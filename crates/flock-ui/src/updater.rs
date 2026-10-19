@@ -17,6 +17,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const STARTUP_DELAY: Duration = Duration::from_secs(20);
 pub const STATUS_ITEM: &str = "status-update";
 const UP_TO_DATE: &str = "Flock is up to date";
+const RETRY: &str = "Retry";
 const FAILED: &str = "Could not update Flock";
 const RESTART: &str = "Restart to update";
 const CHECKING: &str = "Checking for updates…";
@@ -153,7 +154,10 @@ fn notice(state: &UpdaterState, current: &str) -> Option<Toast> {
                 .detail(format!("Flock {current} is the newest release.")),
         ),
         UpdaterState::Failed { reason } => {
-            Some(Toast::new(Status::Err, FAILED).detail(reason.clone()))
+            let failed = Toast::new(Status::Err, FAILED)
+                .detail(reason.clone())
+                .action(RETRY, |_, cx| check_now(cx));
+            Some(failed)
         }
         UpdaterState::Ready { version } => Some(
             Toast::new(Status::Ok, format!("Flock {version} is ready"))

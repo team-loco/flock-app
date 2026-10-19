@@ -925,7 +925,7 @@ fn scale_handler(
             let text = value.read(cx).value();
             let Some(replicas) = parse_replicas(&text) else {
                 toast(
-                    Toast::new(Status::Err, SCALE_INVALID).detail(text.to_string()),
+                    Toast::new(Status::Warn, SCALE_INVALID).detail(text.to_string()),
                     cx,
                 );
                 return;

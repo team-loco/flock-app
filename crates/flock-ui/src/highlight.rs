@@ -222,6 +222,14 @@ mod tests {
 
     use super::*;
 
+    const TOAST_STATUSES: [flock_core::Status; 6] = [
+        flock_core::Status::Ok,
+        flock_core::Status::Warn,
+        flock_core::Status::Err,
+        flock_core::Status::Progress,
+        flock_core::Status::Suspended,
+        flock_core::Status::Offline,
+    ];
     const APPEARANCES: [Appearance; 2] = [Appearance::Dark, Appearance::Light];
 
     fn custom(r: u8, g: u8, b: u8) -> Highlight {
@@ -275,6 +283,12 @@ mod tests {
             over(p.accbg, p.editor),
             TEXT_CONTRAST,
         );
+        for status in TOAST_STATUSES {
+            let ground = p.toast_ground(status);
+            check("fg on toast", p.fg, ground, TEXT_CONTRAST);
+            check("fg2 on toast", p.fg2, ground, TEXT_CONTRAST);
+            check("toast glyph", p.status(status), ground, GLYPH_CONTRAST);
+        }
         failed
     }
 
