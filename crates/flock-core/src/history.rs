@@ -59,6 +59,8 @@ impl Location {
             format!("Logs · {subject} · {container}")
         } else if self.page == Page::Compare {
             format!("Compare · {subject}")
+        } else if self.page == Page::EditYaml {
+            format!("Edit · {subject}")
         } else {
             subject
         };
@@ -74,7 +76,7 @@ impl Location {
     pub fn workload(&self) -> Option<&ResourceRef> {
         self.resource
             .as_ref()
-            .filter(|_| self.page != Page::Compare && self.page != Page::Logs)
+            .filter(|_| !matches!(self.page, Page::Compare | Page::Logs | Page::EditYaml))
             .filter(|target| WorkloadKind::from_kind(&target.kind).is_some())
     }
 
@@ -94,6 +96,9 @@ impl Location {
             }
             (Some(resource), Page::Compare, _) => {
                 return vec![Command::Compare(resource.clone())];
+            }
+            (Some(resource), Page::EditYaml, _) => {
+                return vec![Command::EditYaml(resource.clone())];
             }
             (Some(resource), _, _) => return vec![Command::OpenResource(resource.clone())],
             (None, _, _) => {}

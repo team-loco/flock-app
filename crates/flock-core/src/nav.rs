@@ -35,6 +35,7 @@ pub enum Page {
     Secrets,
     Pvcs,
     Compare,
+    EditYaml,
     Logs,
 }
 
@@ -74,6 +75,7 @@ impl Page {
             Self::Secrets => "Secrets",
             Self::Pvcs => "PVCs",
             Self::Compare => "Compare",
+            Self::EditYaml => "Edit YAML",
             Self::Logs => "Logs",
         }
     }

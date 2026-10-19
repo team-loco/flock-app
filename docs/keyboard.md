@@ -114,3 +114,10 @@ Generated from the binding table in `crates/flock-ui/src/keymap.rs`; run `mise r
 | ⌘⇧R | Reconcile with source |
 | ⌘D | Diff against Git |
 | ⌘Y | YAML |
+
+## Editing YAML
+
+| Keys | Action |
+|---|---|
+| ⌘E | Edit the YAML on screen |
+| ⌘↵ | Review changes, then apply |

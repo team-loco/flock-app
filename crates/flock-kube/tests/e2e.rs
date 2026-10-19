@@ -526,3 +526,162 @@ fn live_utilization_has_hour_samples_and_six_hour_local_history() {
         }
     }
 }
+
+const EDIT_CONFIGMAP: &str = "flock-edit-e2e";
+
+fn edit_target() -> flock_core::ResourceRef {
+    flock_core::ResourceRef {
+        cluster: ClusterId::new(CONTEXT),
+        kind: "ConfigMap".into(),
+        namespace: Some(NAMESPACE.into()),
+        name: EDIT_CONFIGMAP.into(),
+    }
+}
+
+async fn edit(
+    handle: &ClusterHandle,
+    step: flock_core::edit::EditStep,
+) -> flock_core::edit::EditEvent {
+    let (sink, events) = flock_core::Sink::channel();
+    let request = flock_core::edit::EditRequest {
+        target: edit_target(),
+        step,
+        sink,
+    };
+    flock_kube::actions::edit::run(handle.clone(), request).await;
+    let Ok(event) = events.recv().await else {
+        panic!("edit sent no event");
+    };
+    event
+}
+
+async fn loaded(handle: &ClusterHandle) -> flock_core::edit::Live {
+    let event = edit(handle, flock_core::edit::EditStep::Load { reveal: false }).await;
+    let flock_core::edit::EditEvent::Loaded(live) = event else {
+        panic!("{event:?}");
+    };
+    live
+}
+
+async fn remove_edit_configmap(configmaps: &Api<ConfigMap>) {
+    let _ = configmaps
+        .delete(EDIT_CONFIGMAP, &DeleteParams::default())
+        .await;
+}
+
+async fn server_refuses_a_stale_apply(configmaps: &Api<ConfigMap>, base: &flock_core::edit::Live) {
+    let mut outdated = json!({
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": { "name": EDIT_CONFIGMAP, "namespace": NAMESPACE, "resourceVersion": base.resource_version },
+        "data": { "level": "stale" }
+    });
+    outdated["metadata"]["uid"] = json!(base.uid.as_str());
+    let params = kube::api::PatchParams::apply("flock").force();
+    let refused = configmaps
+        .patch(EDIT_CONFIGMAP, &params, &kube::api::Patch::Apply(&outdated))
+        .await;
+    assert!(
+        matches!(&refused, Err(kube::Error::Api(status)) if status.code == 409),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn edit_yaml_reviews_applies_and_rebases_a_concurrent_edit() {
+    use flock_core::edit::{Draft, EditEvent, EditStep};
+
+    if !enabled() {
+        return;
+    }
+    let Some(context) = kind_context() else {
+        return;
+    };
+    let env = Arc::new(ShellEnv::from_process(String::new()));
+    let runtime = tokio::runtime::Handle::current();
+    let (manager, _events) = ClusterManager::new(runtime, KubeSettings::default(), env);
+    let handle = connected(&manager, context).await;
+    let Ok(client) = handle.client() else {
+        panic!("client");
+    };
+    let configmaps: Api<ConfigMap> = Api::namespaced(client, NAMESPACE);
+    remove_edit_configmap(&configmaps).await;
+    let Ok(scratch) = serde_json::from_value::<ConfigMap>(json!({
+        "metadata": { "name": EDIT_CONFIGMAP, "namespace": NAMESPACE },
+        "data": { "level": "info" }
+    })) else {
+        panic!("configmap fixture");
+    };
+    assert!(
+        configmaps
+            .create(&PostParams::default(), &scratch)
+            .await
+            .is_ok()
+    );
+
+    let base = loaded(&handle).await;
+    assert!(!base.text.contains("managedFields"), "{}", base.text);
+    let draft = Draft {
+        text: base.text.replace("level: info", "level: debug"),
+        base: base.clone(),
+    };
+    let reviewed = edit(&handle, EditStep::Review(draft.clone())).await;
+    let EditEvent::Reviewed(lines) = reviewed else {
+        panic!("{reviewed:?}");
+    };
+    assert!(lines.iter().any(|line| line.text.contains("level: debug")));
+    let untouched = configmaps.get(EDIT_CONFIGMAP).await;
+    let level = untouched
+        .ok()
+        .and_then(|cm| cm.data)
+        .and_then(|data| data.get("level").cloned());
+    assert_eq!(level.as_deref(), Some("info"));
+
+    let applied = edit(&handle, EditStep::Apply(draft)).await;
+    let EditEvent::Applied(after) = applied else {
+        panic!("{applied:?}");
+    };
+    assert_ne!(after.resource_version, base.resource_version);
+    let Ok(stored) = configmaps.get(EDIT_CONFIGMAP).await else {
+        panic!("configmap");
+    };
+    let level = stored.data.as_ref().and_then(|data| data.get("level"));
+    assert_eq!(level.map(String::as_str), Some("debug"));
+
+    let stale = Draft {
+        text: after.text.replace("level: debug", "level: warn"),
+        base: after.clone(),
+    };
+    let concurrent = PatchBody::Merge(json!({ "data": { "owner": "someone-else" } }));
+    let target = object_ref::<ConfigMap>(Some(NAMESPACE), EDIT_CONFIGMAP);
+    assert!(handle.patch(&target, concurrent).await.is_ok());
+    let conflicted = edit(&handle, EditStep::Apply(stale)).await;
+    let EditEvent::Conflict(conflict) = conflicted else {
+        panic!("{conflicted:?}");
+    };
+    assert!(
+        conflict
+            .changed
+            .iter()
+            .any(|line| line.text.contains("owner: someone-else")),
+        "{:?}",
+        conflict.changed
+    );
+    assert_eq!(conflict.rebased.contested, Vec::<String>::new());
+    let rebased = Draft {
+        text: conflict.rebased.text.clone(),
+        base: conflict.live.clone(),
+    };
+    let reapplied = edit(&handle, EditStep::Apply(rebased)).await;
+    assert!(matches!(reapplied, EditEvent::Applied(_)), "{reapplied:?}");
+    let Ok(stored) = configmaps.get(EDIT_CONFIGMAP).await else {
+        panic!("configmap");
+    };
+    let data = stored.data.unwrap_or_default();
+    assert_eq!(data.get("level").map(String::as_str), Some("warn"));
+    assert_eq!(data.get("owner").map(String::as_str), Some("someone-else"));
+
+    server_refuses_a_stale_apply(&configmaps, &base).await;
+
+    remove_edit_configmap(&configmaps).await;
+}

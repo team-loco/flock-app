@@ -261,3 +261,15 @@ Settled; change only with a new entry that says why.
     theme. Entry points: the workload Actions menu (Logs for all pods), the workload dock's
     `all pods` toggle, the Pods page (⇧-click rows or a label filter, then Logs for …) and the
     palette's `Logs: follow all <workload> pods`, which opened the workload page before.
+36. **Edit YAML applies server-side, pinned to what the user saw** (#231): every object opens in an
+    Edit YAML tab (row menus, inspectors, ⌘E while YAML shows). The editable text drops `status`,
+    `managedFields`, server metadata and the last-applied annotation, and stays redacted unless the
+    user reveals a Secret's values (one confirm, the tab reloads). Review runs a dry-run
+    server-side apply as field manager `flock` and diffs live against its result; Apply asks to
+    confirm when the cluster confirms destructive actions. Both force field ownership, so the dry
+    run shows exactly what Apply writes, and both pin `metadata.uid` and
+    `metadata.resourceVersion`: a changed or recreated object is a conflict that shows what moved
+    and offers the edit rebased onto the new object (a field-level three-way merge; where both
+    sides changed a field the edit wins and is named). Redacted values the user left alone are
+    restored from the live object before sending; a mask that is typed or partly kept is refused,
+    so a placeholder is never written back.

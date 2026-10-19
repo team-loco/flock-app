@@ -419,7 +419,7 @@ fn value(cell: &Cell, palette: &Palette) -> impl IntoElement {
         .child(SharedString::from(cell.text.clone()))
 }
 
-fn diff_line(line: &flock_core::changes::PatchLine) -> DiffLine {
+pub(crate) fn diff_line(line: &flock_core::changes::PatchLine) -> DiffLine {
     let kind = match line.change {
         LineChange::Context => LineKind::Context,
         LineChange::Added => LineKind::Added,

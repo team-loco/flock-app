@@ -517,6 +517,20 @@ DiffFile::new("Deployment/payments/checkout-api · rendered for prod-us-east", v
 Diffs are always rendered in full (no folding). Gutters: line number (new side for context and
 additions, old side for removals) and a `+` / `−` sign in `addfg` / `delfg` over `addbg` / `delbg`.
 
+## CodeEditor
+
+gpui-component's code editor with the kit's YAML colours (keys `acc`, comments and punctuation
+`mute`), line numbers and inline error marks. Keep the state entity in your view:
+
+```rust
+let editor = cx.new(|cx| yaml_editor(window, cx));          // CodeEditorState; InputEvent::Change on edits
+editor.update(cx, |e, cx| highlight_yaml(e, *cx.palette(), cx));  // again when the palette changes
+editor.update(cx, |e, cx| mark_error(e, Some(line), Some("…"), cx)); // zero-based line; None clears
+CodeEditor::new(&editor)                                    // fills its parent, mono 12
+```
+
+The Edit YAML tab (`screens::edit::EditScreen`) is the working example.
+
 ## Meters and charts
 
 ```rust

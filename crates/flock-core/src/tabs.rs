@@ -5,6 +5,7 @@ use crate::{ClusterId, Page, Snapshot, Status};
 
 pub const LOGS_KIND: &str = "Logs";
 pub const COMPARE_KIND: &str = "Compare";
+pub const EDIT_KIND: &str = "Edit";
 pub const CLUSTER_KIND: &str = "Cluster";
 pub const MAX_PANES: usize = 2;
 const PER_MILLE: u16 = 1000;
@@ -608,6 +609,7 @@ fn describe(location: &Location, snapshot: &Snapshot) -> (Option<Status>, String
             pod_suffix(&resource.name).to_owned(),
         ),
         Page::Compare => (None, COMPARE_KIND.to_owned(), resource.name.clone()),
+        Page::EditYaml => (None, EDIT_KIND.to_owned(), resource.name.clone()),
         _ => (status, resource.kind.clone(), resource.name.clone()),
     }
 }

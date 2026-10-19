@@ -18,7 +18,7 @@ use crate::kit::{
     KeyValue, MenuItem, MetaLine, Meter, MiniMeter, Presence, SectionLabel, StatusGlyph,
     StatusText, Table, TableEvent, chip_label, confirm, slide_in, slide_out,
 };
-use crate::screens::{ListShape, empty_list, new_tab_item};
+use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR, Palette, SPACE_2, SPACE_3, SPACE_4, SPACE_5, TEXT_MONO,
     TEXT_SMALL,
@@ -410,9 +410,14 @@ fn node_items(
     })
     .disabled(node.status == Status::Progress)
     .description(description);
+    let edit_screen = screen.clone();
+    let edit = edit_item(target.target.clone(), move |command, cx| {
+        let _ = edit_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+    });
     let detail = format!("{} · {}", target.target.cluster, target.target.name);
     vec![
         open,
+        edit,
         toggle,
         MenuItem::new("Drain…", move |window, cx| {
             let screen = screen.clone();

@@ -3,6 +3,7 @@ pub mod app_settings;
 pub mod changes;
 pub mod command;
 pub mod compare;
+pub mod edit;
 mod event_inspector;
 mod events;
 pub mod flock;
@@ -78,6 +79,17 @@ pub fn new_tab_item(open: Command, emit: impl Fn(Command, &mut App) + 'static) -
     let command = Command::NewTab(Box::new(open));
     MenuItem::new(OPEN_IN_NEW_TAB, move |_, cx| emit(command.clone(), cx))
         .description(NEW_TAB_DESCRIPTION)
+}
+
+pub const EDIT_YAML: &str = "Edit YAML";
+pub const EDIT_DESCRIPTION: &str =
+    "Open it in an editor tab; review a server-side dry run before applying.";
+
+pub fn edit_item(target: ResourceRef, emit: impl Fn(Command, &mut App) + 'static) -> MenuItem {
+    let command = edit::edit_command(target);
+    MenuItem::new(EDIT_YAML, move |_, cx| emit(command.clone(), cx))
+        .shortcut(edit::EDIT_KEYS)
+        .description(EDIT_DESCRIPTION)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

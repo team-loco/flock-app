@@ -13,6 +13,7 @@ use super::Shell;
 use crate::assets::GEAR;
 use crate::kit::{Button, EmptyState, IconButton, Skeleton, status_symbols};
 use crate::screens::add_cluster::empty_flock;
+use crate::screens::edit::EditScreen;
 use crate::screens::logs::LogsScreen;
 use crate::screens::multilog::MultiLogsScreen;
 use crate::screens::workload::WorkloadScreen;
@@ -57,6 +58,9 @@ impl Shell {
             return fill(screen);
         }
         if let Some(screen) = self.logs_screen(ix, &location, window, cx) {
+            return fill(screen);
+        }
+        if let Some(screen) = self.edit_screen(ix, &location, window, cx) {
             return fill(screen);
         }
         if let Some(screen) = self.workload_screen(ix, &location, window, cx) {
@@ -246,6 +250,52 @@ impl Shell {
             screen.watch(cx);
         });
         self.screens_mut(ix).multi_logs = Some((screen.clone(), subscription));
+        Some(screen)
+    }
+
+    fn edit_screen(
+        &mut self,
+        ix: usize,
+        location: &Location,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<EditScreen>> {
+        let pane = self.screens(ix).pane;
+        let target = location
+            .resource
+            .clone()
+            .filter(|_| location.page == Page::EditYaml);
+        let Some(target) = target else {
+            self.screens_mut(ix).edit = None;
+            return None;
+        };
+        let confirm_apply = self
+            .state
+            .snapshot
+            .catalog
+            .get(&target.cluster)
+            .is_none_or(|settings| settings.preferences.confirm_destructive);
+        let current = self
+            .screens(ix)
+            .edit
+            .as_ref()
+            .filter(|(screen, _)| screen.read(cx).target() == &target)
+            .map(|(screen, _)| screen.clone());
+        if let Some(screen) = current {
+            screen.update(cx, |screen, _| screen.set_confirm_apply(confirm_apply));
+            return Some(screen);
+        }
+        let screen = cx.new(|cx| EditScreen::new(target, window, cx));
+        let navigation = self.screens(ix).navigation.clone();
+        let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
+            shell.pane_command(pane, command.clone(), cx);
+        });
+        screen.update(cx, |screen, cx| {
+            screen.navigation = Some(navigation);
+            screen.set_confirm_apply(confirm_apply);
+            screen.load(cx);
+        });
+        self.screens_mut(ix).edit = Some((screen.clone(), subscription));
         Some(screen)
     }
 

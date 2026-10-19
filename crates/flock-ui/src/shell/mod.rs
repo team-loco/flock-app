@@ -500,6 +500,8 @@ impl Shell {
             Command::InspectResource(_) => {}
             Command::FollowLogs(_) => {}
             Command::Compare(_) => {}
+            Command::EditYaml(_) => {}
+            Command::Edit(_) => {}
             Command::CompareWith { .. } => {}
             #[cfg(feature = "loco")]
             Command::Loco(_) => {}

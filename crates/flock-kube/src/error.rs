@@ -60,6 +60,8 @@ pub enum Error {
         "{kind}/{name} was replaced after you confirmed, so nothing was changed. Review the new one and try again."
     )]
     Replaced { kind: String, name: String },
+    #[error("{0} is redacted; reveal values to change it")]
+    Redacted(String),
     #[error("debug container {name} did not start: {reason}")]
     DebugContainer { name: String, reason: String },
 }

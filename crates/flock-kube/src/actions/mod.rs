@@ -1,4 +1,5 @@
 pub mod drain;
+pub mod edit;
 pub mod exec;
 pub mod failure;
 pub mod forward;
@@ -59,6 +60,7 @@ pub fn cluster_of(command: &Command) -> Option<&ClusterId> {
         Command::StreamLogs(request) => Some(&request.pod.cluster),
         Command::StreamPodLogs(request) => Some(request.target.cluster()),
         Command::Exec(request) => Some(&request.target.pod.cluster),
+        Command::Edit(request) => Some(&request.target.cluster),
         Command::PortForward { service, .. } => Some(&service.cluster),
         Command::Cordon(seen) => Some(&seen.target.cluster),
         Command::Uncordon(seen) => Some(&seen.target.cluster),
@@ -112,6 +114,7 @@ impl Actions {
             Command::StreamLogs(request) => Self::stream_logs(request, handle),
             Command::StreamPodLogs(request) => Self::stream_pod_logs(request, handle),
             Command::Exec(request) => Self::exec(request, handle),
+            Command::Edit(request) => Self::edit(request, handle),
             Command::PortForward {
                 service,
                 local,
@@ -205,6 +208,15 @@ impl Actions {
             return;
         }
         exec::fail(&request.output, &Error::NotConnected.to_string());
+    }
+
+    fn edit(request: &flock_core::edit::EditRequest, handle: Option<ClusterHandle>) {
+        match handle {
+            Some(handle) => {
+                tokio::spawn(edit::run(handle, request.clone()));
+            }
+            None => edit::fail(request),
+        }
     }
 
     fn start_forward(&self, forward: Forward, handle: Option<ClusterHandle>) {

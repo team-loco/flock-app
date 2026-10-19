@@ -27,6 +27,8 @@ pub enum Command {
         container: String,
     },
     Compare(ResourceRef),
+    EditYaml(ResourceRef),
+    Edit(Box<crate::edit::EditRequest>),
     CompareWith {
         base: ResourceRef,
         other: ClusterId,
@@ -146,6 +148,7 @@ impl AppState {
             Command::FollowLogs(_) => Some(vec![command.clone()]),
             Command::OpenLogs { .. } => Some(vec![command.clone()]),
             Command::Compare(_) => Some(vec![command.clone()]),
+            Command::EditYaml(_) => Some(vec![command.clone()]),
             Command::CompareWith { .. } => Some(vec![command.clone()]),
             Command::OpenFluxObject(_) => Some(vec![command.clone()]),
             Command::OpenCommit(_) => Some(vec![command.clone()]),
@@ -237,6 +240,7 @@ impl AppState {
             Command::FollowLogs(target) => has_cluster(target.cluster()),
             Command::OpenLogs { pod, .. } => has_cluster(&pod.cluster),
             Command::Compare(resource) => has_cluster(&resource.cluster),
+            Command::EditYaml(resource) => has_cluster(&resource.cluster),
             Command::CompareWith { base, .. } => has_cluster(&base.cluster),
             Command::ShowClusterSettings(id) => has_cluster(id),
             Command::OpenFluxObject(key) => self.snapshot.flux_object(key).is_some(),
@@ -315,6 +319,7 @@ fn navigate(location: &mut Location, command: &Command, snapshot: &Snapshot) {
             }
         }
         Command::Compare(resource) => compare(location, resource, snapshot),
+        Command::EditYaml(resource) => edit_yaml(location, resource, snapshot),
         Command::CompareWith { base, .. } => compare(location, base, snapshot),
         Command::OpenFluxObject(key) => open_flux_object(location, key, snapshot),
         Command::ShowClusterSettings(_) => select_page(location, Page::ClusterSettings),
@@ -337,6 +342,16 @@ fn compare(location: &mut Location, resource: &ResourceRef, snapshot: &Snapshot)
     *location = Location {
         resource: Some(resource.clone()),
         ..Location::page_on(resource.cluster.clone(), Page::Compare)
+    };
+}
+
+fn edit_yaml(location: &mut Location, resource: &ResourceRef, snapshot: &Snapshot) {
+    if snapshot.cluster(&resource.cluster).is_none() {
+        return;
+    }
+    *location = Location {
+        resource: Some(resource.clone()),
+        ..Location::page_on(resource.cluster.clone(), Page::EditYaml)
     };
 }
 
@@ -700,6 +715,30 @@ mod tests {
         });
         assert_eq!(state.location().resource, Some(deployment("b")));
         assert_eq!(state.workload(), None);
+    }
+
+    #[test]
+    fn edit_yaml_opens_an_editor_tab_that_reopens_itself() {
+        let mut state = loaded();
+        state.apply(&Command::OpenResource(deployment("a")));
+        let opened = state.open_tab(&Command::EditYaml(deployment("a")));
+        assert!(opened.is_some());
+        let location = state.location().clone();
+        assert_eq!(location.page, Page::EditYaml);
+        assert_eq!(location.resource, Some(deployment("a")));
+        assert_eq!(state.workload(), None);
+        assert_eq!(
+            location.commands(),
+            vec![Command::EditYaml(deployment("a"))]
+        );
+        assert!(
+            location
+                .history_label(&state.snapshot)
+                .starts_with("Edit · ")
+        );
+        let title = crate::tabs::title(&location, &state.snapshot);
+        assert_eq!(title.kind, crate::tabs::EDIT_KIND);
+        assert!(!state.ready_for(&Command::EditYaml(deployment("gone"))));
     }
 
     #[test]

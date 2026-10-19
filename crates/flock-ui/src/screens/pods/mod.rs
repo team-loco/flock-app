@@ -26,7 +26,7 @@ use crate::kit::{
     SelectEvent, ShowAll, StatusGlyph, StatusText, Table, TableEvent, Terminal, TextFieldState,
     chip_label, confirm, swap_in,
 };
-use crate::screens::{ListShape, empty_list, new_tab_item};
+use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{
     ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, LINE_PROSE, Palette,
     RADIUS_SMALL, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8,
@@ -809,8 +809,13 @@ fn menu_items(pod: &Pod, screen: &gpui::WeakEntity<PodsScreen>) -> Vec<MenuItem>
     let open = new_tab_item(Command::OpenResource(pod.resource()), move |command, cx| {
         let _ = open_screen.update(cx, |_, cx| cx.emit(command));
     });
+    let edit_screen = screen.clone();
+    let edit = edit_item(pod.resource(), move |command, cx| {
+        let _ = edit_screen.update(cx, |_, cx| cx.emit(command));
+    });
     let mut items = vec![
         open,
+        edit,
         MenuItem::new("Logs", move |_, cx| {
             let pod = logs_pod.clone();
             let _ = logs_screen.update(cx, |this, cx| {

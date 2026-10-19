@@ -3,6 +3,7 @@ mod chart;
 mod code;
 mod diff;
 mod dock;
+mod editor;
 mod filter;
 mod header;
 mod input;
@@ -33,11 +34,13 @@ pub use chart::{CapacityMeter, LineChart, Meter, MiniMeter, Series, StackedBar};
 pub use code::CodeView;
 pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};
+pub use editor::{CodeEditor, CodeEditorState, highlight_yaml, mark_error, yaml_editor};
 pub use filter::{FilterBar, FilterEvent, chip_label, match_note};
 pub use header::{MetaLine, PageHeader, PageTitle};
 pub use input::{
-    InputEvent, TextArea, TextAreaState, TextField, TextFieldDown, TextFieldEnd, TextFieldEscape,
-    TextFieldHome, TextFieldPageDown, TextFieldPageUp, TextFieldState, TextFieldUp,
+    InputEvent, TextArea, TextAreaState, TextField, TextFieldDown, TextFieldEnd, TextFieldEnter,
+    TextFieldEscape, TextFieldHome, TextFieldPageDown, TextFieldPageUp, TextFieldState,
+    TextFieldUp,
 };
 pub use inspector::{Inspector, InspectorPane, clamp_inspector_width};
 pub use load::{ConnectionProgress, EmptyState, ErrorState, ShowAll, Skeleton};

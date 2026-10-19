@@ -3,6 +3,7 @@ mod changes;
 mod compare;
 mod derive;
 mod detail;
+mod edit;
 mod flux;
 mod gitops;
 mod home;
@@ -89,6 +90,9 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
                     continue;
                 }
                 tracing::debug!(?command, "demo backend received command");
+                if edit::handle(&command, &state) {
+                    continue;
+                }
                 if pod_streams::handle(&command, &state, &workloads) {
                     continue;
                 }
