@@ -7,8 +7,19 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLUSTERS=(fleet-a fleet-b flock-loco)
 FLUX_KINDS=kustomizations.kustomize.toolkit.fluxcd.io,helmreleases.helm.toolkit.fluxcd.io
+RECONCILING_NAMESPACE=ledger
+RECONCILING_RELEASE=helmrelease/ledger-migrations
 skip_up="${usage_skip_up:-false}"
 no_teardown="${usage_no_teardown:-false}"
+
+restart_expired_reconciling() {
+  local ready
+  ready="$("${kubectl[@]}" -n "${RECONCILING_NAMESPACE}" get "${RECONCILING_RELEASE}" --ignore-not-found \
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')"
+  if [[ -n "${ready}" && "${ready}" != Unknown ]]; then
+    "${kubectl[@]}" -n "${RECONCILING_NAMESPACE}" delete "${RECONCILING_RELEASE}" --wait
+  fi
+}
 
 teardown() {
   if [[ "${no_teardown}" != true && -n "${CI:-}" ]]; then
@@ -38,6 +49,7 @@ export FLOCK_E2E=1
 for cluster in "${CLUSTERS[@]}"; do
   context="kind-${cluster}"
   kubectl=(mise exec -- kubectl --context "${context}")
+  restart_expired_reconciling
   "${kubectl[@]}" apply -f "${ROOT}/e2e/scenarios/common/namespaces.yaml"
   "${kubectl[@]}" apply -k "${ROOT}/e2e/scenarios/${cluster}"
   "${kubectl[@]}" uncordon "${cluster}-control-plane"
