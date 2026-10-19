@@ -3057,3 +3057,45 @@ fn the_pod_namespace_picker_lists_every_cluster_namespace() -> anyhow::Result<()
     }
     Ok(())
 }
+
+fn opened_flux(ui: &Ui) -> Option<(flock_core::FluxKind, String)> {
+    let location = ui.state().location().clone();
+    location.flux_object.map(|key| (key.kind, key.name))
+}
+
+#[test]
+fn clicking_a_graph_node_opens_that_flux_object() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::FluxGraph)?;
+    assert_eq!(ui.state().location().page, Page::FluxGraph);
+    ui.click("flux-graph-node-0")?;
+    assert_eq!(
+        opened_flux(&ui),
+        Some((flock_core::FluxKind::Kustomization, "apps-ml".into()))
+    );
+    Ok(())
+}
+
+#[test]
+fn graph_selection_compares_across_clusters_and_arrows_walk_the_edges() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::FluxGraph)?;
+    assert!(ui.bounds("flux-graph-compare").is_none());
+    ui.right_click("flux-graph-node-0")?;
+    assert!(ui.bounds("flux-graph-compare").is_some());
+    assert_eq!(opened_flux(&ui), None);
+    ui.press("left")?;
+    ui.press("enter")?;
+    assert_eq!(
+        opened_flux(&ui),
+        Some((flock_core::FluxKind::GitRepository, "fleet-infra".into()))
+    );
+    Ok(())
+}
+
+#[test]
+fn escape_clears_the_graph_selection() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::FluxGraph)?;
+    ui.right_click("flux-graph-node-0")?;
+    ui.press("escape")?;
+    assert!(ui.bounds("flux-graph-compare").is_none());
+    Ok(())
+}

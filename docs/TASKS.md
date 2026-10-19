@@ -104,3 +104,4 @@ Spec column points at `design/`.
 | MENUBAR | Menu-bar health, problem links and persisted setting (#233) | claude | menu-bar-status | done |
 | REL1 | detail pages for every kind, Namespace page, Related section in every inspector (#240) | claude | drilldown-detail-pages | done |
 | NS1 | namespace picker lists every namespace from the Namespace watch, with per-kind counts (#241) | claude | ns-picker-fixes | done |
+| FLUX1 | Flux dependency graph with cross-cluster comparison, live Flux events, Kustomization drift (#232) | claude | flux-graph-events-drift | doing |
