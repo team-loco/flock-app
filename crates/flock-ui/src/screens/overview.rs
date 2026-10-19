@@ -18,9 +18,9 @@ use gpui::{
 use super::ScreenEvent;
 use super::event_inspector::{EventInspector, slot};
 use crate::kit::{
-    Button, CapacityMeter, ClickableSection, Column, EmptyState, ErrorState, LineChart, Link,
-    MetaLine, Presence, SectionHeader, SectionLabel, Segmented, Series, StackedBar, StatusText,
-    Table, TableEvent, Tooltip,
+    ActionMenu, Button, CapacityMeter, ClickableSection, Column, EmptyState, ErrorState, LineChart,
+    Link, MenuItem, MetaLine, Presence, SectionHeader, SectionLabel, Segmented, Series, StackedBar,
+    StatusText, Table, TableEvent, Tooltip,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, METER, Palette, RADIUS_SMALL, RULE, SPACE_1, SPACE_3, SPACE_4, SPACE_5,
@@ -39,6 +39,10 @@ const ALL_EVENTS: &str = "All events →";
 const UTILIZATION: &str = "Utilization";
 const RETRY: &str = "Retry";
 const SET_METRICS_SOURCE: &str = "Set metrics source";
+const ACTIONS: &str = "overview-actions";
+const CLUSTER_SETTINGS: &str = "Cluster settings";
+const CLUSTER_SETTINGS_DESCRIPTION: &str =
+    "Change this cluster's default namespace, metrics source and labels.";
 const CHART_WEIGHT: f32 = 2.;
 const REASON_WIDTH: Pixels = px(150.);
 const OBJECT_WEIGHT: f32 = 1.2;
@@ -134,6 +138,7 @@ pub struct OverviewScreen {
     selected: Option<String>,
     presence: Presence<Event>,
     warnings: Entity<Table<WarningRow>>,
+    menu: Entity<ActionMenu>,
 }
 
 fn presence_of(screen: &mut OverviewScreen) -> &mut Presence<Event> {
@@ -159,6 +164,7 @@ impl OverviewScreen {
             }
         })
         .detach();
+        let menu = cx.new(|cx| ActionMenu::new(ACTIONS, cx));
         Self {
             data: None,
             paused: None,
@@ -168,6 +174,7 @@ impl OverviewScreen {
             selected: None,
             presence: Presence::default(),
             warnings,
+            menu,
         }
     }
 
@@ -227,18 +234,40 @@ impl OverviewScreen {
         if self.data.as_ref() == Some(&data) {
             return;
         }
+        let cluster = data.cluster.clone();
         if self
             .data
             .as_ref()
-            .is_some_and(|shown| shown.cluster != data.cluster)
+            .is_some_and(|shown| shown.cluster != cluster)
         {
             self.selected = None;
+        }
+        if self
+            .data
+            .as_ref()
+            .is_none_or(|shown| shown.cluster != cluster)
+        {
+            self.set_actions(cluster, cx);
         }
         self.data = Some(data);
         self.events = warnings.events;
         self.warnings
             .update(cx, |table, cx| table.set_rows(warnings.rows, cx));
         cx.notify();
+    }
+
+    fn set_actions(&self, cluster: ClusterId, cx: &mut Context<Self>) {
+        let screen = cx.entity().downgrade();
+        let settings = MenuItem::new(CLUSTER_SETTINGS, move |_, cx| {
+            let command = Command::ShowClusterSettings(cluster.clone());
+            let sent = screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+            if sent.is_err() {
+                tracing::debug!("overview closed before opening cluster settings");
+            }
+        })
+        .description(CLUSTER_SETTINGS_DESCRIPTION);
+        self.menu
+            .update(cx, |menu, cx| menu.set_items(vec![settings], cx));
     }
 
     fn toggle_live(&mut self, cx: &mut Context<Self>) {
@@ -279,6 +308,7 @@ impl OverviewScreen {
             .gap(SPACE_4)
             .child(ranges)
             .child(live)
+            .child(this.menu.clone())
     }
 
     fn select_range(&mut self, ix: usize, cx: &mut Context<Self>) {

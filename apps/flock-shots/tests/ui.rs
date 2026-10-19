@@ -2640,3 +2640,24 @@ fn a_label_filter_on_pods_offers_logs_for_the_selector() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn the_cluster_overview_opens_settings_for_its_own_cluster() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("cluster-switcher")?;
+    let staging = switcher_row(&ui, "staging")?;
+    ui.click(staging)?;
+    let staging = Some(ClusterId::new("staging"));
+    assert_eq!(ui.state().location().cluster, staging);
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    ui.click("overview-settings")?;
+    assert_eq!(ui.state().location().page, Page::ClusterSettings);
+    assert_eq!(settings_selection(&ui), staging);
+    ui.press("cmd-[")?;
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    ui.click("overview-actions")?;
+    ui.click("overview-actions-item-0")?;
+    assert_eq!(ui.state().location().page, Page::ClusterSettings);
+    assert_eq!(settings_selection(&ui), staging);
+    Ok(())
+}
