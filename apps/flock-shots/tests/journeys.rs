@@ -1710,3 +1710,83 @@ fn live_a_container_without_a_shell_offers_a_debug_container() -> anyhow::Result
     }
     Ok(())
 }
+
+const LIVE_EVENT_REASON: &str = "FlockLiveCheck";
+
+fn live_event(stamp: u64) -> String {
+    format!(
+        r#"{{"apiVersion":"v1","kind":"Event","metadata":{{"name":"flock-live-{stamp}","namespace":"flux-system"}},"involvedObject":{{"apiVersion":"kustomize.toolkit.fluxcd.io/v1","kind":"Kustomization","name":"apps","namespace":"flux-system"}},"reason":"{LIVE_EVENT_REASON}","message":"Flock end-to-end check","type":"Normal","source":{{"component":"flock-e2e"}}}}"#
+    )
+}
+
+#[test]
+fn live_flux_events_stream_from_every_cluster_and_open_their_object() -> anyhow::Result<()> {
+    let Some(make) = kind()? else {
+        return Ok(());
+    };
+    let mut ui = open(Screen::Flock, &make)?;
+    ui.wait_until(PAGE_TIMEOUT, flux_loaded)?;
+    visit(&mut ui, Page::FluxEvents)?;
+    ui.wait_until(PAGE_TIMEOUT, |state| {
+        ["fleet-a", "fleet-b"].iter().all(|name| {
+            state
+                .snapshot
+                .flux_events
+                .iter()
+                .any(|row| row.cluster.as_str() == *name)
+        })
+    })?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let manifest = std::env::temp_dir().join(format!("flock-live-event-{stamp}.json"));
+    std::fs::write(&manifest, live_event(stamp))?;
+    let created = std::process::Command::new("kubectl")
+        .args(["--context", "kind-fleet-a", "create", "-f"])
+        .arg(&manifest)
+        .status()
+        .context("running kubectl")?;
+    anyhow::ensure!(created.success(), "kubectl create event failed");
+    let arrived = ui.wait_until(PAGE_TIMEOUT, |state| {
+        state.snapshot.flux_events.first().is_some_and(|row| {
+            row.cluster.as_str() == "fleet-a" && row.event.reason == LIVE_EVENT_REASON
+        })
+    });
+    let _ = std::process::Command::new("kubectl")
+        .args(["--context", "kind-fleet-a", "delete", "-f"])
+        .arg(&manifest)
+        .status();
+    let _ = std::fs::remove_file(&manifest);
+    arrived.context("a new Flux event did not stream in at the top")?;
+    let rows = ui.state().snapshot.flux_events;
+    let newest = rows.first().map(|row| row.event.age);
+    let oldest = rows.last().map(|row| row.event.age);
+    anyhow::ensure!(newest <= oldest, "events are not newest first");
+    let expected = rows
+        .first()
+        .and_then(flock_core::events::ClusterEvent::open);
+    ui.click("flux-events-row-0")?;
+    if let Some(flock_core::Command::OpenFluxObject(key)) = expected {
+        assert_eq!(ui.state().location().flux_object, Some(key));
+    }
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(SHOTS_DIR);
+    let location = Location::flock(Page::FluxEvents);
+    for (label, appearance) in [("dark", Appearance::Dark), ("light", Appearance::Light)] {
+        let shots = LiveShots {
+            appearance,
+            highlights: Highlights::default(),
+            timeout: PAGE_TIMEOUT,
+            ready: &page_ready,
+        };
+        flock_shots::render_live(
+            &make,
+            &shots,
+            std::slice::from_ref(&location),
+            |_, image| {
+                let path = dir.join(format!("flock-flux-events-{label}.png"));
+                flock_shots::save(&image, &path)
+            },
+        )?;
+    }
+    Ok(())
+}

@@ -6,6 +6,7 @@ pub enum Page {
     Problems,
     GitOps,
     Changes,
+    FluxEvents,
     ClusterSettings,
     Settings,
     ClusterOverview,
@@ -47,6 +48,7 @@ impl Page {
             Self::Problems => "Problems",
             Self::GitOps => "GitOps",
             Self::Changes => "Changes",
+            Self::FluxEvents => "Flux events",
             Self::ClusterSettings => "Clusters",
             Self::Settings => "Settings",
             Self::ClusterOverview => "Overview",
@@ -126,6 +128,7 @@ impl Page {
                 | Self::Problems
                 | Self::GitOps
                 | Self::Changes
+                | Self::FluxEvents
                 | Self::ClusterSettings
                 | Self::Settings
         )
@@ -155,7 +158,13 @@ impl NavSection {
 
 pub const FLOCK_NAV: &[NavSection] = &[NavSection {
     label: None,
-    pages: &[Page::Overview, Page::Problems, Page::GitOps, Page::Changes],
+    pages: &[
+        Page::Overview,
+        Page::Problems,
+        Page::GitOps,
+        Page::Changes,
+        Page::FluxEvents,
+    ],
 }];
 
 pub const CLUSTER_NAV: &[NavSection] = &[

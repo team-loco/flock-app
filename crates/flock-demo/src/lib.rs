@@ -5,6 +5,7 @@ mod derive;
 mod detail;
 mod edit;
 mod flux;
+mod flux_events;
 mod gitops;
 mod home;
 mod lists;
@@ -212,6 +213,7 @@ pub fn snapshot() -> Snapshot {
         pages: BTreeMap::new(),
         gitops: gitops::gitops(),
         flux: flux::objects(),
+        flux_events: flux_events::events(),
         #[cfg(feature = "loco")]
         loco: loco::clusters(),
         comparisons: compare::comparisons(),

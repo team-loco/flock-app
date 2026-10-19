@@ -703,6 +703,7 @@ impl Shell {
             Page::Pods => Some(screens.pods.read(cx).filter_bar().clone()),
             Page::Changes => Some(screens.changes.read(cx).filter_bar().clone()),
             Page::GitOps => Some(screens.gitops.read(cx).filter_bar().clone()),
+            Page::FluxEvents => Some(screens.flux_events.read(cx).filter_bar().clone()),
             page => screens.pages.filter_bar(page, cx),
         }
     }

@@ -466,6 +466,7 @@ impl Shell {
             Page::Overview => screens.flock.clone().into_any_element(),
             Page::Problems => screens.flock.clone().into_any_element(),
             Page::GitOps => screens.gitops.clone().into_any_element(),
+            Page::FluxEvents => screens.flux_events.clone().into_any_element(),
             page => screens
                 .pages
                 .render(page, self.has_detail(location))

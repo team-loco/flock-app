@@ -1066,6 +1066,30 @@ impl Live {
             .collect()
     }
 
+    fn flux_events(&self, now: Timestamp) -> Vec<flock_core::events::ClusterEvent> {
+        let shown = self
+            .navigations()
+            .any(|navigation| navigation.page == Page::FluxEvents);
+        if !shown {
+            return Vec::new();
+        }
+        let mut rows = Vec::new();
+        for cluster in self.clusters.values() {
+            let events = cluster
+                .handle
+                .objects::<k8s_openapi::api::core::v1::Event>();
+            let flux = crate::detail::flux_events(&events, now).into_iter();
+            rows.extend(flux.map(|event| flock_core::events::ClusterEvent {
+                cluster: cluster.id.clone(),
+                cluster_name: cluster.id.to_string(),
+                event,
+            }));
+        }
+        flock_core::events::newest_first(&mut rows);
+        rows.truncate(self.settings.event_limit);
+        rows
+    }
+
     fn snapshot(&self) -> Snapshot {
         let now = Timestamp::now();
         let mut connected = Vec::new();
@@ -1151,6 +1175,7 @@ impl Live {
             pages: self.page_states(),
             gitops: GitOps::default(),
             flux: Vec::new(),
+            flux_events: self.flux_events(now),
             #[cfg(feature = "loco")]
             loco,
             comparisons: self.comparisons(),

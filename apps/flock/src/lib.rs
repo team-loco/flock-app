@@ -163,6 +163,7 @@ pub enum Screen {
     JobInspector,
     Kustomizations,
     FluxGraph,
+    FluxEvents,
     Job,
     Node,
     Gitops,
@@ -232,6 +233,7 @@ impl Screen {
             }
             Self::Kustomizations => vec![sample, Command::SelectPage(Page::Kustomizations)],
             Self::FluxGraph => vec![sample, Command::SelectPage(Page::FluxGraph)],
+            Self::FluxEvents => vec![Command::SelectPage(Page::FluxEvents)],
             Self::Node => {
                 let target = preset.cluster_object(NODE, SAMPLE_NODE);
                 vec![sample, Command::OpenResource(target)]
@@ -421,6 +423,7 @@ pub fn root_view(
         Screen::JobInspector => shell_view(store, screen, preset, window, cx),
         Screen::Kustomizations => shell_view(store, screen, preset, window, cx),
         Screen::FluxGraph => shell_view(store, screen, preset, window, cx),
+        Screen::FluxEvents => shell_view(store, screen, preset, window, cx),
         Screen::Namespace => shell_view(store, screen, preset, window, cx),
         Screen::Job => shell_view(store, screen, preset, window, cx),
         Screen::Node => shell_view(store, screen, preset, window, cx),

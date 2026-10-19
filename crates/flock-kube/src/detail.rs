@@ -376,6 +376,8 @@ pub fn event_status(event: &core::Event) -> Status {
     }
 }
 
+const FLUX_GROUP: &str = "toolkit.fluxcd.io/";
+
 pub fn event_counts(events: &[Arc<core::Event>]) -> Counts {
     let flagged = Counts::of(events.iter().map(|event| event_status(event)));
     Counts {
@@ -451,6 +453,21 @@ pub fn event(event: &core::Event, now: Timestamp) -> Event {
     }
 }
 
+pub fn flux_events(events: &[Arc<core::Event>], now: Timestamp) -> Vec<Event> {
+    events
+        .iter()
+        .filter(|event| is_flux(event))
+        .map(|e| event(e, now))
+        .collect()
+}
+
+fn is_flux(event: &core::Event) -> bool {
+    let involved = &event.involved_object;
+    let kind = involved.kind.as_deref().unwrap_or_default();
+    let group = involved.api_version.as_deref().unwrap_or_default();
+    flock_core::events::FLUX_EVENT_KINDS.contains(&kind) && group.contains(FLUX_GROUP)
+}
+
 pub fn events(events: &[Arc<core::Event>], limit: usize, now: Timestamp) -> Vec<Event> {
     let mut rows: Vec<Event> = events.iter().map(|e| event(e, now)).collect();
     rows.sort_by_key(|e| e.age);
@@ -506,6 +523,32 @@ mod tests {
                 ]
             }
         }))
+    }
+
+    fn involved(kind: &str, api_version: &str, name: &str) -> Arc<core::Event> {
+        parse(json!({
+            "metadata": { "name": name, "namespace": "flux-system", "uid": name },
+            "involvedObject": {
+                "kind": kind, "apiVersion": api_version, "name": name, "namespace": "flux-system"
+            },
+            "reason": "ReconciliationSucceeded",
+            "type": "Normal",
+            "lastTimestamp": at(60)
+        }))
+    }
+
+    #[test]
+    fn flux_events_keep_only_events_about_flux_objects() {
+        let events = [
+            involved("Kustomization", "kustomize.toolkit.fluxcd.io/v1", "apps"),
+            involved("HelmChart", "source.toolkit.fluxcd.io/v1", "chart"),
+            involved("Pod", "v1", "web-0"),
+            involved("Kustomization", "kustomize.config.k8s.io/v1beta1", "other"),
+        ];
+        let rows = flux_events(&events, now());
+        let objects: Vec<&str> = rows.iter().map(|row| row.object.as_str()).collect();
+        assert_eq!(objects, ["kustomization/apps", "helmchart/chart"]);
+        assert_eq!(rows[0].details.kind, "Kustomization");
     }
 
     #[test]

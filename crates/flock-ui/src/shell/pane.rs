@@ -68,6 +68,7 @@ pub(super) struct PaneScreens {
     pub(super) flock: Entity<FlockScreen>,
     pub(super) changes: Entity<ChangesScreen>,
     pub(super) gitops: Entity<GitOpsScreen>,
+    pub(super) flux_events: Entity<crate::screens::FluxEventsScreen>,
     pub(super) pages: ClusterPages,
     pub(super) flux_object: Entity<FluxObjectPage>,
     #[cfg(feature = "loco")]
@@ -98,6 +99,7 @@ impl PaneScreens {
         let flock = cx.new(FlockScreen::new);
         let changes = cx.new(|cx| ChangesScreen::new(window, cx));
         let gitops = cx.new(|cx| GitOpsScreen::new(window, cx));
+        let flux_events = cx.new(|cx| crate::screens::FluxEventsScreen::new(window, cx));
         #[cfg(feature = "loco")]
         let loco = cx.new(|cx| crate::screens::loco::LocoScreens::new(window, cx));
         let compare = cx.new(CompareScreen::new);
@@ -133,6 +135,7 @@ impl PaneScreens {
             ),
             forward(pane, &flock, cx),
             forward(pane, &gitops, cx),
+            forward(pane, &flux_events, cx),
             forward(pane, &compare, cx),
             forward(pane, &settings, cx),
             forward(pane, &app_settings, cx),
@@ -148,6 +151,7 @@ impl PaneScreens {
             flock,
             changes,
             gitops,
+            flux_events,
             pages,
             flux_object,
             #[cfg(feature = "loco")]
@@ -176,6 +180,8 @@ impl PaneScreens {
             .update(cx, |changes, cx| changes.set_snapshot(snapshot, cx));
         self.gitops
             .update(cx, |gitops, cx| gitops.set_snapshot(snapshot, cx));
+        self.flux_events
+            .update(cx, |screen, cx| screen.set_snapshot(snapshot, cx));
         self.settings
             .update(cx, |settings, cx| settings.set_snapshot(snapshot, cx));
         self.pods
