@@ -444,7 +444,7 @@ impl FluxObjectPage {
         let mut prose = Prose::new("flux-meta");
         let mut has_text = false;
         match &object.detail {
-            FluxDetail::Kustomization => {}
+            FluxDetail::Kustomization(_) => {}
             FluxDetail::HelmRelease(detail) => {
                 prose = prose.text(format!("chart {}", detail.chart));
                 has_text = true;
@@ -505,6 +505,20 @@ impl FluxObjectPage {
             )
             .child(ruled(self.inventory.clone(), palette))
             .into_any_element()
+    }
+
+    fn drift_section(
+        object: &FluxObject,
+        drift: Option<&flock_core::flux::Drift>,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let this = cx.weak_entity();
+        let open: super::flux_drift::OpenResource = std::rc::Rc::new(move |target, _, cx| {
+            this.update(cx, |_, cx| cx.emit(Command::OpenResource(target)))
+                .ok();
+        });
+        super::flux_drift::section(drift, &object.key.cluster, &open, palette)
     }
 
     fn diagnosis_section(object: &FluxObject) -> AnyElement {
@@ -574,8 +588,9 @@ impl FluxObjectPage {
     fn main(&self, page: &FluxPage, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let object = &page.object;
         let body: Vec<AnyElement> = match &object.detail {
-            FluxDetail::Kustomization => vec![
+            FluxDetail::Kustomization(drift) => vec![
                 self.inventory_section(object, palette, cx),
+                Self::drift_section(object, drift.as_ref(), palette, cx),
                 self.history_section(palette),
             ],
             FluxDetail::HelmRelease(detail) => vec![
@@ -910,7 +925,7 @@ fn values_block(object: &FluxObject, palette: &Palette) -> Option<AnyElement> {
         FluxDetail::HelmRelease(detail) => {
             Some(spec_list(&detail.values, VALUES_LABEL).into_any_element())
         }
-        FluxDetail::Kustomization => None,
+        FluxDetail::Kustomization(_) => None,
         FluxDetail::Source(_) => None,
     }
 }

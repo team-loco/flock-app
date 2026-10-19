@@ -90,7 +90,7 @@ mod tests {
             history: Vec::new(),
             spec: Vec::new(),
             yaml: String::new(),
-            detail: FluxDetail::Kustomization,
+            detail: FluxDetail::Kustomization(None),
             conditions: Vec::new(),
             diagnosis: None,
         }

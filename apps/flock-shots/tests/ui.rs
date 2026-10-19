@@ -3117,3 +3117,16 @@ fn flux_events_filter_by_cluster_and_open_their_object() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn kustomization_drift_lists_changed_fields_and_opens_the_object() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Kustomization)?;
+    assert!(ui.bounds("flux-drift").is_some());
+    ui.click("flux-drift-object-0")?;
+    let opened = ui.state().location().resource.clone();
+    assert_eq!(
+        opened.map(|target| (target.kind, target.name)),
+        Some(("Deployment".to_owned(), "checkout-api".to_owned()))
+    );
+    Ok(())
+}

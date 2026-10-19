@@ -350,3 +350,22 @@ Settled; change only with a new entry that says why.
     pane is on the page, capped at `event_limit`. The usual filter bar filters it: words match
     cluster, kind, object, reason and message, `ns:` the namespace, and the Warnings chip keeps
     warnings only. A row opens its Flux object; HelmChart rows have no page and stay unlinked.
+42. **Kustomization drift from inventory and field ownership, not a local render** (#232): the
+    Kustomization page has a Drift section that compares Flux's inventory with the live objects.
+    Flock never runs Kustomize. Rendering the source locally would need the source artifact,
+    Flux's post-build substitutions, patches and decryption to match kustomize-controller exactly.
+    Without the rendered manifests, a dry-run server-side apply has nothing honest to apply. The
+    section reports three things. Missing objects are inventory entries that are gone from the
+    cluster. Extra objects carry this Kustomization's `kustomize.toolkit.fluxcd.io/name` and
+    `/namespace` labels but are not in its inventory; only the kinds the inventory holds are
+    listed. Changed fields are the leaf fields another field manager wrote, outside the `status`
+    subresource, after kustomize-controller's latest Apply in `managedFields`. Each changed field
+    shows its live value (Secret values are hidden), the manager and the age. The check runs in
+    the focused object's refresh loop (every third 10s round, and until the first result arrives),
+    at most 8 requests at once. Objects that cannot be read are named rather than dropped. On kind,
+    kustomize-controller took back a field written by `kubectl annotate` at its next reconcile, so
+    kubectl edits show until then. A field written by any other manager (checked with
+    `--field-manager=flock-e2e`) survived reconciles and keeps showing until the source sets it.
+    HelmRelease drift is left out. A trustworthy version needs a dry-run apply of the release manifest decoded
+    from Helm storage, owned the way helm-controller owns it, and helm-controller already does that
+    when `spec.driftDetection` is enabled.

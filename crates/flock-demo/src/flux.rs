@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use flock_core::diagnosis::from_conditions;
 use flock_core::flux::{
-    FluxDetail, HelmDetail, HelmRevision, HistoryEntry, ManagedObject, Phase, Revision, Sentence,
-    SourceDetail, Span, SpecRow,
+    Drift, DriftField, DriftState, DriftedObject, FluxDetail, HelmDetail, HelmRevision,
+    HistoryEntry, ManagedObject, Phase, Revision, Sentence, SourceDetail, Span, SpecRow,
 };
 use flock_core::{Condition, FluxAction, FluxKey, FluxKind, FluxObject, Snapshot, Status, Uid};
 
@@ -299,7 +299,7 @@ fn kustomization(
         history: Vec::new(),
         spec,
         yaml,
-        detail: FluxDetail::Kustomization,
+        detail: FluxDetail::Kustomization(None),
     }
 }
 
@@ -331,6 +331,7 @@ fn apps_payments_east() -> FluxObject {
     object.last_healthy = Some(Revision::new(PREVIOUS, ago(DAY)));
     object.depends_on = payments_dependencies(PROD_US_EAST);
     object.inventory = payments_inventory();
+    object.detail = FluxDetail::Kustomization(Some(payments_drift()));
     object.history = vec![
         entry(
             4 * MINUTE,
@@ -1022,6 +1023,41 @@ fn resumed(object: &FluxObject) -> FluxObject {
     next.phase = Phase::Ready;
     next.sentence = Sentence::text("Resumed. Flux applies the latest revision on its next run.");
     next
+}
+
+fn payments_drift() -> Drift {
+    let changed = DriftedObject {
+        state: DriftState::Changed,
+        kind: "Deployment".into(),
+        namespace: Some("payments".into()),
+        name: "checkout-api".into(),
+        fields: vec![
+            DriftField {
+                path: "spec.replicas".into(),
+                value: "5".into(),
+                manager: "kubectl (scale)".into(),
+                age: Some(ago(42 * MINUTE)),
+            },
+            DriftField {
+                path: "spec.template.spec.containers[name=api].env[name=LOG_LEVEL].value".into(),
+                value: "debug".into(),
+                manager: "kubectl-edit".into(),
+                age: Some(ago(3 * HOUR)),
+            },
+        ],
+    };
+    let extra = DriftedObject {
+        state: DriftState::Extra,
+        kind: "ConfigMap".into(),
+        namespace: Some("payments".into()),
+        name: "checkout-api-flags-old".into(),
+        fields: Vec::new(),
+    };
+    Drift {
+        checked: 11,
+        objects: vec![changed, extra],
+        unreadable: Vec::new(),
+    }
 }
 
 #[cfg(test)]

@@ -214,6 +214,7 @@ pub struct Inputs<'a> {
     pub health: &'a dyn Fn(&InventoryEntry) -> Option<(Status, String)>,
     pub history: Option<Vec<HistoryEntry>>,
     pub releases: Option<Vec<HelmRevision>>,
+    pub drift: Option<flock_core::flux::Drift>,
 }
 
 fn diagnosis(parsed: &Parsed, summary: &Summary, phase: &Phase) -> Option<Diagnosis> {
@@ -271,7 +272,7 @@ pub fn flux_object(parsed: &Parsed, inputs: Inputs<'_>) -> Option<FluxObject> {
         .history
         .unwrap_or_else(|| reconcile_history(parsed, now));
     let sentence = sentence(parsed, &summary, applied.as_ref());
-    let detail = detail(parsed, now, inputs.releases);
+    let detail = detail(parsed, now, inputs.releases, inputs.drift);
     let uid = parsed.uid().map(Uid::new).unwrap_or_default();
     let labels = parsed.labels();
     let diagnosis = diagnosis(parsed, &summary, &phase);
@@ -590,9 +591,14 @@ fn chart(parsed: &Parsed) -> (String, String) {
     (chart, version)
 }
 
-fn detail(parsed: &Parsed, now: Timestamp, releases: Option<Vec<HelmRevision>>) -> FluxDetail {
+fn detail(
+    parsed: &Parsed,
+    now: Timestamp,
+    releases: Option<Vec<HelmRevision>>,
+    drift: Option<flock_core::flux::Drift>,
+) -> FluxDetail {
     match parsed.kind() {
-        ObjectKind::Kustomization => FluxDetail::Kustomization,
+        ObjectKind::Kustomization => FluxDetail::Kustomization(drift),
         ObjectKind::HelmRelease => {
             let (chart, version) = chart(parsed);
             let releases = releases.unwrap_or_else(|| status_releases(parsed, now));
@@ -928,6 +934,7 @@ pub(super) mod tests {
                 health: &healthy,
                 history: None,
                 releases: None,
+                drift: None,
             },
         )
     }

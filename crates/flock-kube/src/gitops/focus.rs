@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use flock_core::flux::{HelmRevision, HistoryEntry};
+use flock_core::flux::{Drift, HelmRevision, HistoryEntry};
 use flock_core::{FluxKey, FluxKind, Status};
 use flock_flux::helm_storage::{Release, manifest_diff, revision_history};
 use flock_flux::revision::short;
@@ -19,6 +19,7 @@ use crate::resources::WatchKind;
 use crate::task::TaskGuard;
 
 const REFRESH: Duration = Duration::from_secs(10);
+const DRIFT_EVERY: u32 = 3;
 const HISTORY_MAX: usize = 20;
 const WARNING: &str = "Warning";
 const REVISION_ANNOTATION_SUFFIX: &str = "/revision";
@@ -48,6 +49,7 @@ pub struct StoredRelease {
 pub struct FocusDetail {
     events: Option<Vec<StoredEvent>>,
     releases: Option<Vec<StoredRelease>>,
+    drift: Option<Drift>,
     seen: Vec<(String, String)>,
 }
 
@@ -65,6 +67,10 @@ impl FocusDetail {
             })
             .collect();
         Some(entries)
+    }
+
+    pub fn drift(&self) -> Option<Drift> {
+        self.drift.clone()
     }
 
     pub fn releases(&self, now: Timestamp) -> Option<Vec<HelmRevision>> {
@@ -113,7 +119,10 @@ async fn follow(
     detail: Arc<Mutex<FocusDetail>>,
     changed: async_channel::Sender<()>,
 ) {
+    let mut round: u32 = 0;
     loop {
+        let drift_due = round.is_multiple_of(DRIFT_EVERY) || lock(&detail).drift.is_none();
+        round = round.wrapping_add(1);
         if let Ok(client) = handle.client() {
             let history = async {
                 if key.kind != FluxKind::Kustomization {
@@ -126,13 +135,39 @@ async fn follow(
                     load_releases(client.clone(), &handle, &key, &detail).await;
                 }
             };
-            tokio::join!(history, releases);
+            let drift = async {
+                if key.kind == FluxKind::Kustomization && drift_due {
+                    let found = drift(client.clone(), &handle, &key).await;
+                    if found.is_some() {
+                        lock(&detail).drift = found;
+                    }
+                }
+            };
+            tokio::join!(history, releases, drift);
             if changed.try_send(()).is_err() {
                 tracing::trace!("GitOps change already pending");
             }
         }
         tokio::time::sleep(REFRESH).await;
     }
+}
+
+async fn drift(client: kube::Client, handle: &ClusterHandle, key: &FluxKey) -> Option<Drift> {
+    let objects = handle.custom_objects(&custom_kind(ObjectKind::Kustomization));
+    let object = objects.iter().find(|object| {
+        object.metadata.namespace.as_deref() == Some(key.namespace.as_str())
+            && object.metadata.name.as_deref() == Some(key.name.as_str())
+    })?;
+    let parsed = super::convert::parse(object, ObjectKind::Kustomization)?;
+    let inventory = &parsed.object.inventory;
+    let checked = super::drift::check(
+        client,
+        inventory,
+        &key.namespace,
+        &key.name,
+        Timestamp::now(),
+    );
+    Some(checked.await)
 }
 
 async fn events(client: kube::Client, key: &FluxKey) -> Option<Vec<StoredEvent>> {
