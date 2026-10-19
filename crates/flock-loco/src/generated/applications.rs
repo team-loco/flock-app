@@ -69,6 +69,12 @@ pub struct ApplicationSpec {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
+        rename = "resourceName"
+    )]
+    pub resource_name: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
         rename = "serviceSpec"
     )]
     pub service_spec: Option<ApplicationServiceSpec>,
@@ -122,6 +128,14 @@ pub struct ApplicationServiceSpecDeployment {
     pub health_check: Option<ApplicationServiceSpecDeploymentHealthCheck>,
     pub image: String,
     pub port: i32,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "runAsGroup"
+    )]
+    pub run_as_group: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "runAsUser")]
+    pub run_as_user: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
