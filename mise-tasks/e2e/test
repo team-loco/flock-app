@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CLUSTERS=(fleet-a fleet-b)
+CLUSTERS=(fleet-a fleet-b flock-loco)
 FLUX_KINDS=kustomizations.kustomize.toolkit.fluxcd.io,helmreleases.helm.toolkit.fluxcd.io
 skip_up="${usage_skip_up:-false}"
 no_teardown="${usage_no_teardown:-false}"
@@ -41,6 +41,9 @@ for cluster in "${CLUSTERS[@]}"; do
   "${kubectl[@]}" apply -f "${ROOT}/e2e/scenarios/common/namespaces.yaml"
   "${kubectl[@]}" apply -k "${ROOT}/e2e/scenarios/${cluster}"
   "${kubectl[@]}" uncordon "${cluster}-control-plane"
+  if [[ -x "${ROOT}/e2e/${cluster}/install" ]]; then
+    "${ROOT}/e2e/${cluster}/install"
+  fi
   "${kubectl[@]}" annotate "${FLUX_KINDS}" --all --all-namespaces --overwrite \
     "reconcile.fluxcd.io/requestedAt=$(date +%s)"
 done
@@ -49,7 +52,7 @@ done
 
 cd "${ROOT}"
 test_scope=(--workspace)
-loco_feature=flock/loco
+loco_feature=flock-shots/loco
 if [[ "$(uname -s)" != Darwin ]]; then
   test_scope+=(--exclude flock --exclude flock-shots --exclude flock-ui --exclude flock-update)
   loco_feature=flock-kube/loco,flock-demo/loco

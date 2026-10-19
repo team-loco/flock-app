@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "${HERE}/../.." && pwd)"
+CLUSTER=flock-loco
+CONTEXT="kind-${CLUSTER}"
+WAIT_TIMEOUT=300s
+HELM_TIMEOUT=10m
+LOCO_REPOSITORY=https://github.com/team-loco/loco
+LOCO_DIR="${ROOT}/target/loco/${LOCO_REF:?LOCO_REF comes from mise.toml}"
+LOCO_NAMESPACE=loco-system
+BUILD_NAMESPACE=loco-builds
+REGISTRY_NAMESPACE=loco-registry
+GATEWAY_RELEASE=eg
+REGISTRY_HOST="zot.${REGISTRY_NAMESPACE}.svc.cluster.local:5000"
+SOURCES_URL="http://sources.${REGISTRY_NAMESPACE}.svc.cluster.local:8080"
+BUILDER_USER=builder:loco-dev-builder
+PUSH_SECRET=loco-registry-push
+RUNNING_BUILD_SECONDS=86400
+
+kubectl=(mise exec -- kubectl --context "${CONTEXT}")
+helm=(mise exec -- helm --kube-context "${CONTEXT}")
+work_dir="$(mktemp -d)"
+trap 'rm -rf "${work_dir}"' EXIT
+
+fixture_image() {
+  awk '$1 == "FROM" { print $2; exit }' "${LOCO_DIR}/e2e/fixtures/$1/Dockerfile"
+}
+
+if [[ "$(git -C "${LOCO_DIR}" describe --tags --exact-match 2>/dev/null)" != "${LOCO_REF}" ]]; then
+  rm -rf "${LOCO_DIR}"
+  git clone --quiet --depth 1 --branch "${LOCO_REF}" "${LOCO_REPOSITORY}" "${LOCO_DIR}"
+fi
+
+image_tag="sha-$(git -C "${LOCO_DIR}" rev-parse HEAD)"
+
+"${kubectl[@]}" apply -f "${LOCO_DIR}/manifests/namespaces/namespaces.yaml"
+
+core_chart="${LOCO_DIR}/charts/loco-core"
+gateway_version="$(mise exec -- yq '.dependencies[] | select(.name == "gateway-helm") | .version' "${core_chart}/Chart.yaml")"
+if [[ ! -f "${core_chart}/charts/gateway-helm-${gateway_version}.tgz" ]]; then
+  mise exec -- helm dependency build "${core_chart}"
+fi
+mise exec -- yq '.["gateway-helm"]' "${core_chart}/values.yaml" >"${work_dir}/gateway-values.yaml"
+"${helm[@]}" upgrade --install "${GATEWAY_RELEASE}" "${core_chart}/charts/gateway-helm-${gateway_version}.tgz" \
+  --namespace "${LOCO_NAMESPACE}" --values "${work_dir}/gateway-values.yaml" --wait --timeout "${HELM_TIMEOUT}"
+
+mise exec -- helm template loco-core "${core_chart}" --namespace "${LOCO_NAMESPACE}" \
+  --values "${HERE}/core-values.yaml" --set agent.image.tag="${image_tag}" \
+  --show-only templates/gateway.yaml \
+  --show-only templates/agent-rbac.yaml \
+  --show-only templates/env-config-secret.yml \
+  --show-only templates/agent-deployment.yaml >"${work_dir}/core.yaml"
+"${kubectl[@]}" apply -f "${work_dir}/core.yaml"
+
+app_image="$(fixture_image public-image)"
+root_image="$(fixture_image build-probe)"
+zot_image="$(mise exec -- yq '.services.registry.image' "${LOCO_DIR}/compose.yaml")"
+sed -e "s|ZOT_IMAGE|${zot_image}|" -e "s|SOURCES_IMAGE|${app_image}|" "${HERE}/registry.yaml" \
+  | "${kubectl[@]}" apply -f -
+"${kubectl[@]}" -n "${REGISTRY_NAMESPACE}" create configmap zot \
+  --from-file="${LOCO_DIR}/registry/local/config.json" --from-file="${LOCO_DIR}/registry/local/htpasswd" \
+  --dry-run=client -o yaml | "${kubectl[@]}" apply -f -
+mkdir -p "${work_dir}/slow"
+printf 'FROM %s\nRUN sleep %s\n' "${root_image}" "${RUNNING_BUILD_SECONDS}" >"${work_dir}/slow/Dockerfile"
+COPYFILE_DISABLE=1 tar -czf "${work_dir}/ok.tar.gz" -C "${LOCO_DIR}/e2e/fixtures/public-image" .
+COPYFILE_DISABLE=1 tar -czf "${work_dir}/slow.tar.gz" -C "${work_dir}/slow" .
+"${kubectl[@]}" -n "${REGISTRY_NAMESPACE}" create configmap sources \
+  --from-file="${work_dir}/ok.tar.gz" --from-file="${work_dir}/slow.tar.gz" \
+  --dry-run=client -o yaml | "${kubectl[@]}" apply -f -
+
+auth="$(printf '%s' "${BUILDER_USER}" | base64 | tr -d '\n')"
+printf '{"auths":{"%s":{"auth":"%s"}}}' "${REGISTRY_HOST}" "${auth}" >"${work_dir}/push.json"
+"${kubectl[@]}" -n "${LOCO_NAMESPACE}" create secret generic "${PUSH_SECRET}" \
+  --type=kubernetes.io/dockerconfigjson --from-file=.dockerconfigjson="${work_dir}/push.json" \
+  --dry-run=client -o yaml | "${kubectl[@]}" apply -f -
+
+"${helm[@]}" upgrade --install loco-operator "${LOCO_DIR}/charts/loco-operator" \
+  --namespace "${LOCO_NAMESPACE}" --values "${HERE}/operator-values.yaml" \
+  --set controller.image.tag="${image_tag}" --set builds.builderImage.tag="${image_tag}" \
+  --wait --timeout "${HELM_TIMEOUT}"
+
+for deployment in zot sources; do
+  "${kubectl[@]}" -n "${REGISTRY_NAMESPACE}" rollout status "deployment/${deployment}" --timeout="${WAIT_TIMEOUT}"
+done
+
+running="$("${kubectl[@]}" -n "${BUILD_NAMESPACE}" get builds -l flock.dev/expect=Running -o jsonpath='{range .items[*]}{.metadata.name}={.status.phase}{"\n"}{end}')"
+while IFS='=' read -r name phase; do
+  if [[ -n "${name}" && "${phase}" != Running && "${phase}" != Pending && -n "${phase}" ]]; then
+    "${kubectl[@]}" -n "${BUILD_NAMESPACE}" delete build "${name}" --wait
+  fi
+done <<<"${running}"
+
+FLOCK_LOCO_APP_IMAGE="${app_image}" FLOCK_LOCO_ROOT_IMAGE="${root_image}" \
+  FLOCK_LOCO_REGISTRY="${REGISTRY_HOST}" FLOCK_LOCO_SOURCES="${SOURCES_URL}" \
+  FLOCK_LOCO_ROLLOUT="$(date +%s)" python3 "${ROOT}/e2e/loco.py" >"${work_dir}/workload.json"
+"${kubectl[@]}" apply -f "${work_dir}/workload.json"

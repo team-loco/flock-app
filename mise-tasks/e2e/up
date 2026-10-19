@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-#MISE description="Create Flock's two local kind clusters and apply triage scenarios"
+#MISE description="Create Flock's three local kind clusters and apply triage scenarios, with real Loco on flock-loco"
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CLUSTERS=(fleet-a fleet-b)
+CLUSTERS=(fleet-a fleet-b flock-loco)
 WAIT_TIMEOUT=300s
 
 mise exec -- docker info >/dev/null
@@ -11,7 +11,12 @@ existing_clusters="$(mise exec -- kind get clusters)"
 for cluster in "${CLUSTERS[@]}"; do
   context="kind-${cluster}"
   if ! [[ $'\n'"${existing_clusters}"$'\n' == *$'\n'"${cluster}"$'\n'* ]]; then
-    mise exec -- kind create cluster --name "${cluster}" --wait "${WAIT_TIMEOUT}"
+    config="${ROOT}/e2e/${cluster}/kind.yaml"
+    if [[ -f "${config}" ]]; then
+      mise exec -- kind create cluster --name "${cluster}" --config "${config}" --wait "${WAIT_TIMEOUT}"
+    else
+      mise exec -- kind create cluster --name "${cluster}" --wait "${WAIT_TIMEOUT}"
+    fi
   else
     mise exec -- kind export kubeconfig --name "${cluster}"
   fi
@@ -24,6 +29,9 @@ for cluster in "${CLUSTERS[@]}"; do
     mise exec -- kubectl --context "${context}" -n apps delete pod unschedulable --wait
   fi
   mise exec -- kubectl --context "${context}" apply -k "${ROOT}/e2e/scenarios/${cluster}"
+  if [[ -x "${ROOT}/e2e/${cluster}/install" ]]; then
+    "${ROOT}/e2e/${cluster}/install"
+  fi
 done
 
 "${ROOT}/e2e/verify"

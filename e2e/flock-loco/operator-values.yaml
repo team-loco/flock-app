@@ -1,0 +1,11 @@
+controller:
+  image:
+    pullPolicy: IfNotPresent
+builds:
+  pushSecretName: loco-registry-push
+  insecureRegistry: true
+  timeout: 24h
+  privateEgressCIDRs:
+    - 10.244.0.0/16
+  builderImage:
+    pullPolicy: IfNotPresent

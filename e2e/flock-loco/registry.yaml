@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: loco-registry
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zot
+  namespace: loco-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zot
+  template:
+    metadata:
+      labels:
+        app: zot
+    spec:
+      containers:
+        - name: zot
+          image: ZOT_IMAGE
+          ports:
+            - containerPort: 5000
+          volumeMounts:
+            - name: config
+              mountPath: /etc/zot
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: config
+          configMap:
+            name: zot
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zot
+  namespace: loco-registry
+spec:
+  selector:
+    app: zot
+  ports:
+    - port: 5000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sources
+  namespace: loco-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sources
+  template:
+    metadata:
+      labels:
+        app: sources
+    spec:
+      containers:
+        - name: sources
+          image: SOURCES_IMAGE
+          env:
+            - name: NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE
+              value: "1"
+          resources:
+            limits:
+              cpu: 50m
+              memory: 32Mi
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: sources
+              mountPath: /usr/share/nginx/html
+      volumes:
+        - name: sources
+          configMap:
+            name: sources
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sources
+  namespace: loco-registry
+spec:
+  selector:
+    app: sources
+  ports:
+    - port: 8080

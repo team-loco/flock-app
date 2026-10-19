@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
-#MISE description="Delete Flock's two local kind scenario clusters"
+#MISE description="Delete Flock's three local kind scenario clusters, their volumes, unused node images and the Loco checkout"
 set -euo pipefail
 
-CLUSTERS=(fleet-a fleet-b)
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CLUSTERS=(fleet-a fleet-b flock-loco)
 
+node_images=()
 for cluster in "${CLUSTERS[@]}"; do
+  if image="$(mise exec -- docker inspect -f '{{.Config.Image}}' "${cluster}-control-plane" 2>/dev/null)"; then
+    node_images+=("${image}")
+  fi
   mise exec -- kind delete cluster --name "${cluster}"
 done
+for image in ${node_images[@]+"${node_images[@]}"}; do
+  if [[ -z "$(mise exec -- docker ps -aq --filter "ancestor=${image}")" ]]; then
+    mise exec -- docker image rm "${image}" || true
+  fi
+done
+rm -rf "${ROOT}/target/loco"

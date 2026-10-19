@@ -1,8 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CLUSTERS=(fleet-a fleet-b)
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+CLUSTERS=(fleet-a fleet-b flock-loco)
 WAIT_TIMEOUT=300s
+BUILD_TIMEOUT=600s
+LOCO_COMPONENTS=(loco-controller loco-build-controller envoy-gateway)
+APPLICATION_PHASES=(Ready Failed Deploying)
+BUILD_PHASES=(Succeeded Failed Running)
+GATEWAY_LABELS=gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=loco-system
+
+verify_loco() {
+  for deployment in "${LOCO_COMPONENTS[@]}"; do
+    "${kubectl[@]}" -n loco-system rollout status "deployment/${deployment}" --timeout="${WAIT_TIMEOUT}"
+  done
+  "${kubectl[@]}" -n loco-system get deployment/loco-core-agent
+  "${kubectl[@]}" -n reports wait job/nightly-report-backfill --for=condition=Complete --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n loco-system wait deployment -l "${GATEWAY_LABELS}" --for=condition=Available --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n loco-system wait gateway/eg --for=condition=Accepted --timeout="${WAIT_TIMEOUT}"
+  for phase in "${APPLICATION_PHASES[@]}"; do
+    "${kubectl[@]}" -n loco-system wait applications -l "flock.dev/expect=${phase}" \
+      --for=jsonpath='{.status.phase}'="${phase}" --timeout="${WAIT_TIMEOUT}"
+  done
+  for phase in "${BUILD_PHASES[@]}"; do
+    "${kubectl[@]}" -n loco-builds wait builds -l "flock.dev/expect=${phase}" \
+      --for=jsonpath='{.status.phase}'="${phase}" --timeout="${BUILD_TIMEOUT}"
+  done
+  "${kubectl[@]}" wait httproutes --all --all-namespaces \
+    --for=jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'=True --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n ledger wait helmrelease/ledger-api --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=False --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n ledger wait helmrelease/ledger-migrations --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=Unknown --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n flux-system wait kustomization/rollouts --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=Unknown --timeout="${WAIT_TIMEOUT}"
+  "${kubectl[@]}" -n flux-system wait kustomization/frozen-kustomization --for=jsonpath='{.spec.suspend}'=true --timeout="${WAIT_TIMEOUT}"
+  python3 "${ROOT}/e2e/loco.py" --check <("${kubectl[@]}" get pods,applications --all-namespaces -o json)
+}
 
 for cluster in "${CLUSTERS[@]}"; do
   context="kind-${cluster}"
@@ -29,6 +61,9 @@ for cluster in "${CLUSTERS[@]}"; do
   else
     "${kubectl[@]}" -n payments wait helmrelease/checkout-api --for=condition=Ready --timeout="${WAIT_TIMEOUT}"
     "${kubectl[@]}" -n payments rollout status deployment/checkout-api --timeout="${WAIT_TIMEOUT}"
+  fi
+  if [[ "${cluster}" == flock-loco ]]; then
+    verify_loco
   fi
   printf '%s: all scenario assertions passed\n' "${context}"
 done
