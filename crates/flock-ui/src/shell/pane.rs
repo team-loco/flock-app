@@ -10,6 +10,7 @@ use super::load::LoadClock;
 use crate::screens::app_settings::AppSettingsScreen;
 use crate::screens::changes::ChangesScreen;
 use crate::screens::compare::CompareScreen;
+use crate::screens::edit::EditScreen;
 use crate::screens::flock::FlockScreen;
 use crate::screens::flux_object::FluxObjectPage;
 use crate::screens::gitops::GitOpsScreen;
@@ -77,6 +78,7 @@ pub(super) struct PaneScreens {
     pub(super) workload: Option<(Entity<WorkloadScreen>, Subscription)>,
     pub(super) logs: Option<(Entity<LogsScreen>, Subscription)>,
     pub(super) multi_logs: Option<(Entity<MultiLogsScreen>, Subscription)>,
+    pub(super) edit: Option<(Entity<EditScreen>, Subscription)>,
     pub(super) load: LoadClock,
     pub(super) strip: ScrollHandle,
     pub(super) shown: Option<TabId>,
@@ -155,6 +157,7 @@ impl PaneScreens {
             workload: None,
             logs: None,
             multi_logs: None,
+            edit: None,
             load: LoadClock::default(),
             strip: ScrollHandle::default(),
             shown: None,

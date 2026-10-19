@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use flock_core::changes::{LineChange, PatchLine};
+use flock_core::changes::PatchLine;
 use flock_core::compare::{Observed, SpecDiff, build};
 use flock_core::{ClusterId, Comparison, ResourceRef, WorkloadKind};
 use futures::{StreamExt, stream};
@@ -11,12 +11,10 @@ use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use kube::Api;
 use kube::api::ListParams;
 use serde_json::Value;
-use similar::{ChangeTag, TextDiff};
 
 use crate::manager::ClusterHandle;
 
 pub const SPEC_PATH: &str = "spec.template";
-const CONTEXT_LINES: usize = 3;
 const CPU: &str = "cpu";
 const ROLLING_UPDATE: &str = "RollingUpdate";
 const SEPARATOR: &str = " · ";
@@ -171,34 +169,8 @@ fn yaml(template: &Value) -> String {
     serde_norway::to_string(template).unwrap_or_default()
 }
 
-fn line_number(index: Option<usize>) -> u32 {
-    index
-        .and_then(|ix| u32::try_from(ix + 1).ok())
-        .unwrap_or_default()
-}
-
 pub fn spec_lines(base: &Value, other: &Value) -> Vec<PatchLine> {
-    let base = yaml(base);
-    let other = yaml(other);
-    let diff = TextDiff::from_lines(&base, &other);
-    diff.grouped_ops(CONTEXT_LINES)
-        .iter()
-        .flatten()
-        .flat_map(|op| diff.iter_changes(op))
-        .map(|change| {
-            let (kind, number) = match change.tag() {
-                ChangeTag::Equal => (LineChange::Context, line_number(change.new_index())),
-                ChangeTag::Insert => (LineChange::Added, line_number(change.new_index())),
-                ChangeTag::Delete => (LineChange::Removed, line_number(change.old_index())),
-            };
-            PatchLine {
-                change: kind,
-                number,
-                text: change.value().trim_end_matches('\n').to_owned(),
-                note: None,
-            }
-        })
-        .collect()
+    flock_core::edit::diff_lines(&yaml(base), &yaml(other))
 }
 
 pub fn pick_other<'a>(
@@ -261,6 +233,8 @@ pub async fn compare(
 mod tests {
     use flock_core::{Uid, Workload};
     use serde_json::json;
+
+    use flock_core::changes::LineChange;
 
     use super::*;
 

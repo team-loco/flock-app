@@ -93,6 +93,15 @@ impl FluxKey {
         }
     }
 
+    pub fn resource(&self) -> ResourceRef {
+        ResourceRef {
+            cluster: self.cluster.clone(),
+            kind: self.kind.label().to_owned(),
+            namespace: Some(self.namespace.clone()),
+            name: self.name.clone(),
+        }
+    }
+
     pub fn same_object(&self, other: &Self) -> bool {
         self.kind == other.kind && self.namespace == other.namespace && self.name == other.name
     }

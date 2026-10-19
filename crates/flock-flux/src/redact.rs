@@ -19,6 +19,10 @@ pub fn object(value: &mut Value) {
     redact(value, None);
 }
 
+pub fn object_against(value: &mut Value, previous: &Value) {
+    redact(value, Some(previous));
+}
+
 pub fn manifest(text: &str) -> String {
     rewrite(text, &[])
 }
@@ -68,7 +72,9 @@ fn redact(value: &mut Value, previous: Option<&Value>) -> bool {
 fn redact_map(map: &mut Map<String, Value>, previous: Option<&Value>) -> bool {
     let mut changed = false;
     if let Some(metadata) = map.get_mut("metadata").and_then(Value::as_object_mut) {
-        changed |= metadata.remove(MANAGED_FIELDS).is_some();
+        let had = metadata.contains_key(MANAGED_FIELDS);
+        metadata.retain(|key, _| key != MANAGED_FIELDS);
+        changed |= had;
     }
     let secret = map.get("kind").and_then(Value::as_str) == Some(SECRET_KIND);
     for (key, child) in map.iter_mut() {
@@ -374,6 +380,28 @@ mod tests {
             credentials("git@github.com:acme/repo.git and a@b.c"),
             "git@github.com:acme/repo.git and a@b.c"
         );
+    }
+
+    #[test]
+    fn redacting_against_a_previous_object_marks_rotated_values_and_keeps_key_order() {
+        let before = json!({
+            "kind": "Secret",
+            "metadata": { "managedFields": [], "name": "db", "namespace": "apps" },
+            "data": { "password": "b2xk", "user": "YWRtaW4=" },
+        });
+        let mut after = json!({
+            "kind": "Secret",
+            "metadata": { "managedFields": [], "name": "db", "namespace": "apps" },
+            "data": { "password": "bmV3", "user": "YWRtaW4=" },
+        });
+        object_against(&mut after, &before);
+        assert_eq!(after["data"]["password"], json!(CHANGED));
+        assert_eq!(after["data"]["user"], json!(MASK));
+        let keys: Vec<&String> = after["metadata"]
+            .as_object()
+            .map(|metadata| metadata.keys().collect())
+            .unwrap_or_default();
+        assert_eq!(keys, ["name", "namespace"]);
     }
 
     #[test]

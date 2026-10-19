@@ -98,3 +98,4 @@ Spec column points at `design/`.
 | FILTER | Clear filter placeholder, namespace/label completion and removable tokens (#189) | claude | filter-bar-ux | done |
 | C185 | Linux e2e coverage and restart rollback revision selection (#185, #186) | codex | fix-ci-e2e-rollback | done (#195) |
 | MLOG | multi-pod log streaming: merged, colour-coded, legend toggles, pause, pods join and leave (#230) | claude | multi-pod-logs | done |
+| EDIT1 | Edit YAML: editor tab, dry-run server-side diff, UID/resourceVersion-pinned apply with conflict rebase, Secrets redacted unless revealed (#231) | claude | yaml-edit-apply | done |

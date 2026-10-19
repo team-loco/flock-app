@@ -9,7 +9,7 @@ use gpui::{
 
 use super::{ListShape, ScreenEvent, empty_list};
 use crate::kit::{Column, FilterBar, FilterEvent, MenuItem, Table, TableEvent, chip_label};
-use crate::screens::new_tab_item;
+use crate::screens::{edit_item, new_tab_item};
 
 const NAME_WEIGHT: f32 = 1.;
 const NAME_MIN: Pixels = px(220.);
@@ -192,8 +192,13 @@ fn row_items(object: &FluxObject, screen: &WeakEntity<FluxListScreen>) -> Vec<Me
     let open = new_tab_item(Command::OpenFluxObject(key.clone()), move |command, cx| {
         let _ = open_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
     });
+    let edit_screen = screen.clone();
+    let yaml_item = edit_item(key.resource(), move |command, cx| {
+        let _ = edit_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+    });
     let mut items = vec![
         open,
+        yaml_item,
         MenuItem::new("Reconcile", emit(reconcile))
             .description("Ask Flux to apply the current revision now."),
         suspend,

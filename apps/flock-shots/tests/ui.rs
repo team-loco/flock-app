@@ -201,7 +201,7 @@ fn cancelling_a_confirm_dialog_leaves_the_state_unchanged() -> anyhow::Result<()
     let mut ui = Ui::open(Screen::Workload)?;
     let before = ui.state();
     ui.click("workload-actions")?;
-    ui.click("workload-actions-item-5")?;
+    ui.click("workload-actions-item-6")?;
     assert!(ui.bounds("dialog-cancel").is_some());
     ui.click("dialog-cancel")?;
     assert!(ui.bounds("dialog-cancel").is_none());
@@ -441,7 +441,7 @@ fn right_clicking_a_row_opens_its_actions_and_destructive_ones_confirm() -> anyh
     let mut ui = Ui::open(Screen::Resources)?;
     let before = ui.state();
     ui.right_click(selector(format!("{DEPLOYMENTS}-row-1")))?;
-    ui.click(selector(format!("{DEPLOYMENTS}-row-menu-item-1")))?;
+    ui.click(selector(format!("{DEPLOYMENTS}-row-menu-item-2")))?;
     assert!(ui.bounds("dialog-cancel").is_some());
     ui.click("dialog-cancel")?;
     assert_eq!(ui.state(), before);
@@ -1054,7 +1054,7 @@ fn row_menus_carry_each_objects_actions_and_inspectors_keep_only_the_primary() -
     assert!(nodes.bounds("node-actions").is_none());
     nodes.right_click("nodes-row-1")?;
     assert!(nodes.bounds("nodes-row-menu-item-0").is_some());
-    nodes.click("nodes-row-menu-item-2")?;
+    nodes.click("nodes-row-menu-item-3")?;
     assert!(nodes.bounds("dialog-cancel").is_some());
     nodes.click("dialog-cancel")?;
 
@@ -2701,5 +2701,75 @@ fn the_sidebar_header_and_page_header_read_as_one_row_over_one_content_edge() ->
     let back = bounds_of(&mut ui, "pane-0-back")?;
     let meta = bounds_of(&mut ui, "meta-line")?;
     assert_eq!(back.left() + ICON_BUTTON_INSET, meta.left() + SPACE_8);
+    Ok(())
+}
+
+#[test]
+fn editing_yaml_validates_reviews_a_dry_run_and_applies_after_confirming() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::EditYaml)?;
+    assert_eq!(ui.state().location().page, Page::EditYaml);
+    assert!(ui.bounds("edit-footer").is_some());
+    ui.click("edit-editor")?;
+    ui.press("cmd-a")?;
+    ui.type_text("kind: [")?;
+    assert!(ui.bounds("edit-invalid").is_some());
+    ui.press("cmd-enter")?;
+    assert!(ui.bounds("edit-review-view").is_none());
+    ui.press("cmd-a")?;
+    ui.type_text("{apiVersion: v1, kind: ConfigMap, metadata: {name: checkout-api-config, namespace: payments}, data: {level: debug}}")?;
+    assert!(ui.bounds("edit-invalid").is_none());
+    ui.press("cmd-enter")?;
+    assert!(ui.bounds("edit-review-view").is_some());
+    ui.press("cmd-enter")?;
+    assert!(ui.bounds("dialog-cancel").is_some());
+    ui.click("dialog-confirm")?;
+    assert!(ui.bounds("edit-editor").is_some());
+    let notices = ui.read_app(flock_ui::kit::toast_titles);
+    assert!(
+        notices
+            .iter()
+            .any(|title| title.as_ref() == "Applied ConfigMap/checkout-api-config"),
+        "{notices:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_row_menu_opens_the_object_in_an_editor_tab() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Resources)?;
+    let tabs = ui.state().panes().focused().tabs().len();
+    ui.right_click(selector(format!("{DEPLOYMENTS}-row-1")))?;
+    ui.click(selector(format!("{DEPLOYMENTS}-row-menu-item-1")))?;
+    let state = ui.state();
+    assert_eq!(state.location().page, Page::EditYaml);
+    assert_eq!(state.panes().focused().tabs().len(), tabs + 1);
+    Ok(())
+}
+
+#[test]
+#[ignore = "renders the YAML editor states for review"]
+fn edit_yaml_states_render_for_review() -> anyhow::Result<()> {
+    for (appearance, name) in [
+        (flock_ui::theme::Appearance::Dark, "dark"),
+        (flock_ui::theme::Appearance::Light, "light"),
+    ] {
+        let mut ui = Ui::with(Screen::EditYaml, flock::Preset::default(), appearance)?;
+        let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+        ui.click("edit-editor")?;
+        ui.press("cmd-up")?;
+        for _ in 0..10 {
+            ui.press("down")?;
+        }
+        ui.press("cmd-right")?;
+        for _ in 0..4 {
+            ui.press("backspace")?;
+        }
+        ui.type_text("9090")?;
+        ui.save_png(&dir.join(format!("edit-yaml-typed-{name}.png")))?;
+        ui.press("cmd-enter")?;
+        ui.save_png(&dir.join(format!("edit-yaml-review-{name}.png")))?;
+        ui.press("cmd-enter")?;
+        ui.save_png(&dir.join(format!("edit-yaml-confirm-{name}.png")))?;
+    }
     Ok(())
 }

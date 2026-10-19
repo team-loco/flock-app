@@ -16,6 +16,8 @@ use crate::kit::{
     MenuItem, PageHeader, Prose, SectionHeader, SectionLabel, Segmented, StatusGlyph, Table,
     TableEvent, Toast, confirm, parse_unified, toast,
 };
+use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
+use crate::screens::{EDIT_DESCRIPTION, EDIT_YAML};
 use crate::screens::{FullView, full_view_link};
 use crate::theme::{
     ASIDE_WIDTH, ActiveTheme, FONT_MONO, FONT_SANS, LINE_PROSE, Palette, ROW_DOCUMENT,
@@ -241,6 +243,14 @@ impl FluxObjectPage {
         cx.notify();
     }
 
+    fn edit_yaml(&mut self, cx: &mut Context<Self>) {
+        let Some(object) = self.object() else {
+            return;
+        };
+        let target = object.key.resource();
+        cx.emit(edit_command(target));
+    }
+
     fn copy_yaml(&mut self, cx: &mut Context<Self>) {
         let Some(object) = self.object() else {
             return;
@@ -327,6 +337,11 @@ impl FluxObjectPage {
             item(&this, "View YAML", |page, _, cx| page.toggle_yaml(cx))
                 .shortcut(YAML_KEYS)
                 .description(yaml_description(object)),
+        );
+        items.push(
+            item(&this, EDIT_YAML, |page, _, cx| page.edit_yaml(cx))
+                .shortcut(EDIT_KEYS)
+                .description(EDIT_DESCRIPTION),
         );
         items.push(
             item(&this, "Copy YAML", |page, _, cx| page.copy_yaml(cx))
@@ -518,9 +533,13 @@ impl FluxObjectPage {
             .into_any_element()
     }
 
-    fn yaml_section(object: &FluxObject) -> AnyElement {
+    fn yaml_section(object: &FluxObject, cx: &mut Context<Self>) -> AnyElement {
+        let edit = Button::new("flux-edit-yaml", EDIT_YAML)
+            .small()
+            .tooltip(EDIT_KEYS)
+            .on_click(cx.listener(|page, _, _, cx| page.edit_yaml(cx)));
         div()
-            .child(SectionHeader::new("YAML").count("read-only"))
+            .child(SectionHeader::new("YAML").end(edit))
             .child(
                 div()
                     .px(SPACE_8)
@@ -554,7 +573,7 @@ impl FluxObjectPage {
             .child(self.header(object, cx))
             .children(body)
             .when(self.yaml_open, |main| {
-                main.child(Self::yaml_section(object))
+                main.child(Self::yaml_section(object, cx))
             })
             .child(div().h(SPACE_8))
             .into_any_element()
@@ -685,9 +704,14 @@ impl Render for FluxObjectPage {
                 .child(self.main(&page, &palette, cx))
                 .child(aside)
         });
+        let key_context = if self.yaml_open {
+            format!("{FLUX_CONTEXT} {YAML_CONTEXT}")
+        } else {
+            FLUX_CONTEXT.to_owned()
+        };
         div()
             .id("flux-object")
-            .key_context(FLUX_CONTEXT)
+            .key_context(key_context.as_str())
             .track_focus(&self.focus)
             .on_action(cx.listener(|page, _: &Reconcile, _, cx| {
                 let suspended = page.object().is_some_and(|o| o.phase.is_suspended());
@@ -702,6 +726,7 @@ impl Render for FluxObjectPage {
                 cx.emit(Command::SelectPage(Page::Changes));
             }))
             .on_action(cx.listener(|page, _: &ViewYaml, _, cx| page.toggle_yaml(cx)))
+            .on_action(cx.listener(|page, _: &EditYaml, _, cx| page.edit_yaml(cx)))
             .flex_1()
             .min_w_0()
             .h_full()

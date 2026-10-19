@@ -21,7 +21,8 @@ use crate::kit::{
     PageHeader, Rule, SectionHeader, SectionLabel, Segmented, Skeleton, StatusText, Table,
     TableEvent, Terminal, TextFieldState, Toast, Width, confirm, min_row_width, slide_in, toast,
 };
-use crate::screens::{FullView, full_view_link};
+use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
+use crate::screens::{EDIT_YAML, FullView, edit_item, full_view_link};
 use crate::theme::{
     ActiveTheme, FIELD_LABEL, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE, RULE, SPACE_1,
     SPACE_2, SPACE_3, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_CONTROL, TEXT_GLYPH, TEXT_MONO,
@@ -91,7 +92,6 @@ const YAML_ITEM: &str = "View YAML";
 const COMPARE_ITEM: &str = "Compare across clusters";
 const YAML_KEYS: &str = "⌘Y";
 const YAML_LABEL: &str = "YAML";
-const YAML_NOTE: &str = "read-only";
 const YAML_INSPECTOR_WIDTH: Pixels = px(480.);
 
 pub struct WorkloadScreen {
@@ -393,6 +393,12 @@ impl WorkloadScreen {
                 }
             })
             .shortcut(YAML_KEYS),
+            edit_item(workload.target.clone(), {
+                let this = this.clone();
+                move |command, cx| {
+                    this.update(cx, |_, cx| cx.emit(command)).ok();
+                }
+            }),
             MenuItem::new(COMPARE_ITEM, {
                 let this = this.clone();
                 let target = workload.target.clone();
@@ -556,7 +562,11 @@ impl WorkloadScreen {
             .into_any_element()
     }
 
-    fn yaml_inspector(&self, palette: &Palette) -> AnyElement {
+    fn edit_yaml(&mut self, cx: &mut Context<Self>) {
+        cx.emit(edit_command(self.target.clone()));
+    }
+
+    fn yaml_inspector(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let yaml = match self.yaml.clone() {
             Some(yaml) => CodeView::new("workload-yaml-code", yaml)
                 .yaml()
@@ -573,10 +583,10 @@ impl WorkloadScreen {
             .border_color(palette.line)
             .child(div().flex_1().child(SectionLabel::new(YAML_LABEL)))
             .child(
-                div()
-                    .text_size(TEXT_SMALL)
-                    .text_color(palette.mute)
-                    .child(YAML_NOTE),
+                Button::new("workload-edit-yaml", EDIT_YAML)
+                    .small()
+                    .tooltip(EDIT_KEYS)
+                    .on_click(cx.listener(|this, _, _, cx| this.edit_yaml(cx))),
             );
         let content = div()
             .id("workload-yaml")
@@ -1014,10 +1024,16 @@ impl Focusable for WorkloadScreen {
 impl Render for WorkloadScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
+        let context = if self.showing_yaml {
+            format!("{KEY_CONTEXT} {YAML_CONTEXT}")
+        } else {
+            KEY_CONTEXT.to_owned()
+        };
         let root = div()
             .id("workload")
-            .key_context(KEY_CONTEXT)
+            .key_context(context.as_str())
             .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &EditYaml, _, cx| this.edit_yaml(cx)))
             .on_action(cx.listener(|this, _: &ToggleActions, window, cx| {
                 this.menu.update(cx, |menu, cx| menu.toggle(window, cx));
             }))
@@ -1062,7 +1078,7 @@ impl Render for WorkloadScreen {
         };
         let motion = self.entrance.track(Some(shown), entrance, cx);
         let inspector = if self.showing_yaml {
-            let panel = self.yaml_inspector(&palette);
+            let panel = self.yaml_inspector(&palette, cx);
             slide_in(panel, INSPECTOR_ID, motion, YAML_INSPECTOR_WIDTH)
         } else {
             let panel = self.inspector(&workload, cx);

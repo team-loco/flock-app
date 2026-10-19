@@ -241,7 +241,10 @@ impl ClusterHandle {
         self.resolve(&api_version, &kind.kind).await
     }
 
-    async fn dynamic_api(&self, target: &ObjectRef) -> Result<(Client, Api<DynamicObject>)> {
+    pub(crate) async fn dynamic_api(
+        &self,
+        target: &ObjectRef,
+    ) -> Result<(Client, Api<DynamicObject>)> {
         let client = self.client()?;
         let resource = self.resolve(&target.api_version, &target.kind).await?;
         let api = match &target.namespace {

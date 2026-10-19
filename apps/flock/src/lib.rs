@@ -127,6 +127,7 @@ pub enum Screen {
     ResourceInspector,
     Gitops,
     Compare,
+    EditYaml,
     ClusterSettings,
     Settings,
     Kit,
@@ -180,6 +181,16 @@ impl Screen {
             }
             Self::Gitops => vec![Command::SelectPage(Page::GitOps)],
             Self::Compare => vec![Command::Compare(preset.deployment())],
+            Self::EditYaml => {
+                let object = preset.object_or(SAMPLE_NAMESPACE, "checkout-api-config");
+                let target = ResourceRef {
+                    cluster,
+                    kind: "ConfigMap".into(),
+                    namespace: Some(object.namespace),
+                    name: object.name,
+                };
+                vec![Command::EditYaml(target)]
+            }
             Self::ClusterSettings => vec![Command::ShowClusterSettings(cluster)],
             Self::Settings => vec![Command::SelectPage(Page::Settings)],
             Self::Kit => Vec::new(),
@@ -373,6 +384,7 @@ pub fn root_view(
         #[cfg(feature = "loco")]
         Screen::LocoBuilds => shell_view(store, screen, preset, window, cx),
         Screen::Compare => shell_view(store, screen, preset, window, cx),
+        Screen::EditYaml => shell_view(store, screen, preset, window, cx),
         Screen::ClusterSettings => shell_view(store, screen, preset, window, cx),
         Screen::Settings => shell_view(store, screen, preset, window, cx),
         #[cfg(feature = "loco")]

@@ -747,6 +747,12 @@ impl Live {
             Command::NewTab(command) => return self.apply_current(command),
             Command::Compare(target) => self.compare(target, None),
             Command::CompareWith { base, other } => self.compare(base, Some(other)),
+            Command::EditYaml(resource) => {
+                self.navigation.selected = Some(resource.cluster.clone());
+                self.navigation.page = Page::EditYaml;
+                self.page_changed();
+            }
+            Command::Edit(_) => self.act(command),
             Command::PortForward { .. } => self.act(command),
             Command::StopPortForward { .. } => self.act(command),
             Command::Cordon(_) => self.act(command),
@@ -1335,6 +1341,7 @@ fn leaves_compare(command: &Command) -> bool {
             | Command::OpenCommit(_)
             | Command::OpenFluxObject(_)
             | Command::OpenResource(_)
+            | Command::EditYaml(_)
             | Command::ShowClusterSettings(_)
     )
 }

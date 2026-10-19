@@ -87,7 +87,7 @@ pub fn yaml_tokens(line: &str) -> Vec<(Range<usize>, Token)> {
     tokens
 }
 
-fn token_style(token: Token, palette: &Palette) -> HighlightStyle {
+pub(super) fn token_style(token: Token, palette: &Palette) -> HighlightStyle {
     let color = match token {
         Token::Key => palette.acc,
         Token::Punctuation => palette.mute,

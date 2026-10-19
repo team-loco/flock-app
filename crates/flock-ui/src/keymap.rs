@@ -11,6 +11,7 @@ use crate::actions::{
 };
 use crate::kit::{SelectAllText, SendBackTab, SendTab, TERMINAL_CONTEXT};
 use crate::screens::command::PALETTE_CONTEXT;
+use crate::screens::edit::{self, KEY_CONTEXT as EDIT_CONTEXT, YAML_CONTEXT};
 use crate::screens::flux_object::{self, FLUX_CONTEXT};
 use crate::screens::workload::{self, KEY_CONTEXT as WORKLOAD_CONTEXT};
 
@@ -47,10 +48,11 @@ pub enum Group {
     Workload,
     Terminal,
     Flux,
+    Edit,
 }
 
 impl Group {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::General,
         Self::Tabs,
         Self::View,
@@ -62,6 +64,7 @@ impl Group {
         Self::Workload,
         Self::Terminal,
         Self::Flux,
+        Self::Edit,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -77,6 +80,7 @@ impl Group {
             Self::Workload => "Workload page",
             Self::Terminal => "Terminal",
             Self::Flux => "Flux object page",
+            Self::Edit => "Editing YAML",
         }
     }
 }
@@ -379,6 +383,20 @@ pub const BINDINGS: &[Binding] = &[
         KeyBinding::new(k, flux_object::ViewYaml, c)
     })
     .within(FLUX_CONTEXT),
+    Binding::new(
+        &["cmd-e"],
+        "Edit the YAML on screen",
+        Group::Edit,
+        |k, c| KeyBinding::new(k, edit::EditYaml, c),
+    )
+    .within(YAML_CONTEXT),
+    Binding::new(
+        &["cmd-enter"],
+        "Review changes, then apply",
+        Group::Edit,
+        |k, c| KeyBinding::new(k, edit::Submit, c),
+    )
+    .within(EDIT_CONTEXT),
 ];
 
 fn tab_index(keys: &str) -> usize {

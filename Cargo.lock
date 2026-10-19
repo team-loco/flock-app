@@ -1895,6 +1895,8 @@ dependencies = [
  "async-channel",
  "serde",
  "serde_json",
+ "serde_norway",
+ "similar 3.2.0",
  "thiserror 2.0.21",
 ]
 

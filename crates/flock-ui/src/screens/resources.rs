@@ -13,17 +13,19 @@ use flock_core::{
     ResourceRef, Seen, Status,
 };
 use gpui::{
-    AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
-    Render, SharedString, Styled, Subscription, WeakEntity, Window, div, px,
+    AnyElement, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
+    ParentElement, Pixels, Render, SharedString, Styled, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder, px,
 };
 
 use super::ScreenEvent;
 use crate::kit::{
-    CodeView, Column, ConfirmDialog, EmptyState, FilterBar, FilterEvent, IconButton, Inspector,
-    MenuItem, Presence, Select, SelectEvent, ShowAll, Skeleton, Table, TableEvent, chip_label,
-    confirm, slide_in, slide_out,
+    Button, CodeView, Column, ConfirmDialog, EmptyState, FilterBar, FilterEvent, IconButton,
+    Inspector, MenuItem, Presence, Select, SelectEvent, ShowAll, Skeleton, Table, TableEvent,
+    chip_label, confirm, slide_in, slide_out,
 };
-use crate::screens::{ListShape, empty_list, new_tab_item};
+use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
+use crate::screens::{EDIT_YAML, ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::SPACE_3;
 
 const ALL_NAMESPACES: &str = "All namespaces";
@@ -410,6 +412,13 @@ impl ResourcesScreen {
         }
     }
 
+    fn edit(&mut self, cx: &mut Context<Self>) {
+        let target = self.selected_row().and_then(|row| self.target(row));
+        if let Some(target) = target {
+            cx.emit(ScreenEvent::Command(edit_command(target)));
+        }
+    }
+
     fn close(&mut self, cx: &mut Context<Self>) {
         let table = self.table(cx);
         table.update(cx, |table, cx| table.select(None, cx));
@@ -451,8 +460,12 @@ impl ResourcesScreen {
             let open = new_tab_item(Command::OpenResource(target.clone()), move |command, cx| {
                 let _ = open_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
             });
+            let edit_screen = screen.clone();
+            let edit = edit_item(target.clone(), move |command, cx| {
+                let _ = edit_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+            });
             let seen = Seen::new(target, row.uid.clone());
-            let mut items = vec![open];
+            let mut items = vec![open, edit];
             items.extend(delete_items(
                 kind,
                 seen,
@@ -466,7 +479,11 @@ impl ResourcesScreen {
     fn inspector(&self, row: &Resource, cx: &mut Context<Self>) -> AnyElement {
         let close = IconButton::glyph("close-resource", "×", "Close")
             .on_click(cx.listener(|this, _, _, cx| this.close(cx)));
-        let actions = div().flex().gap(SPACE_3).child(close);
+        let edit = Button::new("edit-resource", EDIT_YAML)
+            .small()
+            .tooltip(EDIT_KEYS)
+            .on_click(cx.listener(|this, _, _, cx| this.edit(cx)));
+        let actions = div().flex().gap(SPACE_3).child(edit).child(close);
         let subtitle = format!("{} · {}", self.kind.name(), row.namespace);
         let yaml: AnyElement = if row.yaml.is_empty() {
             Skeleton::rows().into_any_element()
@@ -508,7 +525,10 @@ impl Render for ResourcesScreen {
                 slide_out(panel, INSPECTOR_ID, YAML_INSPECTOR)
             }),
         };
+        let inspecting = inspector.is_some();
         div()
+            .when(inspecting, |root| root.key_context(YAML_CONTEXT))
+            .on_action(cx.listener(|this, _: &EditYaml, _, cx| this.edit(cx)))
             .size_full()
             .flex()
             .child(
