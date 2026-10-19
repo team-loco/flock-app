@@ -1,14 +1,13 @@
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::kit::SelectableText;
 use flock_core::emptiness::Noun;
 use flock_core::filter::label_values;
 use flock_core::multilog::LabelSelector;
-use flock_core::pods::{
-    Container, Pod, PodFilter, PodQuery, filter_counts, namespaces, nav_counts,
-};
+use flock_core::pods::{Container, Pod, PodFilter, PodQuery, filter_counts, nav_counts};
 use flock_core::related::Related;
-use flock_core::resources::{POD_LIST, namespace_choices};
+use flock_core::resources::{NamespaceCount, POD_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
 use flock_core::{
     ClusterId, Command, Counts, LogTarget, Page, Preferences, ResourceRef, Seen, Snapshot,
@@ -31,7 +30,10 @@ use crate::kit::{
     reason_tooltip, swap_in,
 };
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
-use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
+use crate::screens::{
+    ALL_NAMESPACES, ListShape, chosen_namespace, edit_item, empty_list, new_tab_item,
+    set_namespace_options,
+};
 use crate::theme::{
     ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, INSPECTOR_POD, LINE_PROSE,
     MESSAGE_MIN, Palette, RADIUS_SMALL, REASON_WEIGHT, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
@@ -51,7 +53,6 @@ const NAMESPACE_SELECT: Pixels = px(180.);
 const CONTAINER_SELECT: Pixels = px(160.);
 const INSPECTOR_LABEL: Pixels = px(96.);
 
-const ALL_NAMESPACES: &str = "All namespaces";
 const MISSING: &str = "—";
 const MESSAGE: &str = "Message";
 const LOGS_FOR: &str = "Logs for";
@@ -65,6 +66,7 @@ pub struct PodsScreen {
     pods: Vec<Pod>,
     cluster: Option<ClusterId>,
     names: Vec<(ClusterId, String)>,
+    cluster_namespaces: BTreeMap<ClusterId, Vec<String>>,
     shown: usize,
     query: PodQuery,
     selected: Option<ResourceRef>,
@@ -155,10 +157,8 @@ impl PodsScreen {
                     this.logs.update(cx, |logs, cx| logs.set_query(text, cx));
                 }
             }),
-            cx.subscribe(&namespace, |this, _, SelectEvent::Changed(ix), cx| {
-                let chosen = ix
-                    .checked_sub(1)
-                    .and_then(|ix| this.namespaces().get(ix).cloned());
+            cx.subscribe(&namespace, |this, select, SelectEvent::Changed(_), cx| {
+                let chosen = chosen_namespace(select.read(cx));
                 this.choose_namespace(chosen, cx);
             }),
             cx.subscribe(&containers, |this, select, SelectEvent::Changed(ix), cx| {
@@ -177,6 +177,7 @@ impl PodsScreen {
             pods: Vec::new(),
             cluster: None,
             names: Vec::new(),
+            cluster_namespaces: BTreeMap::new(),
             shown: 0,
             query: PodQuery::default(),
             selected: None,
@@ -209,6 +210,14 @@ impl PodsScreen {
             .clusters
             .iter()
             .map(|cluster| (cluster.id.clone(), cluster.name.clone()))
+            .collect();
+        self.cluster_namespaces = snapshot
+            .details
+            .iter()
+            .map(|(id, detail)| {
+                let names = detail.namespaces.iter().map(|ns| ns.name.clone());
+                (id.clone(), names.collect())
+            })
             .collect();
         self.refresh(cx);
     }
@@ -342,13 +351,20 @@ impl PodsScreen {
         }
     }
 
-    fn namespaces(&self) -> Vec<String> {
+    fn namespace_counts(&self) -> Vec<NamespaceCount> {
         let known = self
             .cluster
             .as_ref()
-            .map(|cluster| namespaces(&self.pods, cluster))
-            .unwrap_or_default();
-        namespace_choices(known, self.query.namespace.as_deref())
+            .and_then(|cluster| self.cluster_namespaces.get(cluster))
+            .into_iter()
+            .flatten()
+            .map(String::as_str);
+        let rows = self
+            .pods
+            .iter()
+            .filter(|pod| self.cluster.as_ref() == Some(&pod.cluster))
+            .map(|pod| pod.namespace.as_str());
+        namespace_counts(known, rows, self.query.namespace.as_deref())
     }
 
     fn selected_pod(&self) -> Option<&Pod> {
@@ -383,18 +399,10 @@ impl PodsScreen {
                 .collect(),
             None => Vec::new(),
         };
-        let mut options: Vec<SharedString> = vec![ALL_NAMESPACES.into()];
-        options.extend(self.namespaces().into_iter().map(SharedString::from));
-        let selected = self
-            .query
-            .namespace
-            .as_ref()
-            .and_then(|ns| options.iter().position(|o| o.as_ref() == ns))
-            .unwrap_or_default();
-        self.namespace.update(cx, |select, cx| {
-            select.set_options(options, cx);
-            select.set_selected(selected, cx);
-        });
+        let counts = self.namespace_counts();
+        let total = self.cluster_total();
+        let chosen = self.query.namespace.as_deref();
+        set_namespace_options(&self.namespace, &counts, total, chosen, cx);
         let chips = filter_counts(&self.cluster_pods())
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))

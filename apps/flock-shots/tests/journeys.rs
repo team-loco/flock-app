@@ -1526,3 +1526,70 @@ fn live_every_loco_page_loads_real_loco_with_counts_and_no_toasts() -> anyhow::R
     }
     Ok(())
 }
+
+const SYSTEM_NAMESPACES: [&str; 3] = ["default", "kube-public", "kube-node-lease"];
+
+fn cluster_namespaces(state: &AppState, cluster: &ClusterId) -> Vec<String> {
+    state
+        .snapshot
+        .details
+        .get(cluster)
+        .map(|detail| detail.namespaces.iter().map(|ns| ns.name.clone()).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn live_pod_namespace_picker_lists_namespaces_without_pods() -> anyhow::Result<()> {
+    let Some(make) = kind()? else {
+        return Ok(());
+    };
+    let (mut ui, _) = opened(&make, Screen::Flock)?;
+    let cluster = ClusterId::new(CLUSTERS[1].0);
+    switch_to(&mut ui, CLUSTERS[1].0)?;
+    visit(&mut ui, Page::Pods)?;
+    ui.wait_until(PAGE_TIMEOUT, |state| {
+        let names = cluster_namespaces(state, &cluster);
+        SYSTEM_NAMESPACES
+            .iter()
+            .all(|wanted| names.iter().any(|name| name == wanted))
+    })
+    .context("the Namespace watch should list default, kube-public and kube-node-lease")?;
+    all_namespaces(&mut ui, "pod-namespace")?;
+    let mut names = cluster_namespaces(&ui.state(), &cluster);
+    names.sort();
+    ui.click("pod-namespace")?;
+    let last = selector(format!("pod-namespace-option-{}", names.len()));
+    let past = selector(format!("pod-namespace-option-{}", names.len() + 1));
+    anyhow::ensure!(
+        ui.bounds(last).is_some(),
+        "the picker lists fewer than {names:?}"
+    );
+    anyhow::ensure!(
+        ui.bounds(past).is_none(),
+        "the picker lists more than {names:?}"
+    );
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(SHOTS_DIR);
+    ui.save_png(&dir.join("fleet-b-pod-namespace-picker.png"))?;
+    let ix = names
+        .iter()
+        .position(|name| name == SYSTEM_NAMESPACES[0])
+        .context("default is listed")?;
+    ui.click(selector(format!("pod-namespace-option-{}", ix + 1)))?;
+    ui.wait_until(PAGE_TIMEOUT, |state| {
+        state
+            .snapshot
+            .catalog
+            .get(&cluster)
+            .map(|settings| {
+                settings
+                    .preferences
+                    .namespace_selection(flock_core::resources::POD_LIST)
+            })
+            .is_some_and(|scope| scope.namespace() == Some(SYSTEM_NAMESPACES[0]))
+    })?;
+    anyhow::ensure!(
+        ui.bounds("empty-state-namespace").is_some(),
+        "default on fleet-b has no pods and should say so"
+    );
+    all_namespaces(&mut ui, "pod-namespace")
+}

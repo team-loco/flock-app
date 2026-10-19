@@ -6,9 +6,7 @@ use flock_core::events::Event;
 use flock_core::filter::{StatusFilter, label_values};
 use flock_core::pods::PodEvent;
 use flock_core::related::Related;
-use flock_core::resources::{
-    Resource, filter_counts, filter_resources, namespace_choices, namespaces_of,
-};
+use flock_core::resources::{Resource, filter_counts, filter_resources, namespace_counts};
 use flock_core::settings::NamespaceSelection;
 use flock_core::time::age;
 use flock_core::{
@@ -17,7 +15,7 @@ use flock_core::{
 };
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Render, SharedString, Styled, Subscription, WeakEntity, Window, div,
+    ParentElement, Pixels, Render, Styled, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder, px,
 };
 
@@ -30,10 +28,12 @@ use crate::kit::{
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
-use crate::screens::{EDIT_YAML, ListShape, edit_item, empty_list, new_tab_item};
+use crate::screens::{
+    ALL_NAMESPACES, EDIT_YAML, ListShape, chosen_namespace, edit_item, empty_list, new_tab_item,
+    set_namespace_options,
+};
 use crate::theme::{INSPECTOR_RESOURCE, INSPECTOR_WORKLOAD, REASON_MIN, REASON_WEIGHT, SPACE_3};
 
-const ALL_NAMESPACES: &str = "All namespaces";
 const NAME_WEIGHT: f32 = 1.4;
 const NAME_MIN: Pixels = px(200.);
 const NAMESPACE_WIDTH: Pixels = px(130.);
@@ -172,10 +172,7 @@ impl ResourcesScreen {
             cx.new(|cx| FilterBar::new("resource-filter", window, cx).scope(namespaces.clone()));
         let subscriptions = vec![
             cx.subscribe(&namespaces, |this, select, _: &SelectEvent, cx| {
-                let label = select.read(cx).selected_label().cloned();
-                let choice = label
-                    .filter(|l| l.as_ref() != ALL_NAMESPACES)
-                    .map(|l| l.to_string());
+                let choice = chosen_namespace(select.read(cx));
                 this.choose_namespace(choice, cx);
             }),
             cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
@@ -260,25 +257,13 @@ impl ResourcesScreen {
             self.selected = Some((namespace, name));
         }
         self.rows = rows.to_vec();
-        let known = detail
-            .namespaces
-            .iter()
-            .map(|n| n.name.clone())
-            .chain(namespaces_of(&self.rows));
-        let mut options: Vec<SharedString> = vec![ALL_NAMESPACES.into()];
-        options.extend(
-            namespace_choices(known, self.namespace.as_deref())
-                .into_iter()
-                .map(SharedString::from),
+        let counts = namespace_counts(
+            detail.namespaces.iter().map(|ns| ns.name.as_str()),
+            self.rows.iter().map(|row| row.namespace.as_str()),
+            self.namespace.as_deref(),
         );
-        let current = self.namespace.clone();
-        self.namespaces.update(cx, |select, cx| {
-            select.set_options(options.clone(), cx);
-            let ix = current
-                .and_then(|ns| options.iter().position(|o| o.as_ref() == ns))
-                .unwrap_or_default();
-            select.set_selected(ix, cx);
-        });
+        let chosen = self.namespace.as_deref();
+        set_namespace_options(&self.namespaces, &counts, self.rows.len(), chosen, cx);
         self.refresh(cx);
     }
 

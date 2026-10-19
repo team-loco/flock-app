@@ -22,6 +22,7 @@ pub struct Select {
     id: SharedString,
     options: Vec<SharedString>,
     details: Vec<SharedString>,
+    counts: Vec<usize>,
     selected: usize,
     placeholder: SharedString,
     width: Pixels,
@@ -49,6 +50,7 @@ impl Select {
             id: id.into(),
             options,
             details: Vec::new(),
+            counts: Vec::new(),
             selected: 0,
             placeholder: SharedString::default(),
             width: MENU_WIDTH,
@@ -221,6 +223,15 @@ impl Select {
         cx.notify();
     }
 
+    pub fn set_counts(&mut self, counts: Vec<usize>, cx: &mut Context<Self>) {
+        self.counts = counts;
+        cx.notify();
+    }
+
+    fn count(&self, ix: usize) -> Option<SharedString> {
+        self.counts.get(ix).map(|count| count.to_string().into())
+    }
+
     fn detail(&self, ix: usize) -> Option<SharedString> {
         self.details
             .get(ix)
@@ -342,6 +353,7 @@ impl Select {
             })
             .child(div().truncate().child(label))
             .children(detail(self.detail(self.selected), palette))
+            .children(count(self.count(self.selected), palette))
             .children(chevron)
             .on_click(cx.listener(|this, _, window, cx| {
                 if this.dismissal.take_suppressed() {
@@ -350,6 +362,10 @@ impl Select {
                 this.toggle(window, cx);
             }))
     }
+}
+
+fn count(text: Option<SharedString>, palette: &Palette) -> Option<gpui::Div> {
+    text.map(|text| div().flex_none().text_color(palette.mute).child(text))
 }
 
 fn detail(text: Option<SharedString>, palette: &Palette) -> Option<gpui::Div> {
@@ -408,8 +424,9 @@ impl Render for Select {
                             this.choose(ix, window, cx);
                         }))
                         .gap(SPACE_4)
-                        .child(div().flex_none().child(option.clone()))
+                        .child(div().min_w_0().truncate().child(option.clone()))
                         .children(detail(self.detail(ix), &palette))
+                        .children(count(self.count(ix), &palette).map(Styled::ml_auto))
                         .into_any_element()
                 })
                 .collect();
