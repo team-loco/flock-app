@@ -2688,3 +2688,18 @@ fn the_metrics_source_is_picked_from_a_list_that_stays_inside_the_form() -> anyh
     assert_eq!(metrics, Some(MetricsSource::Prometheus));
     Ok(())
 }
+
+#[test]
+fn the_sidebar_header_and_page_header_read_as_one_row_over_one_content_edge() -> anyhow::Result<()>
+{
+    use flock_ui::theme::{ICON_BUTTON_INSET, SPACE_8};
+    let mut ui = Ui::open(Screen::Nodes)?;
+    let scope = bounds_of(&mut ui, "sidebar-scope")?;
+    let header = bounds_of(&mut ui, "page-header")?;
+    assert_eq!(scope.size.height, header.size.height);
+    assert_eq!(scope.center().y, header.center().y);
+    let back = bounds_of(&mut ui, "pane-0-back")?;
+    let meta = bounds_of(&mut ui, "meta-line")?;
+    assert_eq!(back.left() + ICON_BUTTON_INSET, meta.left() + SPACE_8);
+    Ok(())
+}

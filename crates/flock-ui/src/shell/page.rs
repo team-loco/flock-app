@@ -27,6 +27,7 @@ const UNAVAILABLE_REASON: &str =
     "It was removed from Flock or its kubeconfig context is gone, so this tab has nothing to show.";
 const SHOW_ALL_CLUSTERS: &str = "Show all clusters";
 const OVERVIEW_SETTINGS: &str = "overview-settings";
+const PAGE_HEADER_SELECTOR: &str = "page-header";
 const CLUSTER_SETTINGS: &str = "Cluster settings";
 
 impl Shell {
@@ -336,6 +337,7 @@ impl Shell {
         });
         let controls = cluster.and_then(|_| screens.pages.header_controls(location.page, cx));
         div()
+            .debug_selector(|| PAGE_HEADER_SELECTOR.to_owned())
             .flex()
             .items_center()
             .flex_none()

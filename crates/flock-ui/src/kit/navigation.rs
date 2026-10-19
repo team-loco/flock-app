@@ -8,7 +8,7 @@ use gpui::{
 
 use super::{ActionMenu, IconButton, MenuItem};
 use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
-use crate::theme::SPACE_2;
+use crate::theme::{ICON_BUTTON_INSET, SPACE_2};
 
 #[derive(Clone, Copy)]
 pub struct HistoryJump {
@@ -158,6 +158,7 @@ impl Render for HeaderNavigation {
         div()
             .flex()
             .flex_none()
+            .ml(-ICON_BUTTON_INSET)
             .child(div().flex().gap(SPACE_2).child(back).child(forward))
             .child(self.menu.clone())
     }
