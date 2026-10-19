@@ -304,6 +304,19 @@ impl Shell {
         self.palette.read(cx).is_open()
     }
 
+    pub fn pod_logs(&self, cx: &App) -> Option<(Vec<String>, String)> {
+        let (screen, _) = self.focused_screens().multi_logs.as_ref()?;
+        let view = screen.read(cx).view().read(cx);
+        let legend = view
+            .legend()
+            .iter()
+            .filter(|entry| !entry.hidden)
+            .map(|entry| entry.label.to_string())
+            .collect();
+        let text = view.logs().read(cx).export();
+        Some((legend, text))
+    }
+
     pub fn switcher_open(&self, cx: &App) -> bool {
         self.switcher.read(cx).is_open()
     }
@@ -530,6 +543,7 @@ impl Shell {
             Command::RemoveCluster(_) => {}
             Command::WatchWorkload { .. } => {}
             Command::StreamLogs(_) => {}
+            Command::StreamPodLogs(_) => {}
             Command::Exec(_) => {}
             Command::RestartRollout(_) => {}
             Command::Scale { .. } => {}

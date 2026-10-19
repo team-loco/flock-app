@@ -200,7 +200,7 @@ fn cancelling_a_confirm_dialog_leaves_the_state_unchanged() -> anyhow::Result<()
     let mut ui = Ui::open(Screen::Workload)?;
     let before = ui.state();
     ui.click("workload-actions")?;
-    ui.click("workload-actions-item-4")?;
+    ui.click("workload-actions-item-5")?;
     assert!(ui.bounds("dialog-cancel").is_some());
     ui.click("dialog-cancel")?;
     assert!(ui.bounds("dialog-cancel").is_none());
@@ -2476,5 +2476,116 @@ fn a_progress_toast_is_replaced_in_place_by_its_result() -> anyhow::Result<()> {
     assert_eq!(titles, ["Reconciled", "Other"]);
     let statuses = ui.read_app(toast_statuses);
     assert_eq!(statuses, [Status::Ok, Status::Ok]);
+    Ok(())
+}
+
+fn pod_logs(ui: &Ui) -> (Vec<String>, String) {
+    ui.read(Shell::pod_logs).unwrap_or_default()
+}
+
+#[test]
+fn a_workloads_logs_tab_merges_every_pod_in_time_order() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Logs)?;
+    ui.settle()?;
+    let state = ui.state();
+    assert_eq!(state.location().page, Page::Logs);
+    assert!(state.location().logs.is_some());
+    let (legend, text) = pod_logs(&ui);
+    assert!(legend.len() >= 2, "{legend:?}");
+    let times: Vec<&str> = text
+        .lines()
+        .filter_map(|line| line.split(' ').next())
+        .collect();
+    let mut sorted = times.clone();
+    sorted.sort_unstable();
+    assert_eq!(times, sorted);
+    for label in &legend {
+        assert!(text.contains(label.as_str()), "{label} has no lines");
+    }
+    ui.click("tab-pod-logs-source-0")?;
+    let (shown, filtered) = pod_logs(&ui);
+    assert_eq!(shown.len(), legend.len() - 1);
+    let hidden = legend.iter().find(|label| !shown.contains(label));
+    assert!(hidden.is_some_and(|label| !filtered.contains(&format!(" {label} "))));
+    ui.click("tab-pod-logs-source-0")?;
+    assert_eq!(pod_logs(&ui).0, legend);
+    Ok(())
+}
+
+#[test]
+fn pausing_the_merged_logs_holds_new_lines_until_resumed() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Logs)?;
+    ui.settle()?;
+    ui.click("tab-pod-logs-pause")?;
+    let held = pod_logs(&ui).1;
+    ui.advance_clock(std::time::Duration::from_secs(2))?;
+    assert_eq!(pod_logs(&ui).1, held);
+    ui.click("tab-pod-logs-pause")?;
+    ui.advance_clock(std::time::Duration::from_secs(1))?;
+    assert!(pod_logs(&ui).1.len() > held.len());
+    Ok(())
+}
+
+#[test]
+fn the_workload_menu_and_dock_follow_all_pods() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    ui.click("workload-actions")?;
+    ui.click("workload-actions-item-1")?;
+    assert_eq!(
+        ui.state()
+            .location()
+            .logs
+            .as_ref()
+            .map(flock_core::LogTarget::label),
+        Some("checkout-api".to_owned())
+    );
+    ui.click("tab-0")?;
+    assert_eq!(ui.state().location().page, Page::Deployments);
+    ui.click("logs-all-pods")?;
+    ui.settle()?;
+    assert!(ui.bounds("workload-pod-logs-legend").is_some());
+    assert!(ui.bounds("workload-pod-logs-source-0").is_some());
+    ui.click("logs-open-tab")?;
+    let state = ui.state();
+    assert_eq!(state.location().page, Page::Logs);
+    assert_eq!(
+        state
+            .location()
+            .logs
+            .as_ref()
+            .map(flock_core::LogTarget::label),
+        Some("checkout-api".to_owned())
+    );
+    Ok(())
+}
+
+#[test]
+fn shift_clicked_pods_open_one_merged_logs_tab() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    assert!(ui.bounds("pods-logs-selected").is_none());
+    ui.click("pods-row-0")?;
+    ui.shift_click("pods-row-1")?;
+    ui.click("pods-logs-selected")?;
+    let state = ui.state();
+    assert_eq!(state.location().page, Page::Logs);
+    let target = state.location().logs.clone();
+    assert!(
+        matches!(&target, Some(flock_core::LogTarget::Pods { pods, .. }) if pods.len() == 2),
+        "{target:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_label_filter_on_pods_offers_logs_for_the_selector() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.press("/")?;
+    ui.type_text("l:app=checkout-api ")?;
+    ui.click("pods-logs-selected")?;
+    let target = ui.state().location().logs.clone();
+    assert_eq!(
+        target.as_ref().map(flock_core::LogTarget::label),
+        Some("app=checkout-api".to_owned())
+    );
     Ok(())
 }

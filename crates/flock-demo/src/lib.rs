@@ -9,6 +9,7 @@ mod home;
 mod lists;
 #[cfg(feature = "loco")]
 mod loco;
+mod multi_logs;
 mod pod_streams;
 mod pods;
 mod resources;
@@ -89,6 +90,9 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
                 }
                 tracing::debug!(?command, "demo backend received command");
                 if pod_streams::handle(&command, &state, &workloads) {
+                    continue;
+                }
+                if multi_logs::handle(&command, &state) {
                     continue;
                 }
                 workloads.handle(&command);

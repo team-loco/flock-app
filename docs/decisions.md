@@ -248,3 +248,14 @@ Settled; change only with a new entry that says why.
     characters and names no other cluster. `prod-us-east` / `prod-eu-west` become `us-east` /
     `eu-west`; `fleet-a` / `fleet-b` keep their whole names. Tabs, Compare and the Changes lane
     headers all use it, and Changes lane columns widen to fit the name.
+35. **Merged pod logs** (#230, product owner): `Command::FollowLogs(LogTarget)` opens a `Logs <target>`
+    tab that streams every matching pod and container at once, stern-style. A target is a workload
+    (any controller kind, Jobs included, matched by the pod's controlling owner), a label selector
+    in a namespace (from a Pods label filter) or the pods ⇧-clicked on the Pods page. The backend
+    (`flock_kube::actions::multi_logs`) reads the always-on pod store every second: started
+    containers join, deleted pods leave, a restarted container is followed again, and at most
+    `MAX_STREAMS` log requests run at once per view. The UI merges lines by their RFC 3339
+    timestamp into a buffer of `MERGED_LINES` and colours each pod from a palette derived from the
+    theme. Entry points: the workload Actions menu (Logs for all pods), the workload dock's
+    `all pods` toggle, the Pods page (⇧-click rows or a label filter, then Logs for …) and the
+    palette's `Logs: follow all <workload> pods`, which opened the workload page before.

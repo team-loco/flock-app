@@ -16,6 +16,7 @@ pub mod home;
 pub mod id;
 #[cfg(feature = "loco")]
 pub mod loco;
+pub mod multilog;
 pub mod nav;
 pub mod nodes;
 pub mod notify;
@@ -51,6 +52,7 @@ pub use flux::{FluxAction, FluxKey, FluxKind, FluxObject, FluxPage};
 pub use gitops::GitOps;
 pub use home::FlockHome;
 pub use id::{ClusterId, ResourceRef, Seen, Uid};
+pub use multilog::{LogEvent, LogSource, LogTarget, MultiLogRequest, SourceId, Stamp};
 pub use nav::{CLUSTER_NAV, FLOCK_NAV, NavSection, Page};
 pub use resource::ResourceSummary;
 pub use resources::ResourceKind;

@@ -5,8 +5,8 @@ use crate::filter::{LabelMatch, label_matches, label_token, namespace_token};
 use crate::fuzzy::fuzzy;
 use crate::resource::{kind_info, kind_matches, kind_rank, short_kind};
 use crate::{
-    ClusterId, ClusterSummary, Command, FLOCK_NAV, Page, ResourceRef, ResourceSummary, Snapshot,
-    Status,
+    ClusterId, ClusterSummary, Command, FLOCK_NAV, LogTarget, Page, ResourceRef, ResourceSummary,
+    Snapshot, Status,
 };
 
 const MAX_RESOURCES: usize = 50;
@@ -394,7 +394,7 @@ fn workload_commands(snapshot: &Snapshot, hit: &Hit, summary: &ResourceSummary) 
     let mut commands = vec![command_hit(
         format!("Logs: follow all {} pods on {}", resource.name, hit.cluster),
         Some(LOGS_KEY),
-        Command::FollowLogs(resource.clone()),
+        Command::FollowLogs(LogTarget::Workload(resource.clone())),
     )];
     if elsewhere(snapshot, resource) {
         commands.push(command_hit(
@@ -663,7 +663,7 @@ mod tests {
             [
                 (
                     "Logs: follow all cart pods on a",
-                    Command::FollowLogs(deploy.clone())
+                    Command::FollowLogs(LogTarget::Workload(deploy.clone()))
                 ),
                 (
                     "Compare deploy/cart across clusters",

@@ -8,9 +8,10 @@ use gpui::{
 };
 
 use super::selectable::SelectableText;
+use crate::highlight::{SOURCE_COLORS, source_colors};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, LOG_LEVEL, LOG_LINE, LOG_TIMESTAMP, Palette, SPACE_3, SPACE_6,
-    TEXT_MONO, TEXT_UI,
+    ActiveTheme, FONT_MONO, LOG_LEVEL, LOG_LINE, LOG_SOURCE, LOG_TIMESTAMP, Palette, SPACE_3,
+    SPACE_6, TEXT_MONO, TEXT_UI,
 };
 
 pub const LOG_CAPACITY: usize = 10_000;
@@ -63,10 +64,17 @@ impl Level {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LineSource {
+    pub label: SharedString,
+    pub slot: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogLine {
     pub timestamp: Option<SharedString>,
     pub level: Option<Level>,
     pub message: SharedString,
+    pub source: Option<LineSource>,
 }
 
 impl LogLine {
@@ -79,15 +87,26 @@ impl LogLine {
             timestamp: timestamp.map(|t| SharedString::from(t.to_owned())),
             level,
             message: message.into(),
+            source: None,
         }
+    }
+
+    pub fn with_source(mut self, label: impl Into<SharedString>, slot: usize) -> Self {
+        self.source = Some(LineSource {
+            label: label.into(),
+            slot,
+        });
+        self
     }
 
     pub fn text(&self) -> String {
         let level = self.level.map(Level::label);
+        let source = self.source.as_ref().map(|source| source.label.as_ref());
         let parts: Vec<&str> = self
             .timestamp
             .as_deref()
             .into_iter()
+            .chain(source)
             .chain(level)
             .chain(std::iter::once(self.message.as_ref()))
             .collect();
@@ -113,6 +132,7 @@ impl LogLine {
             timestamp: timestamp.map(|t| SharedString::from(t.to_owned())),
             level,
             message: SharedString::from(message.to_owned()),
+            source: None,
         }
     }
 }
@@ -277,6 +297,7 @@ pub struct LogView {
     scroll: UniformListScrollHandle,
     wrap: bool,
     wrapped: ListState,
+    sources: Option<(Palette, [Hsla; SOURCE_COLORS])>,
 }
 
 impl LogView {
@@ -293,6 +314,40 @@ impl LogView {
             scroll: UniformListScrollHandle::new(),
             wrap: false,
             wrapped: ListState::new(0, ListAlignment::Top, WRAP_OVERDRAW),
+            sources: None,
+        }
+    }
+
+    pub fn set_lines(&mut self, lines: impl IntoIterator<Item = LogLine>, cx: &mut Context<Self>) {
+        self.buffer.clear();
+        self.extend(lines, cx);
+    }
+
+    pub fn set_highlight(&mut self, query: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.query = query.into();
+        cx.notify();
+    }
+
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
+    pub fn line(&self, ix: usize) -> Option<&LogLine> {
+        self.buffer.get(ix)
+    }
+
+    fn source_colors(&mut self, palette: &Palette) -> [Hsla; SOURCE_COLORS] {
+        match &self.sources {
+            Some((cached, colors)) if cached == palette => *colors,
+            _ => {
+                let colors = source_colors(palette);
+                self.sources = Some((*palette, colors));
+                colors
+            }
         }
     }
 
@@ -416,17 +471,36 @@ impl LogView {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let palette = *cx.palette();
+        let sources = self.source_colors(&palette);
         range
             .filter_map(|ix| {
                 self.buffer
                     .get(ix)
-                    .map(|line| self.render_line(ix, line, &palette))
+                    .map(|line| self.render_line(ix, line, &palette, &sources))
             })
             .collect()
     }
 
-    fn render_line(&self, ix: usize, line: &LogLine, palette: &Palette) -> AnyElement {
+    fn render_line(
+        &self,
+        ix: usize,
+        line: &LogLine,
+        palette: &Palette,
+        sources: &[Hsla; SOURCE_COLORS],
+    ) -> AnyElement {
         let colors = line_colors(line.level, self.levels, palette);
+        let source = line.source.as_ref().map(|source| {
+            let color = sources
+                .get(source.slot % SOURCE_COLORS)
+                .copied()
+                .unwrap_or(palette.fg2);
+            div()
+                .w(LOG_SOURCE)
+                .flex_none()
+                .truncate()
+                .text_color(color)
+                .child(source.label.clone())
+        });
         let highlight = HighlightStyle {
             background_color: Some(palette.accbg),
             color: Some(palette.fg),
@@ -455,6 +529,7 @@ impl LogView {
                         .children(line.timestamp.clone()),
                 )
             })
+            .children(source)
             .when(self.levels == Levels::Column, |row| {
                 row.child(
                     div()
@@ -482,9 +557,10 @@ impl Render for LogView {
                 self.wrapped.clone(),
                 cx.processor(|this, ix: usize, _, cx| {
                     let palette = *cx.palette();
+                    let sources = this.source_colors(&palette);
                     this.buffer.get(ix).map_or_else(
                         || div().into_any_element(),
-                        |line| this.render_line(ix, line, &palette),
+                        |line| this.render_line(ix, line, &palette, &sources),
                     )
                 }),
             )
@@ -548,6 +624,8 @@ mod tests {
     fn lines_export_as_plain_text() {
         let full = LogLine::new(Some("21:12:20.231"), Some(Level::Fatal), "exit 1");
         assert_eq!(full.text(), "21:12:20.231 FATAL exit 1");
+        let tagged = full.clone().with_source("x2lqp", 3);
+        assert_eq!(tagged.text(), "21:12:20.231 x2lqp FATAL exit 1");
         assert_eq!(
             LogLine::new(None, None, "── exited ──").text(),
             "── exited ──"

@@ -7,6 +7,10 @@ pub const TEXT_CONTRAST: f32 = 4.5;
 pub const GLYPH_CONTRAST: f32 = 3.;
 
 const DEGREES: f32 = 360.;
+const SOURCE_HUES: [f32; 8] = [215., 35., 150., 290., 185., 330., 80., 255.];
+pub const SOURCE_COLORS: usize = SOURCE_HUES.len();
+const SOURCE_SATURATION: f32 = 0.7;
+const LIGHT_EDITOR: f32 = 0.5;
 const PURPLE: (f32, f32) = (265., 0.85);
 const TEAL: (f32, f32) = (182., 0.7);
 const GREEN: (f32, f32) = (145., 0.6);
@@ -201,6 +205,25 @@ fn secondary(palette: &mut Palette, seed: Seed, appearance: Appearance) {
     palette.selfg = selfg;
 }
 
+pub fn source_colors(palette: &Palette) -> [Hsla; SOURCE_COLORS] {
+    let toward = if palette.editor.l > LIGHT_EDITOR {
+        Appearance::Dark
+    } else {
+        Appearance::Light
+    };
+    let grounds = [
+        palette.editor,
+        over(palette.errbg, palette.editor),
+        palette.sel,
+    ];
+    SOURCE_HUES.map(|degrees| {
+        let start = hsla(degrees / DEGREES, SOURCE_SATURATION, palette.acc.l, 1.);
+        until(start, toward, |color| {
+            readable(color, &grounds, TEXT_CONTRAST)
+        })
+    })
+}
+
 pub fn apply(
     mut palette: Palette,
     appearance: Appearance,
@@ -307,6 +330,37 @@ mod tests {
                         failed.is_empty(),
                         "{appearance:?} {accent:?}/{selection:?}: {failed:#?}"
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pod_colours_are_legible_and_distinct_in_every_mode_and_highlight() {
+        for appearance in APPEARANCES {
+            for accent in choices() {
+                for selection in choices() {
+                    let palette = apply(base(appearance), appearance, accent, selection);
+                    let colors = source_colors(&palette);
+                    let grounds = [
+                        palette.editor,
+                        over(palette.errbg, palette.editor),
+                        palette.sel,
+                    ];
+                    for color in colors {
+                        for ground in grounds {
+                            let got = contrast(color, ground);
+                            assert!(
+                                got >= TEXT_CONTRAST,
+                                "{appearance:?} {accent:?}/{selection:?}: {got:.2}"
+                            );
+                        }
+                    }
+                    for (ix, a) in colors.iter().enumerate() {
+                        for b in colors.iter().skip(ix + 1) {
+                            assert!((a.h - b.h).abs() > f32::EPSILON);
+                        }
+                    }
                 }
             }
         }

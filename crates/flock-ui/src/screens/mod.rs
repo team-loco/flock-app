@@ -10,6 +10,7 @@ mod flux_list;
 pub(crate) mod flux_object;
 pub mod gitops;
 pub mod logs;
+pub mod multilog;
 mod namespaces;
 mod nodes;
 mod overview;

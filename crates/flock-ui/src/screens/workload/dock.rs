@@ -3,12 +3,12 @@ use std::ops::Range;
 
 use flock_core::workload::{Event, Pod};
 use flock_core::{
-    Command, ExecEvent, ExecRequest, ExecTarget, LogLevel, LogRequest, ResourceRef, Sink, Source,
-    TermSize, Workload,
+    Command, ExecEvent, ExecRequest, ExecTarget, LogLevel, LogRequest, LogTarget, ResourceRef,
+    Sink, Source, TermSize, Workload,
 };
 use gpui::{
-    AnyElement, Context, Entity, Focusable, IntoElement, ParentElement, Pixels, Styled,
-    Subscription, Window, div, px, uniform_list,
+    AnyElement, AppContext as _, Context, Entity, Focusable, IntoElement, ParentElement, Pixels,
+    Styled, Subscription, Window, div, px, uniform_list,
 };
 
 use super::{WorkloadScreen, logs_tab_label};
@@ -17,6 +17,7 @@ use crate::kit::{
     Button, Dock, DockState, DockTab, InputEvent, Level, LogLine, LogView, Segmented, Terminal,
     TerminalEvent, TextField, TextFieldState,
 };
+use crate::screens::multilog::MultiLogs;
 use crate::theme::{
     ActiveTheme, FONT_MONO, LOG_LINE, Palette, SPACE_3, SPACE_4, SPACE_5, SPACE_6, TEXT_GLYPH,
     TEXT_MONO,
@@ -33,6 +34,8 @@ const EXEC: &str = "shell";
 const FOLLOW: &str = "follow";
 const WRAP: &str = "wrap";
 const OPEN_IN_TAB: &str = "Open logs in tab";
+const ALL_PODS: &str = "all pods";
+const ALL_PODS_DETAIL: &str = "all pods";
 const DEBUG_IMAGE: &str = "busybox:1.36";
 const POD_KIND: &str = "Pod";
 
@@ -259,6 +262,49 @@ impl WorkloadScreen {
         if debug { DEBUG } else { EXEC }
     }
 
+    fn toggle_all_pods(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.all_pods.take().is_some() {
+            cx.notify();
+            return;
+        }
+        let target = LogTarget::Workload(self.target.clone());
+        let view = cx.new(|cx| MultiLogs::new("workload-pod-logs", target, window, cx));
+        let subscription = cx.subscribe(&view, |_, _, command: &Command, cx| {
+            cx.emit(command.clone());
+        });
+        view.update(cx, MultiLogs::watch);
+        self.all_pods = Some((view, subscription));
+        cx.notify();
+    }
+
+    fn all_pods_tools(
+        &self,
+        view: &Entity<MultiLogs>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let tools = view.update(cx, |view, cx| view.tools(cx).into_any_element());
+        let target = LogTarget::Workload(self.target.clone());
+        div()
+            .flex()
+            .items_center()
+            .gap(SPACE_3)
+            .child(tools)
+            .child(
+                Button::new("logs-all-pods", ALL_PODS)
+                    .small()
+                    .selected(true)
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_all_pods(window, cx))),
+            )
+            .child(
+                Button::new("logs-open-tab", OPEN_IN_TAB)
+                    .small()
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        let open = Command::FollowLogs(target.clone());
+                        cx.emit(Command::NewTab(Box::new(open)));
+                    })),
+            )
+    }
+
     fn log_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let follow = self.logs.read(cx).follow();
         let wrap = self.logs.read(cx).wrap();
@@ -285,6 +331,12 @@ impl WorkloadScreen {
                         this.logs.update(cx, |logs, cx| logs.set_wrap(!wrap, cx));
                         cx.notify();
                     })),
+            )
+            .child(
+                Button::new("logs-all-pods", ALL_PODS)
+                    .small()
+                    .selected(false)
+                    .on_click(cx.listener(|this, _, window, cx| this.toggle_all_pods(window, cx))),
             )
             .child(
                 Button::new("logs-open-tab", OPEN_IN_TAB)
@@ -362,13 +414,18 @@ impl WorkloadScreen {
             _ => String::new(),
         };
         let events = Self::events_pane(workload.events.len(), cx);
+        let logs_tab = match self.all_pods.as_ref().map(|(view, _)| view.clone()) {
+            Some(view) => DockTab::new(LOGS_LABEL)
+                .detail(ALL_PODS_DETAIL)
+                .tools(self.all_pods_tools(&view, cx).into_any_element())
+                .content(view),
+            None => DockTab::new(LOGS_LABEL)
+                .detail(logs_detail)
+                .tools(self.log_tools(cx).into_any_element())
+                .content(self.logs.clone()),
+        };
         Dock::new(&self.dock)
-            .tab(
-                DockTab::new(LOGS_LABEL)
-                    .detail(logs_detail)
-                    .tools(self.log_tools(cx))
-                    .content(self.logs.clone()),
-            )
+            .tab(logs_tab)
             .tab(
                 DockTab::new(EVENTS_LABEL)
                     .detail(workload.events.len().to_string())

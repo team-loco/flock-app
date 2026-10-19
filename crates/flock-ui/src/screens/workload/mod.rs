@@ -6,7 +6,7 @@ pub(crate) use dock::kit_line;
 use flock_core::palette::COMPARE_KEY;
 use flock_core::watch::WATCH_SYNC_TIMEOUT;
 use flock_core::workload::{ContainerSpec, EnvVar, Pod, Revision, short_image, short_pod_name};
-use flock_core::{Command, ResourceRef, Seen, Sink, Status, Workload};
+use flock_core::{Command, LogTarget, ResourceRef, Seen, Sink, Status, Workload};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
@@ -82,6 +82,8 @@ const SCALE_INVALID: &str = "Replicas must be a whole number";
 const ROLLBACK_DESCRIPTION: &str = "Flux re-applies git on the next reconcile unless";
 const ROLLBACK_SUFFIX: &str = "is suspended.";
 const LOGS_ITEM: &str = "Logs";
+const ALL_LOGS_ITEM: &str = "Logs for all pods";
+const ALL_LOGS_DESCRIPTION: &str = "Merge every pod's output, colour-coded, in a new tab.";
 const SHELL_ITEM: &str = "Shell into pod";
 const LOGS_KEYS: &str = "⌘L";
 const SHELL_KEYS: &str = "⌃`";
@@ -114,6 +116,7 @@ pub struct WorkloadScreen {
     watch_task: Option<Task<()>>,
     deadline: Option<Task<()>>,
     log_task: Option<Task<()>>,
+    all_pods: Option<(Entity<crate::screens::multilog::MultiLogs>, Subscription)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -191,6 +194,7 @@ impl WorkloadScreen {
             watch_task: None,
             deadline: None,
             log_task: None,
+            all_pods: None,
             _subscriptions: subscriptions,
         }
     }
@@ -359,6 +363,15 @@ impl WorkloadScreen {
                 }
             })
             .shortcut(LOGS_KEYS),
+            MenuItem::new(ALL_LOGS_ITEM, {
+                let this = this.clone();
+                let target = LogTarget::Workload(workload.target.clone());
+                move |_, cx| {
+                    let command = Command::NewTab(Box::new(Command::FollowLogs(target.clone())));
+                    this.update(cx, |_, cx| cx.emit(command)).ok();
+                }
+            })
+            .description(ALL_LOGS_DESCRIPTION),
             MenuItem::new(SHELL_ITEM, {
                 let this = this.clone();
                 move |window, cx| {

@@ -418,6 +418,7 @@ pub fn changed_statuses(
 pub enum TableEvent {
     Selected(usize),
     Opened(usize),
+    Marked,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -441,6 +442,7 @@ pub struct Table<R: 'static> {
     order: Vec<usize>,
     sort: Option<(usize, SortDirection)>,
     selected: Option<usize>,
+    marked: Option<Vec<SharedString>>,
     row_height: Pixels,
     column_gap: Pixels,
     inset: Pixels,
@@ -487,6 +489,7 @@ impl<R: 'static> Table<R> {
             order: Vec::new(),
             sort: None,
             selected: None,
+            marked: None,
             row_height: ROW_TABLE,
             column_gap: SPACE_6,
             inset: SPACE_8,
@@ -791,6 +794,60 @@ impl<R: 'static> Table<R> {
         self
     }
 
+    pub fn multi_select(mut self) -> Self {
+        self.marked = Some(Vec::new());
+        self
+    }
+
+    pub fn marked_rows(&self) -> Vec<&R> {
+        let (Some(key), Some(marked)) = (&self.key, &self.marked) else {
+            return Vec::new();
+        };
+        self.order
+            .iter()
+            .filter_map(|&ix| self.rows.get(ix))
+            .filter(|row| marked.contains(&key(row)))
+            .collect()
+    }
+
+    pub fn clear_marks(&mut self, cx: &mut Context<Self>) {
+        if let Some(marked) = self.marked.as_mut().filter(|marked| !marked.is_empty()) {
+            marked.clear();
+            cx.emit(TableEvent::Marked);
+            cx.notify();
+        }
+    }
+
+    fn is_marked(&self, row: &R) -> bool {
+        let (Some(key), Some(marked)) = (&self.key, &self.marked) else {
+            return false;
+        };
+        marked.contains(&key(row))
+    }
+
+    fn toggle_mark(&mut self, row: usize) {
+        let Some(key) = self.key.clone() else {
+            return;
+        };
+        let current = self
+            .selected_row()
+            .filter(|_| self.selected != Some(row))
+            .map(|r| key(r));
+        let clicked = self.rows.get(row).map(|r| key(r));
+        let (Some(marked), Some(clicked)) = (self.marked.as_mut(), clicked) else {
+            return;
+        };
+        if marked.is_empty() {
+            marked.extend(current);
+        }
+        match marked.iter().position(|marked| marked == &clicked) {
+            Some(at) => {
+                marked.remove(at);
+            }
+            None => marked.push(clicked),
+        }
+    }
+
     pub fn row_key(mut self, key: impl Fn(&R) -> SharedString + 'static) -> Self {
         self.key = Some(Rc::new(key));
         self
@@ -846,6 +903,10 @@ impl<R: 'static> Table<R> {
             (Some(wanted), Some(key)) => self.rows.iter().position(|row| key(row) == wanted),
             _ => self.selected.filter(|&ix| ix < self.rows.len()),
         };
+        if let (Some(key), Some(marked)) = (&self.key, self.marked.as_mut()) {
+            let keys: Vec<SharedString> = self.rows.iter().map(|row| key(row)).collect();
+            marked.retain(|marked| keys.contains(marked));
+        }
         self.resort();
         cx.notify();
     }
@@ -915,6 +976,18 @@ impl<R: 'static> Table<R> {
             return;
         }
         window.focus(&self.focus, cx);
+        if self.marked.is_some() && event.modifiers().shift {
+            self.toggle_mark(row);
+            self.selected = Some(row);
+            cx.emit(TableEvent::Selected(row));
+            cx.emit(TableEvent::Marked);
+            cx.notify();
+            return;
+        }
+        if let Some(marked) = self.marked.as_mut().filter(|marked| !marked.is_empty()) {
+            marked.clear();
+            cx.emit(TableEvent::Marked);
+        }
         self.selected = Some(row);
         cx.emit(TableEvent::Selected(row));
         let new_tab = event.modifiers().platform;
@@ -1073,7 +1146,7 @@ impl<R: 'static> Table<R> {
                 .child(content)
                 .into_any_element();
         }
-        let selected = self.selected == Some(ix);
+        let selected = self.selected == Some(ix) || self.is_marked(row);
         let status = self.status.as_ref().and_then(|status| status(row));
         let tint = status.and_then(|status| palette.tint(status));
         let hover = palette.hover;

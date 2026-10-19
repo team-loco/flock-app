@@ -13,6 +13,7 @@ use super::Shell;
 use crate::kit::{Button, EmptyState, Skeleton, status_symbols};
 use crate::screens::add_cluster::empty_flock;
 use crate::screens::logs::LogsScreen;
+use crate::screens::multilog::MultiLogsScreen;
 use crate::screens::workload::WorkloadScreen;
 use crate::theme::{
     ActiveTheme, FONT_MONO, PAGE_HEADER, Palette, RULE, SPACE_2, SPACE_4, SPACE_5, SPACE_7,
@@ -47,21 +48,15 @@ impl Shell {
         if crate::screens::loco::owns(location.page) {
             return self.screens(ix).loco.clone().into_any_element();
         }
+        if let Some(screen) = self.multi_logs_screen(ix, &location, window, cx) {
+            self.screens_mut(ix).logs = None;
+            return fill(screen);
+        }
         if let Some(screen) = self.logs_screen(ix, &location, window, cx) {
-            return div()
-                .flex_1()
-                .min_w_0()
-                .h_full()
-                .child(screen)
-                .into_any_element();
+            return fill(screen);
         }
         if let Some(screen) = self.workload_screen(ix, &location, window, cx) {
-            return div()
-                .flex_1()
-                .min_w_0()
-                .h_full()
-                .child(screen)
-                .into_any_element();
+            return fill(screen);
         }
         let palette = *cx.palette();
         let screens = self.screens(ix);
@@ -206,6 +201,47 @@ impl Shell {
             screen.watch(cx);
         });
         self.screens_mut(ix).logs = Some((screen.clone(), subscription));
+        Some(screen)
+    }
+
+    fn multi_logs_screen(
+        &mut self,
+        ix: usize,
+        location: &Location,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<MultiLogsScreen>> {
+        let pane = self.screens(ix).pane;
+        let target = location
+            .logs
+            .clone()
+            .filter(|_| location.page == Page::Logs);
+        let Some(target) = target else {
+            self.screens_mut(ix).multi_logs = None;
+            return None;
+        };
+        let compact = self.panes.len() > 1;
+        let current = self
+            .screens(ix)
+            .multi_logs
+            .as_ref()
+            .filter(|(screen, _)| screen.read(cx).shows(&target, cx))
+            .map(|(screen, _)| screen.clone());
+        if let Some(screen) = current {
+            screen.update(cx, |screen, cx| screen.set_compact(compact, cx));
+            return Some(screen);
+        }
+        let screen = cx.new(|cx| MultiLogsScreen::new(target, window, cx));
+        let navigation = self.screens(ix).navigation.clone();
+        screen.update(cx, |screen, _| screen.navigation = Some(navigation));
+        let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
+            shell.pane_command(pane, command.clone(), cx);
+        });
+        screen.update(cx, |screen, cx| {
+            screen.set_compact(compact, cx);
+            screen.watch(cx);
+        });
+        self.screens_mut(ix).multi_logs = Some((screen.clone(), subscription));
         Some(screen)
     }
 
@@ -360,6 +396,15 @@ impl Shell {
             .child(div().text_color(palette.fg2).child(scope))
             .into_any_element()
     }
+}
+
+fn fill(screen: impl IntoElement) -> AnyElement {
+    div()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .child(screen)
+        .into_any_element()
 }
 
 fn note_parts(counts: &Counts, text: String, palette: &Palette) -> Vec<(String, gpui::Hsla)> {

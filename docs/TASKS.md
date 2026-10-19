@@ -97,3 +97,4 @@ Spec column points at `design/`.
 | SETTINGS | Open Cluster settings on the cluster each link came from (#219) | claude | settings-cluster-context | done |
 | FILTER | Clear filter placeholder, namespace/label completion and removable tokens (#189) | claude | filter-bar-ux | done |
 | C185 | Linux e2e coverage and restart rollback revision selection (#185, #186) | codex | fix-ci-e2e-rollback | done (#195) |
+| MLOG | multi-pod log streaming: merged, colour-coded, legend toggles, pause, pods join and leave (#230) | claude | multi-pod-logs | done |
