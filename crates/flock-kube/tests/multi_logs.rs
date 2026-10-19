@@ -17,11 +17,11 @@ use serde_json::json;
 mod common;
 
 use common::kubeconfig::kind_only_home;
+use common::scratch::ScratchNamespace;
 use common::{WAIT, eventually};
 
 const E2E_VAR: &str = "FLOCK_E2E";
 const CONTEXT: &str = "kind-fleet-a";
-const NAMESPACE: &str = "default";
 const DEPLOYMENT: &str = "flock-multilog-e2e";
 const IMAGE: &str = "busybox:1.37";
 const REPLICAS: i32 = 2;
@@ -43,7 +43,7 @@ fn deployment() -> Deployment {
     let Ok(deployment) = serde_json::from_value(json!({
         "apiVersion": "apps/v1",
         "kind": "Deployment",
-        "metadata": { "name": DEPLOYMENT, "namespace": NAMESPACE },
+        "metadata": { "name": DEPLOYMENT },
         "spec": {
             "replicas": REPLICAS,
             "selector": { "matchLabels": { "app": DEPLOYMENT } },
@@ -163,7 +163,8 @@ async fn multi_pod_logs_follow_a_deployment_as_it_scales() {
     let Ok(client) = handle.client() else {
         panic!("client after connect");
     };
-    let api: Api<Deployment> = Api::namespaced(client, NAMESPACE);
+    let scratch = ScratchNamespace::create(&[(CONTEXT, &client)]).await;
+    let api: Api<Deployment> = Api::namespaced(client, scratch.name());
     let _ = api.delete(DEPLOYMENT, &DeleteParams::default()).await;
     eventually(
         "previous deployment gone",
@@ -178,7 +179,7 @@ async fn multi_pod_logs_follow_a_deployment_as_it_scales() {
     let target = LogTarget::Workload(ResourceRef {
         cluster: ClusterId::new(CONTEXT),
         kind: "Deployment".into(),
-        namespace: Some(NAMESPACE.into()),
+        namespace: Some(scratch.name().into()),
         name: DEPLOYMENT.into(),
     });
     let request = MultiLogRequest { target, sink };

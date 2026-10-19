@@ -24,6 +24,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 mod common;
 
 use common::kubeconfig::kind_only_home;
+use common::scratch::ScratchNamespace;
 use common::{WAIT, eventually};
 
 const E2E_VAR: &str = "FLOCK_E2E";
@@ -34,7 +35,6 @@ const PODINFO: &str = "podinfo";
 const PODINFO_SELECTOR: &str = "app.kubernetes.io/name=podinfo";
 const PODINFO_CONTAINER: &str = "podinfo";
 const PODINFO_PORT: u16 = 9898;
-const DEBUG_NAMESPACE: &str = "default";
 const DEBUG_POD: &str = "flock-actions-e2e";
 const DEBUG_IMAGE: &str = "busybox:1.37";
 const ECHO_MARKER: &str = "flock-e2e-exec";
@@ -69,10 +69,28 @@ fn kind_context(name: &str) -> Option<KubeContext> {
 }
 
 struct Harness {
-    _home: tempfile::TempDir,
+    scratch: ScratchNamespace,
+    home: tempfile::TempDir,
     commands: Sender<Command>,
     updates: Receiver<Update>,
     client: Client,
+}
+
+async fn client_in(kubeconfig: &std::path::Path, name: &str) -> Client {
+    let options = KubeConfigOptions {
+        context: Some(name.to_owned()),
+        ..KubeConfigOptions::default()
+    };
+    let Ok(kubeconfig) = Kubeconfig::read_from(kubeconfig) else {
+        panic!("kind kubeconfig");
+    };
+    let Ok(config) = Config::from_custom_kubeconfig(kubeconfig, &options).await else {
+        panic!("{name} client config");
+    };
+    let Ok(client) = Client::try_from(config) else {
+        panic!("{name} client");
+    };
+    client
 }
 
 fn cluster() -> ClusterId {
@@ -107,19 +125,14 @@ impl Harness {
             })
             .collect();
         let home = kind_only_home(&contexts);
-        let options = KubeConfigOptions {
-            context: Some(CONTEXT.to_owned()),
-            ..KubeConfigOptions::default()
-        };
-        let Ok(kubeconfig) = Kubeconfig::read_from(home.path().join(".kube").join("config")) else {
-            panic!("kind kubeconfig");
-        };
-        let Ok(config) = Config::from_custom_kubeconfig(kubeconfig, &options).await else {
-            panic!("kind client config");
-        };
-        let Ok(client) = Client::try_from(config) else {
-            panic!("kind client");
-        };
+        let file = home.path().join(".kube").join("config");
+        let mut clients = Vec::new();
+        for name in names {
+            clients.push((*name, client_in(&file, name).await));
+        }
+        let clusters: Vec<(&str, &Client)> = clients.iter().map(|(name, c)| (*name, c)).collect();
+        let scratch = ScratchNamespace::create(&clusters).await;
+        let client = client_in(&file, CONTEXT).await;
         let sources = DiscoverySources {
             kubeconfig_env: None,
             home: Some(home.path().to_path_buf()),
@@ -142,7 +155,8 @@ impl Harness {
         let (commands, commands_rx) = async_channel::unbounded();
         Box::new(backend).start(updates_tx, commands_rx);
         let harness = Self {
-            _home: home,
+            scratch,
+            home,
             commands,
             updates,
             client,
@@ -155,6 +169,10 @@ impl Harness {
             })
             .await;
         Some(harness)
+    }
+
+    fn namespace(&self) -> &str {
+        self.scratch.name()
     }
 
     fn send(&self, command: Command) {
@@ -364,7 +382,7 @@ fn debug_pod() -> Pod {
     let Ok(pod) = serde_json::from_value(json!({
         "apiVersion": "v1",
         "kind": "Pod",
-        "metadata": { "name": DEBUG_POD, "namespace": DEBUG_NAMESPACE },
+        "metadata": { "name": DEBUG_POD },
         "spec": {
             "terminationGracePeriodSeconds": 0,
             "containers": [{
@@ -402,10 +420,10 @@ async fn debug_shell_attaches_an_ephemeral_container() {
     let Some(harness) = Harness::start().await else {
         return;
     };
-    let pods: Api<Pod> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let pods: Api<Pod> = Api::namespaced(harness.client.clone(), harness.namespace());
     recreate(&pods).await;
     let target = ExecTarget {
-        pod: resource("Pod", Some(DEBUG_NAMESPACE), DEBUG_POD),
+        pod: resource("Pod", Some(harness.namespace()), DEBUG_POD),
         container: "main".into(),
         debug_image: Some(DEBUG_IMAGE.into()),
     };
@@ -706,7 +724,7 @@ async fn restart_and_rollback(harness: &Harness, deployments: &Api<Deployment>) 
     let Some(original) = template_of(deployments, SCRATCH_ROLLBACK).await else {
         panic!("scratch template");
     };
-    let sets: Api<ReplicaSet> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let sets: Api<ReplicaSet> = Api::namespaced(harness.client.clone(), harness.namespace());
     eventually(
         "initial replica set revision",
         || async { sets.list(&ListParams::default()).await.ok() },
@@ -726,7 +744,7 @@ async fn restart_and_rollback(harness: &Harness, deployments: &Api<Deployment>) 
         },
     )
     .await;
-    let target = resource("Deployment", Some(DEBUG_NAMESPACE), SCRATCH_ROLLBACK);
+    let target = resource("Deployment", Some(harness.namespace()), SCRATCH_ROLLBACK);
     let target = seen_by(&harness.client, APPS_V1, target).await;
     harness.send(Command::RestartRollout(target.clone()));
     eventually(
@@ -753,7 +771,7 @@ async fn restart_then_roll_back_to_the_original_template() {
     let Some(harness) = Harness::start().await else {
         return;
     };
-    let deployments: Api<Deployment> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let deployments: Api<Deployment> = Api::namespaced(harness.client.clone(), harness.namespace());
     let _ = deployments
         .delete(SCRATCH_ROLLBACK, &DeleteParams::default())
         .await;
@@ -798,8 +816,8 @@ async fn stateful_image(sets: &Api<StatefulSet>) -> Option<String> {
     set.spec?.template.spec?.containers.first()?.image.clone()
 }
 
-async fn revisions_of(client: &Client) -> usize {
-    let history: Api<ControllerRevision> = Api::namespaced(client.clone(), DEBUG_NAMESPACE);
+async fn revisions_of(client: &Client, namespace: &str) -> usize {
+    let history: Api<ControllerRevision> = Api::namespaced(client.clone(), namespace);
     let listed = history.list(&ListParams::default()).await;
     listed.map_or(0, |list| {
         list.items
@@ -820,7 +838,7 @@ async fn stateful_set_rolls_back_through_controller_revisions() {
     let Some(harness) = Harness::start().await else {
         return;
     };
-    let sets: Api<StatefulSet> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let sets: Api<StatefulSet> = Api::namespaced(harness.client.clone(), harness.namespace());
     let _ = sets
         .delete(SCRATCH_STATEFUL_SET, &DeleteParams::default())
         .await;
@@ -836,7 +854,7 @@ async fn stateful_set_rolls_back_through_controller_revisions() {
     assert!(created.is_ok(), "{created:?}");
     eventually(
         "first revision",
-        || revisions_of(&harness.client),
+        || revisions_of(&harness.client, harness.namespace()),
         |count| *count == 1,
     )
     .await;
@@ -851,11 +869,15 @@ async fn stateful_set_rolls_back_through_controller_revisions() {
     assert!(patched.is_ok(), "{patched:?}");
     eventually(
         "second revision",
-        || revisions_of(&harness.client),
+        || revisions_of(&harness.client, harness.namespace()),
         |count| *count == 2,
     )
     .await;
-    let target = resource("StatefulSet", Some(DEBUG_NAMESPACE), SCRATCH_STATEFUL_SET);
+    let target = resource(
+        "StatefulSet",
+        Some(harness.namespace()),
+        SCRATCH_STATEFUL_SET,
+    );
     let target = seen_by(&harness.client, APPS_V1, target).await;
     harness.send(Command::Rollback {
         target,
@@ -872,26 +894,6 @@ async fn stateful_set_rolls_back_through_controller_revisions() {
         .delete(SCRATCH_STATEFUL_SET, &DeleteParams::default())
         .await;
     assert!(deleted.is_ok(), "{deleted:?}");
-}
-
-async fn client_for(name: &str) -> Client {
-    let options = KubeConfigOptions {
-        context: Some(name.to_owned()),
-        ..KubeConfigOptions::default()
-    };
-    let Some(context) = kind_context(name) else {
-        panic!("{name} context");
-    };
-    let Ok(kubeconfig) = Kubeconfig::read_from(&context.id.file) else {
-        panic!("kubeconfig readable");
-    };
-    let Ok(config) = Config::from_custom_kubeconfig(kubeconfig, &options).await else {
-        panic!("{name} client config");
-    };
-    let Ok(client) = Client::try_from(config) else {
-        panic!("{name} client");
-    };
-    client
 }
 
 fn scratch_deployment(name: &str, image: &str) -> Deployment {
@@ -941,7 +943,7 @@ async fn recreate_scratch(deployments: &Api<Deployment>, image: &str) {
 async fn compare_and_apply(harness: &Harness, ours: &Api<Deployment>, theirs: &Api<Deployment>) {
     recreate_scratch(ours, DEBUG_IMAGE).await;
     recreate_scratch(theirs, NEWER_IMAGE).await;
-    let target = resource("Deployment", Some(DEBUG_NAMESPACE), SCRATCH_DEPLOYMENT);
+    let target = resource("Deployment", Some(harness.namespace()), SCRATCH_DEPLOYMENT);
     harness.send(Command::Compare(target.clone()));
     let snapshot = harness
         .snapshot_until(|snapshot| {
@@ -988,9 +990,10 @@ async fn compare_diffs_two_clusters_and_applies_the_other_template() {
     let Some(harness) = Harness::start_with(&[CONTEXT, OTHER_CONTEXT]).await else {
         return;
     };
-    let ours: Api<Deployment> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
-    let other_client = client_for(OTHER_CONTEXT).await;
-    let theirs: Api<Deployment> = Api::namespaced(other_client, DEBUG_NAMESPACE);
+    let ours: Api<Deployment> = Api::namespaced(harness.client.clone(), harness.namespace());
+    let file = harness.home.path().join(".kube").join("config");
+    let other_client = client_in(&file, OTHER_CONTEXT).await;
+    let theirs: Api<Deployment> = Api::namespaced(other_client, harness.namespace());
     let outcome = AssertUnwindSafe(compare_and_apply(&harness, &ours, &theirs))
         .catch_unwind()
         .await;
@@ -1044,7 +1047,7 @@ async fn delete_waits_until_the_object_is_gone() {
     let Some(harness) = Harness::start().await else {
         return;
     };
-    let configmaps: Api<ConfigMap> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let configmaps: Api<ConfigMap> = Api::namespaced(harness.client.clone(), harness.namespace());
     let Ok(scratch) = serde_json::from_value::<ConfigMap>(json!({
         "metadata": { "name": SCRATCH_CONFIGMAP },
         "data": { "key": "value" }
@@ -1052,7 +1055,7 @@ async fn delete_waits_until_the_object_is_gone() {
         panic!("configmap fixture");
     };
     let _ = configmaps.create(&PostParams::default(), &scratch).await;
-    let target = resource("ConfigMap", Some(DEBUG_NAMESPACE), SCRATCH_CONFIGMAP);
+    let target = resource("ConfigMap", Some(harness.namespace()), SCRATCH_CONFIGMAP);
     let target = seen_by(&harness.client, CORE_V1, target).await;
     harness.send(Command::Delete(target));
     eventually(
@@ -1135,7 +1138,7 @@ async fn a_delete_confirmed_for_a_replaced_object_leaves_the_new_one() {
     let Some(harness) = Harness::start().await else {
         return;
     };
-    let configmaps: Api<ConfigMap> = Api::namespaced(harness.client.clone(), DEBUG_NAMESPACE);
+    let configmaps: Api<ConfigMap> = Api::namespaced(harness.client.clone(), harness.namespace());
     let Ok(scratch) = serde_json::from_value::<ConfigMap>(json!({
         "metadata": { "name": SCRATCH_REPLACED },
         "data": { "key": "value" }
@@ -1147,7 +1150,7 @@ async fn a_delete_confirmed_for_a_replaced_object_leaves_the_new_one() {
         .await;
     let created = configmaps.create(&PostParams::default(), &scratch).await;
     assert!(created.is_ok(), "{created:?}");
-    let target = resource("ConfigMap", Some(DEBUG_NAMESPACE), SCRATCH_REPLACED);
+    let target = resource("ConfigMap", Some(harness.namespace()), SCRATCH_REPLACED);
     let seen = seen_by(&harness.client, CORE_V1, target).await;
     let deleted = configmaps
         .delete(SCRATCH_REPLACED, &DeleteParams::default())
