@@ -356,7 +356,7 @@ impl Gallery {
                 Button::new("reconcile", "Reconcile")
                     .primary()
                     .shortcut("⌘R")
-                    .on_click(|_, _, cx| toast(Toast::new(Status::Progress, "Reconciling apps-payments"), cx)),
+                    .on_click(|_, _, cx| toast(Toast::new(Status::Progress, "Reconciling apps-payments").key("reconcile"), cx)),
             )
             .action(self.more.clone())
             .sentence(
@@ -633,7 +633,8 @@ impl Gallery {
                 Button::new("toast-err", "Error toast").on_click(|_, _, cx| {
                     toast(
                         Toast::new(Status::Err, "Reconcile failed")
-                            .detail("kustomize build: accumulating resources"),
+                            .detail("kustomize build: accumulating resources")
+                            .action("Retry", |_, _| {}),
                         cx,
                     );
                 }),
@@ -651,10 +652,20 @@ impl Gallery {
 fn open_samples(more: &Entity<ActionMenu>, window: &mut Window, cx: &mut App) {
     more.update(cx, |menu, cx| menu.show(window, cx));
     confirm(delete_dialog(), window, cx);
-    toast(
+    let samples = [
+        Toast::new(Status::Progress, "Reconciling apps-payments")
+            .detail("prod-us-east · flux-system"),
         Toast::new(Status::Ok, "Scaled checkout-api to 3").detail("prod-us-east · payments"),
-        cx,
-    );
+        Toast::new(Status::Warn, "Drain ip-10-0-4-17 incomplete")
+            .detail("prod-us-east · 2 pods blocked by PodDisruptionBudgets"),
+        Toast::new(Status::Err, "Reconcile failed")
+            .detail("kustomize build: accumulating resources")
+            .action("Retry", |_, _| {})
+            .action("View logs", |_, _| {}),
+    ];
+    for sample in samples {
+        toast(sample, cx);
+    }
 }
 
 fn delete_dialog() -> ConfirmDialog {

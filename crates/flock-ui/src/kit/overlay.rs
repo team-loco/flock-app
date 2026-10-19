@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use flock_core::Status;
 use gpui::{
@@ -17,7 +18,8 @@ use super::status::StatusGlyph;
 use crate::theme::{
     ActiveTheme, DIALOG_TOP, DIALOG_WIDTH, FONT_MONO, LINE_PROSE, PAGE_HEADER, POPOVER_IN, Palette,
     RADIUS_MENU, RULE, SPACE_2, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, STATUS_BAR, TEXT_BODY,
-    TEXT_SMALL, TEXT_TITLE, TOAST_TIMEOUT, TOAST_WIDTH,
+    TEXT_SMALL, TEXT_TITLE, TOAST_PROGRESS_TIMEOUT, TOAST_SUCCESS_TIMEOUT, TOAST_WARNING_TIMEOUT,
+    TOAST_WIDTH,
 };
 
 const CANCEL: &str = "Cancel";
@@ -73,19 +75,29 @@ impl ConfirmDialog {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone)]
+struct ToastAction {
+    label: SharedString,
+    on_click: ConfirmHandler,
+}
+
+#[derive(Clone)]
 pub struct Toast {
+    key: Option<SharedString>,
     status: Status,
     title: SharedString,
     detail: Option<SharedString>,
+    actions: Vec<ToastAction>,
 }
 
 impl Toast {
     pub fn new(status: Status, title: impl Into<SharedString>) -> Self {
         Self {
+            key: None,
             status,
             title: title.into(),
             detail: None,
+            actions: Vec::new(),
         }
     }
 
@@ -93,10 +105,40 @@ impl Toast {
         self.detail = Some(detail.into());
         self
     }
+
+    pub fn key(mut self, key: impl Into<SharedString>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
+
+    pub fn action(
+        mut self,
+        label: impl Into<SharedString>,
+        on_click: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        let action = ToastAction {
+            label: label.into(),
+            on_click: Rc::new(on_click),
+        };
+        self.actions.push(action);
+        self
+    }
+
+    fn lifetime(&self) -> Option<Duration> {
+        match self.status {
+            Status::Err => None,
+            Status::Warn => Some(TOAST_WARNING_TIMEOUT),
+            Status::Progress => Some(TOAST_PROGRESS_TIMEOUT),
+            Status::Ok => Some(TOAST_SUCCESS_TIMEOUT),
+            Status::Suspended => Some(TOAST_SUCCESS_TIMEOUT),
+            Status::Offline => Some(TOAST_SUCCESS_TIMEOUT),
+        }
+    }
 }
 
 struct Shown {
     id: u64,
+    revision: u64,
     toast: Toast,
 }
 
@@ -215,14 +257,44 @@ impl Overlays {
 
     fn push(&mut self, toast: Toast, cx: &mut Context<Self>) {
         self.next += 1;
-        let id = self.next;
-        self.toasts.push(Shown { id, toast });
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(TOAST_TIMEOUT).await;
-            this.update(cx, |overlays, cx| overlays.remove(id, cx)).ok();
-        })
-        .detach();
+        let revision = self.next;
+        let lifetime = toast.lifetime();
+        let existing = toast.key.as_ref().and_then(|key| {
+            self.toasts
+                .iter_mut()
+                .find(|shown| shown.toast.key.as_ref() == Some(key))
+        });
+        let id = if let Some(shown) = existing {
+            shown.revision = revision;
+            shown.toast = toast;
+            shown.id
+        } else {
+            self.toasts.push(Shown {
+                id: revision,
+                revision,
+                toast,
+            });
+            revision
+        };
+        if let Some(lifetime) = lifetime {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(lifetime).await;
+                this.update(cx, |overlays, cx| overlays.expire(id, revision, cx))
+                    .ok();
+            })
+            .detach();
+        }
         cx.notify();
+    }
+
+    fn expire(&mut self, id: u64, revision: u64, cx: &mut Context<Self>) {
+        let current = self
+            .toasts
+            .iter()
+            .any(|shown| shown.id == id && shown.revision == revision);
+        if current {
+            self.remove(id, cx);
+        }
     }
 
     fn remove(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -371,6 +443,43 @@ impl Overlays {
             .map(|shown| {
                 let id = shown.id;
                 let toast = &shown.toast;
+                let actions: Vec<_> = toast
+                    .actions
+                    .iter()
+                    .enumerate()
+                    .map(|(index, action)| {
+                        let handler = action.on_click.clone();
+                        Button::new(
+                            ElementId::NamedInteger("toast-action".into(), index as u64),
+                            action.label.clone(),
+                        )
+                        .small()
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.remove(id, cx);
+                                handler(window, cx);
+                            },
+                        ))
+                    })
+                    .collect();
+                let body = div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .gap(SPACE_2)
+                    .min_w_0()
+                    .child(div().text_size(TEXT_BODY).child(toast.title.clone()))
+                    .when_some(toast.detail.clone(), |text, detail| {
+                        text.child(
+                            div()
+                                .text_size(TEXT_SMALL)
+                                .text_color(palette.fg2)
+                                .child(detail),
+                        )
+                    })
+                    .when(!actions.is_empty(), |text| {
+                        text.child(div().flex().gap(SPACE_4).pt(SPACE_2).children(actions))
+                    });
                 let card = div()
                     .id(ElementId::NamedInteger("toast".into(), id))
                     .occlude()
@@ -379,29 +488,19 @@ impl Overlays {
                     .gap(SPACE_4)
                     .px(SPACE_6)
                     .py(SPACE_5)
-                    .bg(palette.panel)
+                    .bg(palette.toast_ground(toast.status))
                     .border(RULE)
-                    .border_color(palette.line2)
+                    .border_color(palette.toast_border(toast.status))
                     .rounded(RADIUS_MENU)
                     .shadow(popover::shadow(&palette))
+                    .text_color(palette.fg)
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| this.remove(id, cx)))
                     .child(div().pt(SPACE_2).child(StatusGlyph::new(toast.status)))
+                    .child(body)
                     .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(SPACE_2)
-                            .min_w_0()
-                            .child(div().text_size(TEXT_BODY).child(toast.title.clone()))
-                            .when_some(toast.detail.clone(), |text, detail| {
-                                text.child(
-                                    div()
-                                        .text_size(TEXT_SMALL)
-                                        .text_color(palette.mute)
-                                        .child(detail),
-                                )
-                            }),
+                        IconButton::glyph("toast-close", CLOSE, CLOSE_TOOLTIP)
+                            .on_click(cx.listener(move |this, _, _, cx| this.remove(id, cx))),
                     );
                 let animation = Animation::new(POPOVER_IN).with_easing(ease_out_quint());
                 card.with_animation(
@@ -526,5 +625,23 @@ mod tests {
             overlays.read_with(cx, |overlays, _| overlays.toasts.len()),
             1
         );
+    }
+}
+
+#[cfg(test)]
+mod lifetime_tests {
+    use super::*;
+
+    fn lifetime(status: Status) -> Option<Duration> {
+        Toast::new(status, "t").lifetime()
+    }
+
+    #[test]
+    fn only_errors_persist_and_warnings_outlast_successes() {
+        assert_eq!(lifetime(Status::Err), None);
+        assert_eq!(lifetime(Status::Ok), Some(TOAST_SUCCESS_TIMEOUT));
+        assert_eq!(lifetime(Status::Warn), Some(TOAST_WARNING_TIMEOUT));
+        assert_eq!(lifetime(Status::Progress), Some(TOAST_PROGRESS_TIMEOUT));
+        assert!(TOAST_SUCCESS_TIMEOUT < TOAST_WARNING_TIMEOUT);
     }
 }

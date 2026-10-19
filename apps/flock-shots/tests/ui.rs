@@ -2406,3 +2406,75 @@ fn all_events_opens_the_events_page_on_the_warnings_chip() -> anyhow::Result<()>
     assert_eq!(chip, Some(1));
     Ok(())
 }
+
+fn push_toast(ui: &mut Ui, toast: flock_ui::kit::Toast) {
+    ui.update_app(|cx| flock_ui::kit::toast(toast, cx));
+}
+
+#[test]
+fn errors_persist_while_success_and_warnings_auto_dismiss() -> anyhow::Result<()> {
+    use flock_core::Status;
+    use flock_ui::kit::{Toast, toast_statuses};
+    use flock_ui::theme::{TOAST_SUCCESS_TIMEOUT, TOAST_WARNING_TIMEOUT};
+    let mut ui = Ui::open(Screen::Flock)?;
+    push_toast(&mut ui, Toast::new(Status::Err, "Reconcile failed"));
+    push_toast(&mut ui, Toast::new(Status::Warn, "Drain incomplete"));
+    push_toast(&mut ui, Toast::new(Status::Ok, "Scaled"));
+    ui.settle()?;
+    let all = ui.read_app(toast_statuses);
+    assert_eq!(all, [Status::Err, Status::Warn, Status::Ok]);
+    ui.advance_clock(TOAST_SUCCESS_TIMEOUT)?;
+    let after_success = ui.read_app(toast_statuses);
+    assert_eq!(after_success, [Status::Err, Status::Warn]);
+    ui.advance_clock(TOAST_WARNING_TIMEOUT.abs_diff(TOAST_SUCCESS_TIMEOUT))?;
+    let after_warning = ui.read_app(toast_statuses);
+    assert_eq!(after_warning, [Status::Err]);
+    ui.advance_clock(TOAST_WARNING_TIMEOUT * 4)?;
+    let later = ui.read_app(toast_statuses);
+    assert_eq!(later, [Status::Err]);
+    ui.click("toast-close")?;
+    let remaining = ui.read_app(toast_statuses);
+    assert_eq!(remaining, Vec::<Status>::new());
+    Ok(())
+}
+
+#[test]
+fn an_error_toast_shows_its_action_and_running_it_dismisses_the_toast() -> anyhow::Result<()> {
+    use flock_core::Status;
+    use flock_ui::kit::{Toast, toast_statuses};
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let mut ui = Ui::open(Screen::Flock)?;
+    let retried = Rc::new(Cell::new(false));
+    let flag = retried.clone();
+    let failed = Toast::new(Status::Err, "Could not update Flock")
+        .action("Retry", move |_, _| flag.set(true));
+    push_toast(&mut ui, failed);
+    ui.settle()?;
+    assert!(ui.bounds("toast-action-0").is_some());
+    ui.click("toast-action-0")?;
+    assert!(retried.get());
+    let remaining = ui.read_app(toast_statuses);
+    assert_eq!(remaining, Vec::<Status>::new());
+    Ok(())
+}
+
+#[test]
+fn a_progress_toast_is_replaced_in_place_by_its_result() -> anyhow::Result<()> {
+    use flock_core::Status;
+    use flock_ui::kit::{Toast, toast_statuses, toast_titles};
+    let mut ui = Ui::open(Screen::Flock)?;
+    let key = "reconcile";
+    push_toast(
+        &mut ui,
+        Toast::new(Status::Progress, "Reconciling").key(key),
+    );
+    push_toast(&mut ui, Toast::new(Status::Ok, "Other"));
+    push_toast(&mut ui, Toast::new(Status::Ok, "Reconciled").key(key));
+    ui.settle()?;
+    let titles = ui.read_app(toast_titles);
+    assert_eq!(titles, ["Reconciled", "Other"]);
+    let statuses = ui.read_app(toast_statuses);
+    assert_eq!(statuses, [Status::Ok, Status::Ok]);
+    Ok(())
+}
