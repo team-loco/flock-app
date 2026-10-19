@@ -21,6 +21,7 @@ pub enum SelectEvent {
 pub struct Select {
     id: SharedString,
     options: Vec<SharedString>,
+    details: Vec<SharedString>,
     selected: usize,
     placeholder: SharedString,
     width: Pixels,
@@ -47,6 +48,7 @@ impl Select {
         Self {
             id: id.into(),
             options,
+            details: Vec::new(),
             selected: 0,
             placeholder: SharedString::default(),
             width: MENU_WIDTH,
@@ -214,6 +216,18 @@ impl Select {
         cx.notify();
     }
 
+    pub fn set_details(&mut self, details: Vec<SharedString>, cx: &mut Context<Self>) {
+        self.details = details;
+        cx.notify();
+    }
+
+    fn detail(&self, ix: usize) -> Option<SharedString> {
+        self.details
+            .get(ix)
+            .filter(|detail| !detail.is_empty())
+            .cloned()
+    }
+
     fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.open {
             self.close(window, cx);
@@ -327,6 +341,7 @@ impl Select {
                 trigger.hover(move |style| style.bg(hover))
             })
             .child(div().truncate().child(label))
+            .children(detail(self.detail(self.selected), palette))
             .children(chevron)
             .on_click(cx.listener(|this, _, window, cx| {
                 if this.dismissal.take_suppressed() {
@@ -335,6 +350,17 @@ impl Select {
                 this.toggle(window, cx);
             }))
     }
+}
+
+fn detail(text: Option<SharedString>, palette: &Palette) -> Option<gpui::Div> {
+    text.map(|text| {
+        div()
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .text_color(palette.mute)
+            .child(text)
+    })
 }
 
 impl Render for Select {
@@ -381,7 +407,9 @@ impl Render for Select {
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.choose(ix, window, cx);
                         }))
-                        .child(div().truncate().child(option.clone()))
+                        .gap(SPACE_4)
+                        .child(div().flex_none().child(option.clone()))
+                        .children(detail(self.detail(ix), &palette))
                         .into_any_element()
                 })
                 .collect();

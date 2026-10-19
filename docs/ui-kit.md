@@ -156,6 +156,10 @@ select.read(cx).selected_index()
 select.update(cx, |s, cx| s.set_selected(ix, cx));   // e.g. when the edited object changes
 ```
 
+`set_details(details, cx)` adds muted secondary text per option, by index (empty for none), shown in the
+list and after the selected label (Cluster settings shows the detected Prometheus target beside `auto`).
+Settings forms keep controls within `theme::SETTINGS_FIELD` and inset by `theme::SETTINGS_INSET`.
+
 `.editable(window, cx)` adds a type-to-filter field and a “Use” row for free text. Arrow keys move
 through the filtered options and the free-text row; Enter saves, Esc cancels. `.placeholder("default")`
 labels an empty value. `set_value(value, cx)` selects a value, retaining it as an option when absent

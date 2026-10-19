@@ -2661,3 +2661,30 @@ fn the_cluster_overview_opens_settings_for_its_own_cluster() -> anyhow::Result<(
     assert_eq!(settings_selection(&ui), staging);
     Ok(())
 }
+
+#[test]
+fn the_metrics_source_is_picked_from_a_list_that_stays_inside_the_form() -> anyhow::Result<()> {
+    use flock_core::settings::MetricsSource;
+    use flock_ui::theme::{SETTINGS_FIELD, SETTINGS_INSET};
+    let mut ui = Ui::open(Screen::ClusterSettings)?;
+    let cluster = settings_selection(&ui).ok_or_else(|| anyhow::anyhow!("no cluster"))?;
+    let window = bounds_of(&mut ui, "tab-strip")?;
+    for selector in ["metrics-source", "default-namespace"] {
+        let field = bounds_of(&mut ui, selector)?;
+        assert!(field.size.width <= SETTINGS_FIELD, "{selector}");
+        assert!(
+            field.right() <= window.right() - SETTINGS_INSET,
+            "{selector}"
+        );
+    }
+    ui.click("metrics-source")?;
+    ui.click("metrics-source-option-2")?;
+    let metrics = ui
+        .state()
+        .snapshot
+        .catalog
+        .get(&cluster)
+        .map(|s| s.preferences.metrics);
+    assert_eq!(metrics, Some(MetricsSource::Prometheus));
+    Ok(())
+}

@@ -17,8 +17,8 @@ use crate::kit::{
 use crate::settings::{self, Settings};
 use crate::theme::{
     ActiveTheme, Appearance, HEX_FIELD, LINE_PROSE, PAGE_HEADER, Palette, RADIUS, RADIUS_SMALL,
-    ROW_DOCUMENT, RULE, SETTINGS_COLUMN, SPACE_1, SPACE_2, SPACE_4, SPACE_6, SPACE_7, SPACE_8,
-    SWATCH, TEXT_SMALL, TEXT_TITLE, Theme,
+    ROW_DOCUMENT, RULE, SETTINGS_COLUMN, SETTINGS_INSET, SPACE_1, SPACE_2, SPACE_4, SPACE_6,
+    SPACE_7, SPACE_8, SWATCH, TEXT_SMALL, TEXT_TITLE, Theme,
 };
 use crate::updater::{self, Updater};
 
@@ -573,7 +573,7 @@ impl Render for AppSettingsScreen {
             .flex_col()
             .w_full()
             .max_w(SETTINGS_COLUMN)
-            .px(SPACE_8)
+            .px(SETTINGS_INSET)
             .pb(SPACE_8)
             .child(appearance.children(highlights))
             .child(Self::refresh(&current, &palette, cx))

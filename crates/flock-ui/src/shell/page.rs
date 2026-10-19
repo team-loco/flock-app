@@ -3,7 +3,7 @@ use flock_core::overview::plural;
 use flock_core::watch::WatchState;
 use flock_core::{Command, Counts, Page};
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
+    AnyElement, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
     MouseButton, ParentElement, StatefulInteractiveElement, Styled, Window, div,
 };
 

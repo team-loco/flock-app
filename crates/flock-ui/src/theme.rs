@@ -89,6 +89,8 @@ pub const ICON_SPLIT: Pixels = px(14.);
 pub const STATUS_BAR: Pixels = px(26.);
 pub const ASIDE_WIDTH: Pixels = px(300.);
 pub const SETTINGS_COLUMN: Pixels = px(720.);
+pub const SETTINGS_INSET: Pixels = SPACE_8;
+pub const SETTINGS_FIELD: Pixels = px(300.);
 
 pub const ICON: Pixels = px(11.);
 pub const ICON_BUTTON: Pixels = px(22.);
