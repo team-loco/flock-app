@@ -330,3 +330,15 @@ Settled; change only with a new entry that says why.
     not linked: a PVC's PersistentVolume comes from `spec.volumeName`; HPAs and HTTPRoutes are
     related when facts for them exist, but no watch provides them yet, and Endpoints are covered by
     the Service's selected pods.
+40. **Flux graph per cluster** (#232): the Flux section gains Graph, a layered drawing of the
+    cluster's Flux objects. Edges run from what an object needs to the object: `dependsOn` as solid
+    lines, sources (GitRepository, OCIRepository, HelmRepository) as dashed ones. A HelmRelease's
+    HelmChart is not a node: its source edge resolves through the chart to the repository, the same
+    `FluxObject::source` the object page shows. Missing `dependsOn` targets are drawn as offline
+    nodes marked "not found". Layout lives in `flock_core::flux_graph`: longest-path layers (a
+    dependency cycle is broken at the edge that closes it), long edges pass through placeholder
+    slots so they never cross a node, then barycenter sweeps order each layer, ties broken by key,
+    so the same objects always draw the same picture. Clicking a node opens the object; arrow keys
+    (or right-click) select one, Enter opens it, Escape clears it. A selection shows the same
+    object (kind, namespace, name) on every cluster that has it side by side, with values that
+    differ from this cluster's in the warning colour; a cell opens that cluster's object.

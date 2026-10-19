@@ -195,6 +195,14 @@ pub const CHART_AXIS: Pixels = px(30.);
 pub const CHART_STROKE: Pixels = px(2.);
 pub const CHART_DASH: Pixels = px(4.);
 pub const LEGEND_SWATCH: Pixels = px(10.);
+pub const GRAPH_NODE_WIDTH: Pixels = px(220.);
+pub const GRAPH_NODE_HEIGHT: Pixels = px(44.);
+pub const GRAPH_COLUMN_GAP: Pixels = px(72.);
+pub const GRAPH_ROW_GAP: Pixels = px(14.);
+pub const GRAPH_EDGE: Pixels = px(1.);
+pub const GRAPH_EDGE_ACTIVE: Pixels = px(1.5);
+pub const GRAPH_LEGEND_SWATCH: Pixels = px(8.);
+pub const GRAPH_COMPARE_COLUMN: Pixels = px(180.);
 
 pub const DIALOG_WIDE: Pixels = px(720.);
 pub const PICK_CHECK_COLUMN: Pixels = px(20.);

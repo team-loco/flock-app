@@ -8,6 +8,7 @@ pub mod edit;
 mod event_inspector;
 mod events;
 pub mod flock;
+mod flux_graph;
 mod flux_list;
 pub(crate) mod flux_object;
 pub mod gitops;
@@ -33,6 +34,7 @@ use gpui::{
 use crate::kit::{EmptyState, FilterBar, Link, MenuItem, Select, ShowAll};
 
 pub use events::EventsScreen;
+pub use flux_graph::FluxGraphScreen;
 pub use flux_list::FluxListScreen;
 pub use namespaces::NamespacesScreen;
 pub use nodes::NodesScreen;
@@ -143,6 +145,7 @@ pub struct ClusterPages {
     events: Entity<EventsScreen>,
     resources: Entity<ResourcesScreen>,
     flux: Entity<FluxListScreen>,
+    graph: Entity<FluxGraphScreen>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -158,7 +161,9 @@ impl ClusterPages {
         let events = cx.new(|cx| EventsScreen::new(window, cx));
         let resources = cx.new(|cx| ResourcesScreen::new(window, cx));
         let flux = cx.new(|cx| FluxListScreen::new(window, cx));
+        let graph = cx.new(FluxGraphScreen::new);
         let subscriptions = vec![
+            subscribe(&graph, on_event.clone(), cx),
             subscribe(&flux, on_event.clone(), cx),
             subscribe(&overview, on_event.clone(), cx),
             subscribe(&nodes, on_event.clone(), cx),
@@ -173,6 +178,7 @@ impl ClusterPages {
             events,
             resources,
             flux,
+            graph,
             _subscriptions: subscriptions,
         }
     }
@@ -186,6 +192,13 @@ impl ClusterPages {
         preferences: &flock_core::Preferences,
         cx: &mut App,
     ) {
+        if let Some(cluster) = cluster
+            && page == Page::FluxGraph
+        {
+            self.graph
+                .update(cx, |screen, cx| screen.set(cluster, snapshot, cx));
+            return;
+        }
         if let Some(cluster) = cluster
             && is_flux_list(page)
         {
@@ -240,6 +253,9 @@ impl ClusterPages {
     }
 
     pub fn render(&self, page: Page, has_detail: bool) -> Option<AnyElement> {
+        if page == Page::FluxGraph {
+            return Some(self.graph.clone().into_any_element());
+        }
         if is_flux_list(page) {
             return Some(self.flux.clone().into_any_element());
         }
@@ -307,6 +323,7 @@ impl ClusterPages {
             Page::Namespaces => Some(self.namespaces.read(cx).list_focus(cx)),
             Page::Events => Some(self.events.read(cx).list_focus(cx)),
             other if is_flux_list(other) => Some(self.flux.read(cx).list_focus(cx)),
+            Page::FluxGraph => Some(gpui::Focusable::focus_handle(&self.graph, cx)),
             other => {
                 ResourceKind::for_page(other)?;
                 Some(self.resources.update(cx, ResourcesScreen::list_focus))
@@ -320,6 +337,9 @@ impl ClusterPages {
     }
 
     pub fn header_note(&self, page: Page, has_detail: bool, cx: &App) -> Option<(Counts, String)> {
+        if page == Page::FluxGraph {
+            return Some(self.graph.read(cx).header_note());
+        }
         if is_flux_list(page) {
             return Some(self.flux.read(cx).header_note());
         }

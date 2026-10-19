@@ -11,6 +11,7 @@ pub mod events;
 pub mod filter;
 pub mod flock;
 pub mod flux;
+pub mod flux_graph;
 pub mod fuzzy;
 pub mod gitops;
 pub mod history;

@@ -1593,3 +1593,49 @@ fn live_pod_namespace_picker_lists_namespaces_without_pods() -> anyhow::Result<(
     );
     all_namespaces(&mut ui, "pod-namespace")
 }
+
+#[test]
+fn live_flux_graph_draws_sources_and_dependencies_and_opens_nodes() -> anyhow::Result<()> {
+    let Some(make) = kind()? else {
+        return Ok(());
+    };
+    let mut ui = open(Screen::Flock, &make)?;
+    ui.wait_until(PAGE_TIMEOUT, flux_loaded)?;
+    switch_to(&mut ui, "fleet-a")?;
+    visit(&mut ui, Page::FluxGraph)?;
+    let cluster = ClusterId::new("fleet-a");
+    let graph = flock_core::flux_graph::FluxGraph::build(&cluster, &ui.state().snapshot.flux);
+    let sources = graph
+        .edges
+        .iter()
+        .filter(|edge| edge.kind == flock_core::flux_graph::EdgeKind::Source)
+        .count();
+    anyhow::ensure!(sources > 0, "fleet-a has no source edges");
+    anyhow::ensure!(ui.bounds("flux-graph-node-0").is_some(), "no graph nodes");
+    ui.right_click("flux-graph-node-0")?;
+    anyhow::ensure!(ui.bounds("flux-graph-compare").is_some(), "no comparison");
+    let first = graph.nodes.first().filter(|node| node.present);
+    let expected = first.map(|node| node.key.clone());
+    ui.click("flux-graph-node-0")?;
+    assert_eq!(ui.state().location().flux_object, expected);
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(SHOTS_DIR);
+    let location = Location::page_on(cluster, Page::FluxGraph);
+    for (label, appearance) in [("dark", Appearance::Dark), ("light", Appearance::Light)] {
+        let shots = LiveShots {
+            appearance,
+            highlights: Highlights::default(),
+            timeout: PAGE_TIMEOUT,
+            ready: &page_ready,
+        };
+        flock_shots::render_live(
+            &make,
+            &shots,
+            std::slice::from_ref(&location),
+            |_, image| {
+                let path = dir.join(format!("fleet-a-flux-graph-{label}.png"));
+                flock_shots::save(&image, &path)
+            },
+        )?;
+    }
+    Ok(())
+}

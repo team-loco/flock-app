@@ -83,7 +83,10 @@ impl ClusterFlux {
     pub fn page_state(&self, page: Page) -> Option<WatchState> {
         let kinds: Vec<ObjectKind> = KINDS
             .into_iter()
-            .filter(|kind| super::convert::core_kind(*kind).is_some_and(|core| core.page() == page))
+            .filter(|kind| {
+                super::convert::core_kind(*kind)
+                    .is_some_and(|core| page == Page::FluxGraph || core.page() == page)
+            })
             .collect();
         if kinds.is_empty() {
             return None;
@@ -275,7 +278,13 @@ mod tests {
         ));
         assert!(passes.recv().await.is_ok());
         assert_eq!(flux.handle.status(), ConnectionStatus::Connected);
-        for page in [Page::Kustomizations, Page::HelmReleases, Page::Sources] {
+        let pages = [
+            Page::Kustomizations,
+            Page::HelmReleases,
+            Page::Sources,
+            Page::FluxGraph,
+        ];
+        for page in pages {
             assert_eq!(flux.page_state(page), Some(WatchState::Synced), "{page:?}");
         }
         assert_eq!(flux.page_state(Page::GitOps), None);
