@@ -2335,3 +2335,74 @@ fn every_list_turns_typed_tokens_into_removable_chips() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+fn first_warning(ui: &Ui) -> anyhow::Result<flock_core::events::Event> {
+    let state = ui.state();
+    let cluster = state
+        .location()
+        .cluster
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("cluster"))?;
+    let detail = state
+        .snapshot
+        .detail(&cluster)
+        .ok_or_else(|| anyhow::anyhow!("detail"))?;
+    detail
+        .recent_warnings(1)
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("the demo cluster has no warnings"))
+}
+
+#[test]
+fn overview_warning_message_shows_in_a_tooltip_on_hover() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    assert!(ui.bounds("tooltip").is_none());
+    ui.hover("overview-warnings-row-0")?;
+    ui.advance_clock(std::time::Duration::from_secs(1))?;
+    assert!(ui.bounds("tooltip").is_some());
+    Ok(())
+}
+
+#[test]
+fn overview_warning_row_opens_the_event_inspector_with_the_full_message() -> anyhow::Result<()> {
+    for appearance in [
+        flock_ui::theme::Appearance::Dark,
+        flock_ui::theme::Appearance::Light,
+    ] {
+        let mut ui = Ui::with(Screen::Cluster, flock::Preset::default(), appearance)?;
+        assert!(ui.bounds("event-inspector-pane").is_none());
+        ui.click("overview-warnings-row-0")?;
+        assert!(ui.bounds("event-inspector-pane").is_some());
+        assert!(ui.bounds("event-message").is_some());
+        assert_eq!(ui.state().location().page, Page::ClusterOverview);
+        ui.press("escape")?;
+        assert!(ui.bounds("event-inspector-pane").is_none());
+        ui.press("down enter")?;
+        assert!(ui.bounds("event-inspector-pane").is_some());
+        ui.click("close-event")?;
+        assert!(ui.bounds("event-inspector-pane").is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn overview_warning_object_link_opens_the_resource_without_opening_the_inspector()
+-> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let object = first_warning(&ui)?.object;
+    let selector = selector(format!("warning-object-{object}"));
+    ui.click(selector)?;
+    assert_ne!(ui.state().location().page, Page::ClusterOverview);
+    Ok(())
+}
+
+#[test]
+fn all_events_opens_the_events_page_on_the_warnings_chip() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("all-events")?;
+    assert_eq!(ui.state().location().page, Page::Events);
+    let chip = ui.read(|shell, cx| shell.filter_bar(cx).map(|bar| bar.read(cx).chip()));
+    assert_eq!(chip, Some(1));
+    Ok(())
+}

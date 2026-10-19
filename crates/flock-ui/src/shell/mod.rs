@@ -333,6 +333,10 @@ impl Shell {
         match event {
             ScreenEvent::Command(command) => self.dispatch(command.clone(), cx),
             ScreenEvent::Navigate(page) => self.dispatch(Command::SelectPage(*page), cx),
+            ScreenEvent::ShowEvents(filter) => {
+                self.dispatch(Command::SelectPage(Page::Events), cx);
+                self.focused_screens().pages.show_event_filter(*filter, cx);
+            }
         }
     }
 
