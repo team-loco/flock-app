@@ -12,12 +12,14 @@ use gpui::{
 };
 
 use super::{WorkloadScreen, logs_tab_label};
+use crate::kit::confirm;
 use crate::kit::status_symbols;
 use crate::kit::{
     Button, Dock, DockState, DockTab, InputEvent, Level, LogLine, LogView, Segmented, Terminal,
     TerminalEvent, TextField, TextFieldState,
 };
 use crate::screens::multilog::MultiLogs;
+use crate::screens::no_shell::{DEBUG_IMAGE, confirm_debug, no_shell_state, start_debug_button};
 use crate::theme::{
     ActiveTheme, FONT_MONO, LOG_LINE, Palette, SPACE_3, SPACE_4, SPACE_5, SPACE_6, TEXT_GLYPH,
     TEXT_MONO,
@@ -36,7 +38,8 @@ const WRAP: &str = "wrap";
 const OPEN_IN_TAB: &str = "Open logs in tab";
 const ALL_PODS: &str = "all pods";
 const ALL_PODS_DETAIL: &str = "all pods";
-const DEBUG_IMAGE: &str = "busybox:1.36";
+const NO_SHELL_ID: &str = "workload-no-shell";
+const START_DEBUG_ID: &str = "workload-start-debug";
 const POD_KIND: &str = "Pod";
 
 const EVENT_AGE: Pixels = px(48.);
@@ -47,7 +50,9 @@ const EVENT_COUNT: Pixels = px(72.);
 pub struct ExecSession {
     input: async_channel::Sender<Vec<u8>>,
     resize: async_channel::Sender<TermSize>,
+    target: ExecTarget,
     debug: bool,
+    no_shell: bool,
     open: bool,
     _task: gpui::Task<()>,
 }
@@ -171,13 +176,29 @@ impl WorkloadScreen {
     }
 
     fn start_shell(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.ensure_exec(cx);
+        self.ensure_exec(false, cx);
         let focus = self.terminal.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
         cx.notify();
     }
 
-    fn ensure_exec(&mut self, cx: &mut Context<Self>) {
+    fn confirm_debug_container(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(target) = self.exec.as_ref().map(|session| session.target.clone()) else {
+            return;
+        };
+        let screen = cx.weak_entity();
+        let dialog = confirm_debug(&target.pod.name, &target.container, move |window, cx| {
+            let _ = screen.update(cx, |this, cx| {
+                this.ensure_exec(true, cx);
+                let focus = this.terminal.read(cx).focus_handle(cx);
+                window.focus(&focus, cx);
+                cx.notify();
+            });
+        });
+        confirm(dialog, window, cx);
+    }
+
+    fn ensure_exec(&mut self, force_debug: bool, cx: &mut Context<Self>) {
         if self.exec.as_ref().is_some_and(|session| session.open) {
             return;
         }
@@ -185,7 +206,7 @@ impl WorkloadScreen {
         else {
             return;
         };
-        let debug = needs_debug(&pod, &container);
+        let debug = force_debug || needs_debug(&pod, &container);
         let target = ExecTarget {
             pod: pod_ref(&self.target, &pod.name),
             container,
@@ -204,7 +225,7 @@ impl WorkloadScreen {
             terminal.set_open(true, cx);
         });
         cx.emit(Command::Exec(ExecRequest {
-            target,
+            target: target.clone(),
             input: source,
             resize: sizes,
             output,
@@ -220,7 +241,9 @@ impl WorkloadScreen {
         self.exec = Some(ExecSession {
             input,
             resize,
+            target,
             debug,
+            no_shell: false,
             open: true,
             _task: task,
         });
@@ -234,13 +257,22 @@ impl WorkloadScreen {
             ExecEvent::Output(bytes) => {
                 self.terminal.update(cx, |t, cx| t.feed(&bytes, cx));
             }
+            ExecEvent::NoShell => {
+                if let Some(session) = self.exec.as_mut() {
+                    session.no_shell = true;
+                }
+                cx.notify();
+            }
             ExecEvent::Exited { code } => {
+                let no_shell = self.exec.as_ref().is_some_and(|s| s.no_shell);
                 let note = match code {
                     Some(code) => format!("Session ended (exit {code})."),
                     None => "Session ended.".to_owned(),
                 };
                 self.terminal.update(cx, |t, cx| {
-                    t.note(note, cx);
+                    if !no_shell {
+                        t.note(note, cx);
+                    }
                     t.set_open(false, cx);
                 });
                 if let Some(session) = self.exec.as_mut() {
@@ -435,9 +467,18 @@ impl WorkloadScreen {
                 DockTab::new(TERMINAL_LABEL)
                     .detail(self.terminal_detail())
                     .tools(self.terminal_tools(cx))
-                    .content(self.terminal.clone()),
+                    .content(self.terminal_content(cx)),
             )
             .into_any_element()
+    }
+
+    fn terminal_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        if !self.exec.as_ref().is_some_and(|s| s.no_shell) {
+            return self.terminal.clone().into_any_element();
+        }
+        let start = start_debug_button(START_DEBUG_ID)
+            .on_click(cx.listener(|this, _, window, cx| this.confirm_debug_container(window, cx)));
+        no_shell_state(NO_SHELL_ID, start).into_any_element()
     }
 
     fn events_pane(count: usize, cx: &mut Context<Self>) -> impl IntoElement + use<> {

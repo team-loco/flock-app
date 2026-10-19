@@ -157,6 +157,7 @@ impl ExecTarget {
 pub enum ExecEvent {
     Started { note: String },
     Output(Vec<u8>),
+    NoShell,
     Exited { code: Option<i32> },
 }
 

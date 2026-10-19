@@ -453,7 +453,16 @@ impl Ui {
     }
 
     pub fn live(screen: Screen, preset: Preset, make: BackendFactory) -> anyhow::Result<Self> {
-        Self::build(screen, preset, Appearance::Dark, Source::Backend(make))
+        Self::live_in(screen, preset, Appearance::Dark, make)
+    }
+
+    pub fn live_in(
+        screen: Screen,
+        preset: Preset,
+        appearance: Appearance,
+        make: BackendFactory,
+    ) -> anyhow::Result<Self> {
+        Self::build(screen, preset, appearance, Source::Backend(make))
     }
 
     pub fn scripted(screen: Screen) -> anyhow::Result<(Self, Sender<Update>)> {

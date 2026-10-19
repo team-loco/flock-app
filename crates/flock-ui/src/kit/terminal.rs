@@ -40,6 +40,7 @@ const DEVICE_ID: &str = "\x1b[?1;2c";
 const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_COLS: u16 = 80;
 const SCROLLBACK_ROWS: usize = 10_000;
+const REPLAY_LIMIT: usize = 4 * 1024 * 1024;
 
 #[derive(Default)]
 struct Replies(Vec<u8>);
@@ -69,31 +70,39 @@ impl vt100::Callbacks for Replies {
 
 pub struct TerminalBuffer {
     parser: vt100::Parser<Replies>,
+    replay: Vec<u8>,
     open: bool,
+}
+
+fn parser(rows: u16, cols: u16) -> vt100::Parser<Replies> {
+    vt100::Parser::new_with_callbacks(rows, cols, SCROLLBACK_ROWS, Replies::default())
 }
 
 impl Default for TerminalBuffer {
     fn default() -> Self {
-        let replies = Replies::default();
         Self {
-            parser: vt100::Parser::new_with_callbacks(
-                DEFAULT_ROWS,
-                DEFAULT_COLS,
-                SCROLLBACK_ROWS,
-                replies,
-            ),
+            parser: parser(DEFAULT_ROWS, DEFAULT_COLS),
+            replay: Vec::new(),
             open: false,
         }
     }
 }
 
 impl TerminalBuffer {
+    fn process(&mut self, bytes: &[u8]) {
+        self.parser.process(bytes);
+        self.replay.extend_from_slice(bytes);
+        if self.replay.len() > REPLAY_LIMIT {
+            let excess = self.replay.len() - REPLAY_LIMIT / 2;
+            self.replay.drain(..excess);
+        }
+    }
+
     pub fn note(&mut self, text: &str) {
         if self.parser.screen().cursor_position().1 != 0 {
-            self.parser.process(NEWLINE);
+            self.process(NEWLINE);
         }
-        self.parser
-            .process(format!("{NOTE_START}{text}{NOTE_END}").as_bytes());
+        self.process(format!("{NOTE_START}{text}{NOTE_END}").as_bytes());
     }
 
     pub fn set_open(&mut self, open: bool) {
@@ -105,14 +114,15 @@ impl TerminalBuffer {
     }
 
     pub fn feed(&mut self, bytes: &[u8]) -> Vec<u8> {
-        self.parser.process(bytes);
+        self.process(bytes);
         std::mem::take(&mut self.parser.callbacks_mut().0)
     }
 
     fn resize(&mut self, size: TermSize) {
-        self.parser
-            .screen_mut()
-            .set_size(size.rows.max(1), size.cols.max(1));
+        let mut reflowed = parser(size.rows.max(1), size.cols.max(1));
+        reflowed.process(&self.replay);
+        reflowed.callbacks_mut().0.clear();
+        self.parser = reflowed;
     }
 
     fn history(&mut self) -> usize {
@@ -900,6 +910,29 @@ mod tests {
         buffer.resize(TermSize { rows: 3, cols: 20 });
         assert_eq!(buffer.parser.screen().size(), (3, 20));
         assert!(buffer.export().contains("three"));
+    }
+
+    #[test]
+    fn long_lines_wrap_again_when_the_terminal_narrows_or_widens() {
+        let mut buffer = TerminalBuffer::default();
+        buffer.resize(TermSize { rows: 5, cols: 30 });
+        buffer.note("note");
+        buffer.feed(&[b'A'; 50]);
+        buffer.feed(b"\r\n$ \x1b[6n");
+        buffer.resize(TermSize { rows: 5, cols: 20 });
+        assert_eq!(
+            texts(&mut buffer),
+            [
+                "note",
+                &"A".repeat(20),
+                &"A".repeat(20),
+                &"A".repeat(10),
+                "$ "
+            ]
+        );
+        assert_eq!(buffer.parser.callbacks_mut().0, Vec::<u8>::new());
+        buffer.resize(TermSize { rows: 5, cols: 60 });
+        assert_eq!(texts(&mut buffer), ["note", &"A".repeat(50), "$ "]);
     }
 
     #[test]

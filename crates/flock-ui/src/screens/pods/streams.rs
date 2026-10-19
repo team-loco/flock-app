@@ -11,8 +11,9 @@ use super::PodsScreen;
 use crate::assets::DOWNLOAD;
 use crate::kit::{
     Button, Dock, DockTab, EmptyState, IconButton, LogView, Terminal, TerminalEvent, TextField,
-    Toast, toast,
+    Toast, confirm, toast,
 };
+use crate::screens::no_shell::{DEBUG_IMAGE, confirm_debug, no_shell_state, start_debug_button};
 use crate::screens::workload::kit_line;
 use crate::theme::SPACE_3;
 
@@ -32,7 +33,8 @@ const DOWNLOAD_TOOLTIP: &str = "Download logs";
 const DOWNLOADS: &str = "Downloads";
 const SAVE_FAILED: &str = "Could not save the logs";
 const SAVED: &str = "Saved logs";
-const DEBUG_IMAGE: &str = "busybox:1.36";
+const NO_SHELL_ID: &str = "pod-no-shell";
+const START_DEBUG_ID: &str = "pod-start-debug";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogKey {
@@ -54,6 +56,7 @@ pub struct LogSession {
 pub struct ShellSession {
     key: ShellKey,
     debug: bool,
+    no_shell: bool,
     input: Sender<Vec<u8>>,
     resize: Sender<TermSize>,
     open: bool,
@@ -142,10 +145,11 @@ impl PodsScreen {
         self.log = Some(LogSession { key, _task: task });
     }
 
-    fn open_shell(&mut self, key: ShellKey, cx: &mut Context<Self>) {
-        let debug = self
-            .selected_pod()
-            .is_some_and(|pod| needs_debug(pod, &key.container));
+    fn open_shell(&mut self, key: ShellKey, force_debug: bool, cx: &mut Context<Self>) {
+        let debug = force_debug
+            || self
+                .selected_pod()
+                .is_some_and(|pod| needs_debug(pod, &key.container));
         let target = ExecTarget {
             pod: key.pod.clone(),
             container: key.container.clone(),
@@ -159,7 +163,8 @@ impl PodsScreen {
                 .find(|c| c.name != key.container && c.state == ContainerState::Running)
                 .map(|c| c.name.clone())
         });
-        let reason = debug.then(|| debug_reason(&key.container, other.as_deref()));
+        let reason =
+            (debug && !force_debug).then(|| debug_reason(&key.container, other.as_deref()));
         terminal.update(cx, |terminal, cx| {
             terminal.clear(cx);
             if let Some(reason) = reason {
@@ -205,6 +210,7 @@ impl PodsScreen {
         self.shell = Some(ShellSession {
             key,
             debug,
+            no_shell: false,
             input,
             resize,
             open: true,
@@ -221,9 +227,18 @@ impl PodsScreen {
             ExecEvent::Output(bytes) => {
                 self.terminal.update(cx, |t, cx| t.feed(&bytes, cx));
             }
+            ExecEvent::NoShell => {
+                if let Some(session) = self.shell.as_mut() {
+                    session.no_shell = true;
+                }
+                cx.notify();
+            }
             ExecEvent::Exited { code } => {
+                let no_shell = self.shell.as_ref().is_some_and(|s| s.no_shell);
                 self.terminal.update(cx, |t, cx| {
-                    t.note(exit_note(code), cx);
+                    if !no_shell {
+                        t.note(exit_note(code), cx);
+                    }
                     t.set_open(false, cx);
                 });
                 if let Some(session) = self.shell.as_mut() {
@@ -247,11 +262,29 @@ impl PodsScreen {
             .map(Pod::resource)
             .zip(self.container_name());
         if let Some((pod, container)) = target {
-            self.open_shell(ShellKey { pod, container }, cx);
+            self.open_shell(ShellKey { pod, container }, false, cx);
             let focus = self.terminal.read(cx).focus_handle(cx);
             window.focus(&focus, cx);
             cx.notify();
         }
+    }
+
+    fn confirm_debug_container(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(key) = self.shell.as_ref().map(|session| session.key.clone()) else {
+            return;
+        };
+        let screen = cx.weak_entity();
+        let start = key.clone();
+        let dialog = confirm_debug(&key.pod.name, &key.container, move |window, cx| {
+            let key = start.clone();
+            let _ = screen.update(cx, |this, cx| {
+                this.open_shell(key, true, cx);
+                let focus = this.terminal.read(cx).focus_handle(cx);
+                window.focus(&focus, cx);
+                cx.notify();
+            });
+        });
+        confirm(dialog, window, cx);
     }
 
     fn download_logs(&self, cx: &mut Context<Self>) {
@@ -396,8 +429,17 @@ impl PodsScreen {
                 DockTab::new(TERMINAL_LABEL)
                     .detail(terminal_detail)
                     .tools(self.terminal_tools(cx))
-                    .content(self.terminal.clone()),
+                    .content(self.terminal_content(cx)),
             )
+    }
+
+    fn terminal_content(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        if !self.shell.as_ref().is_some_and(|s| s.no_shell) {
+            return self.terminal.clone().into_any_element();
+        }
+        let start = start_debug_button(START_DEBUG_ID)
+            .on_click(cx.listener(|this, _, window, cx| this.confirm_debug_container(window, cx)));
+        no_shell_state(NO_SHELL_ID, start).into_any_element()
     }
 }
 
