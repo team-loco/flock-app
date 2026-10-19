@@ -20,14 +20,22 @@ use crate::theme::{
 };
 
 const CLUSTER_NAME_MIN: Pixels = px(140.);
-const CLUSTER_STATE: Pixels = px(128.);
-const CLUSTER_VERSION: Pixels = px(76.);
-const CLUSTER_NODES: Pixels = px(54.);
-const CLUSTER_PODS: Pixels = px(108.);
+const CLUSTER_STATE_MIN: Pixels = px(96.);
+const CLUSTER_STATE_MAX: Pixels = px(200.);
+const CLUSTER_VERSION_MIN: Pixels = px(64.);
+const CLUSTER_VERSION_MAX: Pixels = px(140.);
+const CLUSTER_NODES_MIN: Pixels = px(48.);
+const CLUSTER_NODES_MAX: Pixels = px(72.);
+const CLUSTER_PODS_MIN: Pixels = px(56.);
+const CLUSTER_PODS_MAX: Pixels = px(140.);
 const CLUSTER_USAGE: Pixels = px(92.);
-const CLUSTER_FLUX: Pixels = px(108.);
-const CLUSTER_REVISION: Pixels = px(84.);
-const CLUSTER_PROBLEMS: Pixels = px(92.);
+const CLUSTER_FLUX_MIN: Pixels = px(56.);
+const CLUSTER_FLUX_MAX: Pixels = px(140.);
+const CLUSTER_REVISION_MIN: Pixels = px(64.);
+const CLUSTER_REVISION_MAX: Pixels = px(110.);
+const CLUSTER_PROBLEMS_MIN: Pixels = px(72.);
+const CLUSTER_PROBLEMS_MAX: Pixels = px(200.);
+const BADGE_GAP: &str = "  ";
 const CLUSTER_NAME_WEIGHT: f32 = 1.3;
 
 const PROBLEM_GLYPH: Pixels = px(14.);
@@ -417,25 +425,25 @@ fn cluster_columns() -> Vec<Column<ClusterSummary>> {
         Column::new("State", |c: &ClusterSummary, _| {
             StatusText::new(c.status, c.state.clone()).into_any_element()
         })
-        .fixed(CLUSTER_STATE),
+        .fit_status_by(|c: &ClusterSummary| c.state.clone().into())
+        .auto(CLUSTER_STATE_MIN, CLUSTER_STATE_MAX),
         Column::new("Version", |c: &ClusterSummary, palette| {
-            text(
-                c.version.clone().unwrap_or_else(|| MISSING.into()),
-                palette.fg2,
-            )
+            text(version_label(c), palette.fg2)
         })
         .mono()
-        .fixed(CLUSTER_VERSION),
+        .fit_by(|c: &ClusterSummary| version_label(c).into(), Pixels::ZERO)
+        .auto(CLUSTER_VERSION_MIN, CLUSTER_VERSION_MAX),
         Column::new("Nodes", |c: &ClusterSummary, palette| {
-            let nodes = c
-                .nodes
-                .map_or_else(|| MISSING.to_owned(), |n| n.to_string());
-            text(nodes, dimmed(c, palette))
+            text(nodes_label(c), dimmed(c, palette))
         })
         .mono()
         .end()
-        .fixed(CLUSTER_NODES),
-        Column::new("Pods", pods_cell).mono().fixed(CLUSTER_PODS),
+        .fit_by(|c: &ClusterSummary| nodes_label(c).into(), Pixels::ZERO)
+        .auto(CLUSTER_NODES_MIN, CLUSTER_NODES_MAX),
+        Column::new("Pods", pods_cell)
+            .mono()
+            .fit_by(|c: &ClusterSummary| pods_label(c).into(), SPACE_3)
+            .auto(CLUSTER_PODS_MIN, CLUSTER_PODS_MAX),
         Column::new("CPU", |c: &ClusterSummary, palette| {
             mini_meter(c.metrics.as_ref().and_then(|m| m.cpu_percent), palette)
         })
@@ -447,28 +455,75 @@ fn cluster_columns() -> Vec<Column<ClusterSummary>> {
         .mono()
         .fixed(CLUSTER_USAGE),
         Column::new("Flux", |c: &ClusterSummary, palette| match &c.metrics {
-            Some(m) => {
-                let status = m.flux.status();
-                let total = m.flux.total.unwrap_or_default();
-                let label = format!("{} {}/{total}", status.glyph(), m.flux_ready());
-                text(label, palette.status(status))
-            }
+            Some(m) => text(flux_label(c), palette.status(m.flux.status())),
             None => text(MISSING, palette.mute),
         })
         .mono()
-        .fixed(CLUSTER_FLUX),
+        .fit_by(|c: &ClusterSummary| flux_label(c).into(), Pixels::ZERO)
+        .auto(CLUSTER_FLUX_MIN, CLUSTER_FLUX_MAX),
         Column::new("Revision", |c: &ClusterSummary, palette| match &c.metrics {
             Some(m) if m.revision.held => text(m.revision.sha.clone(), palette.sus),
             Some(m) => text(m.revision.sha.clone(), palette.fg2),
             None => text(MISSING, palette.mute),
         })
         .mono()
-        .fixed(CLUSTER_REVISION),
+        .fit_by(|c: &ClusterSummary| revision_label(c).into(), Pixels::ZERO)
+        .auto(CLUSTER_REVISION_MIN, CLUSTER_REVISION_MAX),
         Column::new("Problems", |c: &ClusterSummary, palette| {
             badges(&c.problems, SPACE_4, palette).into_any_element()
         })
-        .fixed(CLUSTER_PROBLEMS),
+        .mono()
+        .fit_by(
+            |c: &ClusterSummary| badges_label(&c.problems).into(),
+            Pixels::ZERO,
+        )
+        .auto(CLUSTER_PROBLEMS_MIN, CLUSTER_PROBLEMS_MAX),
     ]
+}
+
+fn version_label(cluster: &ClusterSummary) -> String {
+    cluster.version.clone().unwrap_or_else(|| MISSING.into())
+}
+
+fn nodes_label(cluster: &ClusterSummary) -> String {
+    cluster
+        .nodes
+        .map_or_else(|| MISSING.to_owned(), |n| n.to_string())
+}
+
+fn revision_label(cluster: &ClusterSummary) -> String {
+    cluster
+        .metrics
+        .as_ref()
+        .map_or_else(|| MISSING.to_owned(), |m| m.revision.sha.clone())
+}
+
+fn flux_label(cluster: &ClusterSummary) -> String {
+    let Some(m) = &cluster.metrics else {
+        return MISSING.to_owned();
+    };
+    let total = m.flux.total.unwrap_or_default();
+    format!("{} {}/{total}", m.flux.status().glyph(), m.flux_ready())
+}
+
+fn pods_label(cluster: &ClusterSummary) -> String {
+    let Some(metrics) = &cluster.metrics else {
+        return MISSING.to_owned();
+    };
+    let total = metrics.pods.total.unwrap_or_default();
+    match metrics.pods.badges().into_iter().next() {
+        Some((status, n)) => format!("{total} {} {n}", status.glyph()),
+        None => total.to_string(),
+    }
+}
+
+fn badges_label(counts: &Counts) -> String {
+    let labels: Vec<String> = counts
+        .badges()
+        .into_iter()
+        .map(|(status, n)| format!("{} {n}", status.glyph()))
+        .collect();
+    labels.join(BADGE_GAP)
 }
 
 fn pods_cell(cluster: &ClusterSummary, palette: &Palette) -> AnyElement {
@@ -647,5 +702,35 @@ mod tests {
             .collect();
         assert_eq!(shape, [true, false, false]);
         assert!(problem_rows(&[], Severity::Errors, &[]).is_empty());
+    }
+
+    #[test]
+    fn content_widths_measure_the_text_each_cell_draws() {
+        let problems = Counts::total(0).with_err(2).with_warn(13);
+        assert_eq!(badges_label(&problems), "✕ 2  ▲ 13");
+        assert_eq!(badges_label(&Counts::total(4)), "");
+        let offline = ClusterSummary {
+            id: ClusterId::new("edge"),
+            name: "edge".into(),
+            status: Status::Offline,
+            state: "Offline".into(),
+            distro: String::new(),
+            region: String::new(),
+            version: None,
+            nodes: None,
+            problems,
+            nav: std::collections::BTreeMap::new(),
+            metrics: None,
+        };
+        assert_eq!(
+            [
+                version_label(&offline),
+                nodes_label(&offline),
+                pods_label(&offline),
+                flux_label(&offline),
+                revision_label(&offline),
+            ],
+            [MISSING; 5].map(str::to_owned)
+        );
     }
 }
