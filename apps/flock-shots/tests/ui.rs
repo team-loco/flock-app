@@ -2057,7 +2057,7 @@ fn splitting_keeps_the_existing_tabs_at_rest() -> anyhow::Result<()> {
 #[test]
 fn splitting_keeps_a_closed_inspector_closed_in_both_panes() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::ResourceInspector)?;
-    assert!(ui.state().location().resource.is_some());
+    assert_eq!(ui.state().location().page, Page::ConfigMaps);
     assert!(ui.bounds("resource-inspector-pane").is_some());
     ui.click("close-resource")?;
     assert!(ui.bounds("resource-inspector-pane").is_none());
@@ -2833,12 +2833,78 @@ fn unhealthy_job_inspector_leads_with_whats_wrong_then_conditions_events_and_yam
 }
 
 #[test]
+fn a_namespace_page_links_to_its_objects_and_back_returns_to_it() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Namespace)?;
+    let namespace = ui.state().location().clone();
+    assert_eq!(
+        namespace.detail().map(|target| target.name.as_str()),
+        Some("payments")
+    );
+    ui.click("related-Deployments-checkout-api")?;
+    let workload = ui.state().workload().map(|target| target.name.clone());
+    assert_eq!(workload.as_deref(), Some("checkout-api"));
+    ui.click("pane-0-back")?;
+    assert_eq!(ui.state().location(), &namespace);
+    ui.click("related-Pods-checkout-api-7f9c6d-x2lqp")?;
+    let pod = ui.state().location().clone();
+    assert_eq!(pod.page, Page::Pods);
+    assert_eq!(
+        pod.resource.map(|target| target.name),
+        Some("checkout-api-7f9c6d-x2lqp".to_owned())
+    );
+    assert!(ui.bounds("pod-inspector-pane").is_some());
+    ui.click("pane-0-back")?;
+    ui.click("pane-0-forward")?;
+    assert_eq!(ui.state().location().page, Page::Pods);
+    ui.click("pane-0-back")?;
+    ui.click("related-list-Deployments")?;
+    assert_eq!(ui.state().location().page, Page::Deployments);
+    assert_eq!(ui.state().location().resource, None);
+    let scoped = ui
+        .state()
+        .snapshot
+        .catalog
+        .get(&ClusterId::new("prod-us-east"))
+        .map(|settings| settings.preferences.namespace_selection("Deployment"));
+    assert_eq!(
+        scoped.as_ref().and_then(|selection| selection.namespace()),
+        Some("payments")
+    );
+    ui.click("pane-0-back")?;
+    assert_eq!(ui.state().location(), &namespace);
+    Ok(())
+}
+
+#[test]
 fn healthy_objects_have_no_reason_or_whats_wrong() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::ResourceInspector)?;
     assert!(ui.bounds("resource-inspector-pane").is_some());
     assert!(ui.bounds("whats-wrong").is_none());
     assert!(ui.bounds("reason-cell").is_none());
     assert!(ui.bounds("object-events").is_none());
+    Ok(())
+}
+
+#[test]
+fn opening_a_namespace_row_shows_its_page() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Namespaces)?;
+    ui.double_click("namespaces-row-0")?;
+    let opened = ui
+        .state()
+        .location()
+        .detail()
+        .map(|target| target.kind.clone());
+    assert_eq!(opened.as_deref(), Some("Namespace"));
+    Ok(())
+}
+
+#[test]
+fn the_resource_inspector_links_the_workloads_that_consume_it() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::ResourceInspector)?;
+    assert!(ui.bounds("resource-inspector-pane").is_some());
+    ui.click("related-Deployments-checkout-api")?;
+    let workload = ui.state().workload().map(|target| target.name.clone());
+    assert_eq!(workload.as_deref(), Some("checkout-api"));
     Ok(())
 }
 
@@ -2856,6 +2922,26 @@ fn inspector_width_defaults_per_kind_and_a_dragged_width_wins() -> anyhow::Resul
     job.click("close-resource")?;
     job.click("resources-Job-row-2")?;
     assert_eq!(width(&mut job), Some(INSPECTOR_WORKLOAD - px(40.)));
+    Ok(())
+}
+
+#[test]
+fn a_node_inspector_links_the_pods_scheduled_on_it() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Node)?;
+    assert!(ui.bounds("node-inspector-pane").is_some());
+    ui.scroll(
+        "node-inspector-pane",
+        gpui::point(gpui::px(0.), gpui::px(-1200.)),
+    )?;
+    ui.click("related-Pods-checkout-api-7f9c6d-x2lqp")?;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, Page::Pods);
+    assert_eq!(
+        location.resource.map(|target| target.name),
+        Some("checkout-api-7f9c6d-x2lqp".to_owned())
+    );
+    ui.click("pane-0-back")?;
+    assert_eq!(ui.state().location().page, Page::Nodes);
     Ok(())
 }
 
@@ -2894,5 +2980,17 @@ fn failing_flux_list_and_page_name_the_reason() -> anyhow::Result<()> {
     let wrong = top(&mut page, "whats-wrong")?;
     let conditions = top(&mut page, "condition-table")?;
     assert!(wrong < conditions);
+    Ok(())
+}
+
+#[test]
+fn a_job_page_follows_the_logs_of_all_its_pods() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Job)?;
+    let job = ui.state().location().detail().cloned();
+    assert_eq!(job.as_ref().map(|target| target.kind.as_str()), Some("Job"));
+    ui.click("detail-logs")?;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, Page::Logs);
+    assert!(location.logs.is_some());
     Ok(())
 }

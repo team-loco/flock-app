@@ -203,8 +203,8 @@ fn pod(seed: Seed) -> Pod {
 
 const CHECKOUT_LABELS: &[(&str, &str)] = &[("app", "checkout-api"), ("version", "2.14.0")];
 const CHECKOUT_VOLUMES: &[(&str, &str)] = &[
-    ("config", "configmap checkout-config"),
-    ("envoy-config", "configmap checkout-envoy"),
+    ("config", "configmap checkout-api-config"),
+    ("secrets", "secret checkout-api-secrets"),
 ];
 
 fn healthy_checkout(

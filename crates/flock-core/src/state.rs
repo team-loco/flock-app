@@ -595,6 +595,37 @@ mod tests {
     }
 
     #[test]
+    fn opening_a_namespace_or_config_object_shows_its_detail_page() {
+        let mut state = loaded();
+        let namespace = ResourceRef {
+            cluster: ClusterId::new("a"),
+            kind: "Namespace".into(),
+            namespace: None,
+            name: "payments".into(),
+        };
+        state.apply(&Command::OpenResource(namespace.clone()));
+        assert_eq!(state.location().page, Page::Namespaces);
+        assert_eq!(state.location().detail(), Some(&namespace));
+        assert_eq!(state.workload(), None);
+        let config = ResourceRef {
+            kind: "ConfigMap".into(),
+            namespace: Some("payments".into()),
+            name: "checkout-api-config".into(),
+            ..namespace
+        };
+        state.apply(&Command::OpenResource(config.clone()));
+        assert_eq!(state.location().page, Page::ConfigMaps);
+        assert_eq!(state.location().detail(), Some(&config));
+        assert!(state.back());
+        assert_eq!(state.location().page, Page::Namespaces);
+        state.apply(&Command::EditYaml(config));
+        assert_eq!(state.location().detail(), None);
+        state.apply(&Command::OpenResource(deployment("a")));
+        assert_eq!(state.location().detail(), None);
+        assert!(state.workload().is_some());
+    }
+
+    #[test]
     fn inspecting_a_listed_workload_stays_on_the_list() {
         let mut state = loaded();
         state.apply(&Command::SelectCluster(Some(ClusterId::new("b"))));

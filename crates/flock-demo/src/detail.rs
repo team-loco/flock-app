@@ -51,6 +51,7 @@ pub fn prod_us_east() -> ClusterDetail {
         namespaces: namespaces(),
         events: events(),
         resources,
+        related: Vec::new(),
     }
 }
 

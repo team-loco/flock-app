@@ -5,6 +5,7 @@ use flock_core::emptiness::Noun;
 use flock_core::events::Event;
 use flock_core::filter::{StatusFilter, label_values};
 use flock_core::pods::PodEvent;
+use flock_core::related::Related;
 use flock_core::resources::{
     Resource, filter_counts, filter_resources, namespace_choices, namespaces_of,
 };
@@ -28,6 +29,7 @@ use crate::kit::{
     confirm, reason_cell, reason_tooltip, slide_in, slide_out,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
+use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
 use crate::screens::{EDIT_YAML, ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{INSPECTOR_RESOURCE, INSPECTOR_WORKLOAD, REASON_MIN, REASON_WEIGHT, SPACE_3};
 
@@ -128,6 +130,7 @@ pub struct ResourcesScreen {
     awaiting: Option<String>,
     preferences: Preferences,
     selected: Option<(String, String)>,
+    related: Vec<Related>,
     revealed: Option<(ResourceKind, String, String)>,
     tables: HashMap<ResourceKind, Entity<Table<Resource>>>,
     namespaces: Entity<Select>,
@@ -191,6 +194,7 @@ impl ResourcesScreen {
             awaiting: None,
             preferences: Preferences::default(),
             selected: None,
+            related: Vec::new(),
             revealed: None,
             tables: HashMap::new(),
             namespaces,
@@ -232,6 +236,10 @@ impl ResourcesScreen {
         if self.confirm_destructive != confirm_destructive {
             self.confirm_destructive = confirm_destructive;
             self.refresh(cx);
+        }
+        if self.related != detail.related {
+            self.related.clone_from(&detail.related);
+            cx.notify();
         }
         let switched = self.kind != kind || self.cluster.as_ref() != Some(&cluster.id);
         if self.events != detail.events {
@@ -281,6 +289,10 @@ impl ResourcesScreen {
         name: String,
         cx: &mut Context<Self>,
     ) {
+        let key = (namespace.clone(), name.clone());
+        if kind == self.kind && self.selected.as_ref() == Some(&key) {
+            return;
+        }
         if kind == self.kind && self.cluster.is_some() {
             self.show_namespace_of(&namespace, cx);
             self.selected = Some((namespace, name));
@@ -531,6 +543,17 @@ impl ResourcesScreen {
             .into_iter()
             .map(PodEvent::from)
             .collect();
+        let screen = cx.weak_entity();
+        let pick: OnPick = Rc::new(move |pick, _, cx| {
+            if let Pick::Object(target) = pick {
+                let command = Command::OpenResource(target);
+                let _ = screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+            }
+        });
+        let related = self
+            .target(row)
+            .and_then(|target| self.related.iter().find(|related| related.target == target));
+        let related = inspector_section(related, &pick, cx);
         let mut inspector = Inspector::new(INSPECTOR_ID, row.name.clone())
             .mono()
             .width(inspector_width(self.kind))
@@ -545,6 +568,7 @@ impl ResourcesScreen {
         }
         inspector
             .section(Some(EVENTS), EventList::new(events))
+            .section(Some(RELATED), related)
             .section(Some(YAML), yaml)
             .into_any_element()
     }

@@ -310,3 +310,23 @@ Settled; change only with a new entry that says why.
     owns the AppKit objects on the main thread (`MainThreadMarker`) and queues menu actions into
     gpui, each menu item retaining its target. The workspace denies unsafe code, allowed only in
     that module.
+39. **Detail pages and Related objects come from the background stores** (#240): every object opens
+    somewhere. Deployments, StatefulSets and DaemonSets keep the workload page; Pods and Nodes keep
+    their list inspectors, which are their detail views; Jobs, CronJobs, Services, Ingresses,
+    ConfigMaps, Secrets, PVCs and Namespaces open a detail page (`Location::detail`,
+    `screens::detail`) with the Related groups and then the YAML. A Namespace page lists every
+    sidebar kind in that namespace plus its events, each with a count and an "Open list" link that
+    sets that list's namespace preference and opens it; namespace rows open the page. Every
+    inspector and detail page has a Related section, placed before YAML. Relations are computed in
+    `flock_core::related` from plain `Fact`s (controller owner, service selector, pod-template
+    labels, volume / env / envFrom / imagePullSecret / Ingress backend and TLS / PVC volume
+    references, the node a pod runs on); ReplicaSets are derived from their pods'
+    `pod-template-hash`. Consumers are the topmost referencing objects, so a ConfigMap lists the
+    Deployment and not its pods. The live backend builds facts only for targets some pane
+    inspects or opens (`Selection::inspected`), from the stores decision 31 already keeps, scoped
+    to the target's namespace; inspecting a kind that has no list row (Pod, Node, Namespace) no
+    longer fetches its YAML. Groups show the worst first (Jobs newest first) and at most
+    `related::LIMIT` items with a "+N more" line. Kinds no background watch holds are named but
+    not linked: a PVC's PersistentVolume comes from `spec.volumeName`; HPAs and HTTPRoutes are
+    related when facts for them exist, but no watch provides them yet, and Endpoints are covered by
+    the Service's selected pods.

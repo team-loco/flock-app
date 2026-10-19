@@ -17,6 +17,7 @@ use crate::manager::{ClusterHandle, ConnectionStatus};
 use crate::metrics::{NodeUsage, PodUsage};
 use crate::probe::PrometheusTarget;
 use crate::problems::{connection_problem, node_problems, pod_problems};
+use crate::related;
 use crate::resources::WatchKind;
 use crate::snapshot::{Facts, count, node_counts, page_kind, pod_counts, summarize};
 use crate::usage::{UsageRing, sample};
@@ -59,6 +60,7 @@ pub struct Selection<'a> {
     pub pod_rows: bool,
     pub event_limit: usize,
     pub yaml: &'a [&'a (ResourceRef, String)],
+    pub inspected: &'a [&'a ResourceRef],
 }
 
 pub struct Built {
@@ -128,7 +130,7 @@ pub fn cluster(
             events: &events,
             index: &index,
         };
-        cluster_detail(handle, extras, &parts, selection, now)
+        cluster_detail(id, handle, extras, &parts, selection, now)
     });
     Built {
         summary,
@@ -180,6 +182,7 @@ struct Parts<'a> {
 }
 
 fn cluster_detail(
+    id: &ClusterId,
     handle: &ClusterHandle,
     extras: &Extras,
     parts: &Parts<'_>,
@@ -213,6 +216,15 @@ fn cluster_detail(
             row.yaml.clone_from(yaml);
         }
     }
+    let nodes = detail::nodes(nodes, index, usage, now);
+    let scope = related::Scope {
+        cluster: id,
+        nodes: &nodes,
+        events: &events,
+        index,
+        now,
+    };
+    let related = related::related(handle, &scope, selection.inspected);
     ClusterDetail {
         overview: Overview {
             metrics_source,
@@ -222,7 +234,7 @@ fn cluster_detail(
             pods: index.phases,
             utilization,
         },
-        nodes: detail::nodes(nodes, index, usage, now),
+        nodes,
         namespaces: detail::namespaces(
             &handle.objects::<Namespace>(),
             index,
@@ -231,6 +243,7 @@ fn cluster_detail(
         ),
         events,
         resources,
+        related,
     }
 }
 

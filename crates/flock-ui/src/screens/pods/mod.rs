@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::kit::SelectableText;
 use flock_core::emptiness::Noun;
 use flock_core::filter::label_values;
@@ -5,6 +7,7 @@ use flock_core::multilog::LabelSelector;
 use flock_core::pods::{
     Container, Pod, PodFilter, PodQuery, filter_counts, namespaces, nav_counts,
 };
+use flock_core::related::Related;
 use flock_core::resources::{POD_LIST, namespace_choices};
 use flock_core::settings::NamespaceSelection;
 use flock_core::{
@@ -27,6 +30,7 @@ use crate::kit::{
     Table, TableEvent, Terminal, TextFieldState, WHATS_WRONG, WhatsWrong, chip_label, confirm,
     reason_tooltip, swap_in,
 };
+use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{
     ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, INSPECTOR_POD, LINE_PROSE,
@@ -64,6 +68,7 @@ pub struct PodsScreen {
     shown: usize,
     query: PodQuery,
     selected: Option<ResourceRef>,
+    related: Vec<Related>,
     container: Option<String>,
     log: Option<LogSession>,
     shell: Option<ShellSession>,
@@ -175,6 +180,7 @@ impl PodsScreen {
             shown: 0,
             query: PodQuery::default(),
             selected: None,
+            related: Vec::new(),
             container: None,
             log: None,
             shell: None,
@@ -194,6 +200,11 @@ impl PodsScreen {
 
     pub fn set_snapshot(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
         self.pods.clone_from(&snapshot.pods);
+        self.related = snapshot
+            .details
+            .values()
+            .flat_map(|detail| detail.related.iter().cloned())
+            .collect();
         self.names = snapshot
             .clusters
             .iter()
@@ -448,6 +459,9 @@ impl PodsScreen {
             return;
         }
         self.selected = pod;
+        if let Some(pod) = self.selected.clone() {
+            cx.emit(Command::InspectResource(pod));
+        }
         self.pick_container(None);
         self.sync_selection(cx);
     }
@@ -487,10 +501,26 @@ impl PodsScreen {
             .map(|pod| format!("{}/{}", pod.namespace, pod.name))
             .unwrap_or_default();
         let motion = self.entrance.track(Some(&selection), entrance, cx);
+        let related = self.selected.as_ref().and_then(|target| {
+            self.related
+                .iter()
+                .find(|related| &related.target == target)
+        });
+        let screen = cx.weak_entity();
+        let pick: OnPick = Rc::new(move |pick, _, cx| {
+            if let Pick::Object(target) = pick {
+                let _ = screen.update(cx, |_, cx| cx.emit(Command::OpenResource(target)));
+            }
+        });
+        let related = section(&palette)
+            .child(SectionLabel::new(RELATED))
+            .child(inspector_section(related, &pick, cx));
         let (header, body) = match self.selected_pod() {
             Some(pod) => (
                 Some(Self::pod_header(pod, &palette, cx)),
-                Self::pod_details(pod, &palette, cx).into_any_element(),
+                Self::pod_details(pod, &palette, cx)
+                    .child(related)
+                    .into_any_element(),
             ),
             None => (
                 None,
@@ -555,7 +585,7 @@ impl PodsScreen {
         header.flex_none().into_any_element()
     }
 
-    fn pod_details(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+    fn pod_details(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> gpui::Div {
         let whats_wrong = pod.diagnosis().map(|diagnosis| {
             section(palette)
                 .child(SectionLabel::new(WHATS_WRONG))
@@ -948,7 +978,7 @@ impl Render for PodsScreen {
             cluster: self.cluster_name(),
         };
         let screen = cx.weak_entity();
-        let show_all: ShowAll = std::rc::Rc::new(move |_, cx| {
+        let show_all: ShowAll = Rc::new(move |_, cx| {
             let _ = screen.update(cx, PodsScreen::show_all_namespaces);
         });
         let list: AnyElement = match empty_list(&shape, &self.filter, Some(show_all), cx) {
