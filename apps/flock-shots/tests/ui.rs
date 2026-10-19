@@ -280,6 +280,33 @@ fn command_comma_opens_settings_and_its_controls_change_the_app_settings() -> an
 }
 
 #[test]
+fn menu_bar_toggle_updates_and_saves_the_setting() -> anyhow::Result<()> {
+    use std::{cell::RefCell, rc::Rc};
+    let mut ui = Ui::open(Screen::Settings)?;
+    let saved = Rc::new(RefCell::new(Vec::new()));
+    let log = saved.clone();
+    ui.update_app(|cx| {
+        let current = flock_ui::settings::current(cx).clone();
+        flock_ui::settings::install(
+            current,
+            Rc::new(move |settings| {
+                log.borrow_mut().push(settings.show_in_menu_bar);
+                Ok(())
+            }),
+            false,
+            cx,
+        );
+    });
+    assert!(ui.read_app(|cx| flock_ui::settings::current(cx).show_in_menu_bar));
+    ui.click("settings-menu-bar")?;
+    assert!(!ui.read_app(|cx| flock_ui::settings::current(cx).show_in_menu_bar));
+    ui.click("settings-menu-bar")?;
+    assert!(ui.read_app(|cx| flock_ui::settings::current(cx).show_in_menu_bar));
+    assert_eq!(*saved.borrow(), vec![false, true]);
+    Ok(())
+}
+
+#[test]
 fn highlight_swatches_and_hex_fields_recolour_the_app_live() -> anyhow::Result<()> {
     use flock_core::app_settings::{Highlight, Rgb};
     use flock_ui::theme::{ActiveTheme, Palette};

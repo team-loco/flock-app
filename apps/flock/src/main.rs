@@ -1,3 +1,6 @@
+#[cfg(all(target_os = "macos", not(test)))]
+mod menubar;
+
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -275,12 +278,14 @@ fn launch(
     cx.set_menus(menus());
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_window_closed(|cx, _| {
-        if cx.windows().is_empty() {
+        if cx.windows().is_empty() && !keep_running(flock_ui::settings::current(cx)) {
             cx.quit();
         }
     })
     .detach();
     let store = cx.new(|cx| Store::new(updates, commands, cx));
+    #[cfg(all(target_os = "macos", not(test)))]
+    menubar::install(store.clone(), cx);
     let new_window_store = store.clone();
     cx.on_action(move |_: &NewWindow, cx| {
         if let Err(error) = open_flock_window(new_window_store.clone(), Vec::new(), None, cx) {
@@ -294,6 +299,10 @@ fn launch(
         open_flock_window(store.clone(), Vec::new(), Some(&saved), cx)?;
     }
     Ok(())
+}
+
+fn keep_running(settings: &flock_core::AppSettings) -> bool {
+    cfg!(target_os = "macos") && settings.show_in_menu_bar
 }
 
 fn install_tabs(store: TabStore, cx: &mut App) -> Vec<SavedWindow> {
@@ -383,6 +392,14 @@ fn open_flock_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn last_window_stays_running_only_when_the_menu_bar_is_enabled_on_macos() {
+        let mut settings = flock_core::AppSettings::default();
+        assert_eq!(keep_running(&settings), cfg!(target_os = "macos"));
+        settings.show_in_menu_bar = false;
+        assert!(!keep_running(&settings));
+    }
 
     #[gpui::test]
     fn new_window_shortcut_and_close_keep_other_windows_open(cx: &mut gpui::TestAppContext) {

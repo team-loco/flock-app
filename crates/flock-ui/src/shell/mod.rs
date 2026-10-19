@@ -172,9 +172,7 @@ impl Shell {
                     }
                 });
             }
-            if !cx.windows().is_empty() {
-                crate::session::forget(window_id, cx);
-            }
+            crate::session::closed(window_id, cx);
         })
     }
 

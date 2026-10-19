@@ -86,6 +86,7 @@ mod tests {
             panic!("open");
         };
         let mut settings = AppSettings {
+            show_in_menu_bar: false,
             theme: ThemeChoice::Light,
             primary: Highlight::Custom(Rgb {
                 r: 0xd9,

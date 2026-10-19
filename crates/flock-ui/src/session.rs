@@ -58,7 +58,11 @@ pub(crate) fn record(window: u64, saved: SavedWindow, cx: &mut App) {
     }
 }
 
-pub(crate) fn forget(window: u64, cx: &mut App) {
+pub(crate) fn closed(window: u64, cx: &mut App) {
+    let menu_bar = cfg!(target_os = "macos") && crate::settings::current(cx).show_in_menu_bar;
+    if cx.windows().is_empty() && !menu_bar {
+        return;
+    }
     if cx.default_global::<Sessions>().windows.forget(window) {
         persist(cx);
     }
@@ -93,6 +97,28 @@ mod tests {
             focused: 0,
             ..SavedWindow::default()
         }
+    }
+
+    #[gpui::test]
+    fn closing_the_last_menu_bar_window_does_not_restore_a_closed_window(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(|cx| {
+            crate::init(None, cx).unwrap_or_else(|error| panic!("UI init: {error}"));
+            record(7, window(Page::Nodes), cx);
+            closed(7, cx);
+            record(8, window(Page::Pods), cx);
+            let saved = cx.global::<Sessions>().windows.session();
+            if cfg!(target_os = "macos") {
+                assert_eq!(saved.windows, [window(Page::Pods)]);
+            } else {
+                assert_eq!(saved.windows, [window(Page::Nodes), window(Page::Pods)]);
+            }
+            crate::settings::update(cx, |settings| settings.show_in_menu_bar = false)
+                .unwrap_or_else(|error| panic!("settings: {error}"));
+            closed(8, cx);
+            assert_eq!(cx.global::<Sessions>().windows.session(), saved);
+        });
     }
 
     #[test]

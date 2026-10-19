@@ -26,3 +26,7 @@ Every pane's page header leads with ghost SVG Back/Forward controls from the kit
 keep their size, tooltips name the destination and shortcut, and right-click opens the active tab's
 history menu in nearest-first order. `HeaderNavigation` owns this behavior across shell and screen
 headers; the shell routes navigation to the owning pane.
+
+Settings uses the shared Toggle and persisted AppSettings for “Show in menu bar” under Appearance.
+The macOS menu-bar item uses native AppKit menus and system typography; its health glyphs follow
+Flock's status vocabulary. Its lifecycle and problem click-through follow decision 35.
