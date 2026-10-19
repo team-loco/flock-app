@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
@@ -6,6 +7,7 @@ use anyhow::Context as _;
 use flock::{Preset, Screen};
 use flock_core::app_settings::Highlight;
 use flock_core::history::Location;
+use flock_core::tabs::Session;
 use flock_core::{
     AppState, CLUSTER_NAV, ClusterId, ContextRef, FluxKey, FluxKind, NewCluster, Page, ResourceRef,
     Status, WatchState,
@@ -593,6 +595,15 @@ fn live_tabs_open_per_page_switch_split_and_close() -> anyhow::Result<()> {
     check_invariants(&mut ui, &before, "splitting")?;
     switch_to(&mut ui, CLUSTERS[1].0)?;
     check_invariants(&mut ui, &before, "switching the split pane's cluster")?;
+    let saved = Rc::new(RefCell::new(Vec::new()));
+    let log = saved.clone();
+    ui.update_app(|cx| {
+        let save: flock_ui::session::Saver = Rc::new(move |session: &Session| {
+            log.borrow_mut().push(session.windows.len());
+            Ok(())
+        });
+        flock_ui::session::install(save, cx);
+    });
     while ui.state().panes().panes().len() > 1 || tab_count(&ui) > 1 {
         let tabs = ui
             .state()
@@ -611,12 +622,22 @@ fn live_tabs_open_per_page_switch_split_and_close() -> anyhow::Result<()> {
             .sum::<usize>();
         anyhow::ensure!(after < tabs, "⌘W did not close a tab ({tabs} tabs)");
     }
+    check_invariants(&mut ui, &before, "closing every tab but the last")?;
+    anyhow::ensure!(
+        ui.read_app(|cx| flock_ui::settings::current(cx).keeps_running_in_menu_bar()),
+        "Flock should keep running in the menu bar by default"
+    );
     ui.press("cmd-w")?;
     anyhow::ensure!(
-        ui.state().location().page == Page::Overview && ui.state().location().cluster.is_none(),
-        "closing the last tab should leave Flock home"
+        ui.read_app(|cx| cx.windows().is_empty()),
+        "closing the last tab should close the window"
     );
-    check_invariants(&mut ui, &before, "closing every tab")
+    anyhow::ensure!(
+        saved.borrow().last() == Some(&0),
+        "closing the last window should drop its saved tabs, saved {:?}",
+        saved.borrow()
+    );
+    Ok(())
 }
 
 fn sidebar_round_trip(ui: &mut Ui, from: &str) -> anyhow::Result<()> {
