@@ -1126,9 +1126,9 @@ fn keyboard_opens_switches_and_closes_tabs() -> anyhow::Result<()> {
     assert_eq!(active_tab(&ui), 2);
     ui.press("cmd-w cmd-w")?;
     assert_eq!(tab_pages(&ui), [Page::ClusterOverview]);
-    ui.press("cmd-w")?;
-    assert_eq!(tab_pages(&ui), [Page::Overview]);
     assert_eq!(ui.read_app(|cx| cx.windows().len()), 1);
+    ui.press("cmd-w")?;
+    assert_eq!(ui.read_app(|cx| cx.windows().len()), 0);
     Ok(())
 }
 
@@ -2019,6 +2019,24 @@ fn splitting_keeps_the_existing_tabs_at_rest() -> anyhow::Result<()> {
     assert_eq!(tab_gap(&mut ui), Some(gpui::px(0.)));
     assert!(ui.bounds("tab-slot-0").is_none());
     assert!(ui.bounds("tab-slot-1").is_none());
+    ui.advance_clock(TAB_ENTER)?;
+    ui.press_unsettled("cmd-w")?;
+    assert_eq!(pane_count(&ui), 1);
+    assert!(ui.bounds("tab-slot-0").is_none());
+    assert!(ui.bounds("tab-slot-1").is_none());
+    Ok(())
+}
+
+#[test]
+fn splitting_keeps_a_closed_inspector_closed_in_both_panes() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::ResourceInspector)?;
+    assert!(ui.state().location().resource.is_some());
+    assert!(ui.bounds("resource-inspector-pane").is_some());
+    ui.click("close-resource")?;
+    assert!(ui.bounds("resource-inspector-pane").is_none());
+    ui.press("cmd-\\")?;
+    assert_eq!(pane_count(&ui), 2);
+    assert!(ui.bounds("resource-inspector-pane").is_none());
     Ok(())
 }
 

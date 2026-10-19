@@ -415,25 +415,30 @@ impl Shell {
         command
     }
 
-    fn announce_pane(&self, ix: usize, cx: &mut Context<Self>) {
+    fn announce_pane(&self, ix: usize, reveal: bool, cx: &mut Context<Self>) {
         let location = self.location_at(ix);
         let screens = self.screens(ix);
         for command in location.commands() {
             screens.scope.send(command);
         }
-        if let Some(resource) = &location.resource {
+        if let Some(resource) = location.resource.as_ref().filter(|_| reveal) {
             screens.pages.reveal(resource, cx);
         }
     }
 
     pub(super) fn show_active(&mut self, cx: &mut Context<Self>) {
-        self.announce_pane(self.state.panes().focused_index(), cx);
+        self.announce_pane(self.state.panes().focused_index(), true, cx);
         self.shown(cx);
     }
 
     fn show_all(&mut self, cx: &mut Context<Self>) {
+        let all: Vec<usize> = (0..self.panes.len()).collect();
+        self.show_panes(&all, cx);
+    }
+
+    pub(super) fn show_panes(&mut self, revealed: &[usize], cx: &mut Context<Self>) {
         for ix in 0..self.panes.len() {
-            self.announce_pane(ix, cx);
+            self.announce_pane(ix, revealed.contains(&ix), cx);
         }
         self.shown(cx);
     }
@@ -467,6 +472,10 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.state.panes().is_last(id) {
+            window.remove_window();
+            return;
+        }
         let active = self.state.panes().active().id();
         if !self.state.panes_mut().close(id) {
             return;

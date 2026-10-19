@@ -61,6 +61,10 @@ fn presence(screen: &mut NodesScreen) -> &mut Presence<Node> {
 impl EventEmitter<ScreenEvent> for NodesScreen {}
 
 impl NodesScreen {
+    pub fn inspecting(&self) -> bool {
+        self.selected.is_some()
+    }
+
     pub fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
         if self.selected.is_none() {
             return false;

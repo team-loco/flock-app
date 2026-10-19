@@ -127,6 +127,10 @@ fn presence(screen: &mut ResourcesScreen) -> &mut Presence<Resource> {
 impl EventEmitter<ScreenEvent> for ResourcesScreen {}
 
 impl ResourcesScreen {
+    pub fn inspecting(&self) -> bool {
+        self.selected.is_some()
+    }
+
     pub fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
         if self.selected.is_none() {
             return false;

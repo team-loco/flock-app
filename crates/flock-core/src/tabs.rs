@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use crate::history::{History, Location};
 use crate::{ClusterId, Page, Snapshot, Status};
 
-pub const FLOCK_KIND: &str = "Flock";
 pub const LOGS_KIND: &str = "Logs";
 pub const COMPARE_KIND: &str = "Compare";
 pub const CLUSTER_KIND: &str = "Cluster";
@@ -381,22 +380,24 @@ impl Panes {
         true
     }
 
+    pub fn is_last(&self, id: TabId) -> bool {
+        match self.all.as_slice() {
+            [pane] => pane.tabs.len() == 1 && pane.position(id).is_some(),
+            _ => false,
+        }
+    }
+
     pub fn close(&mut self, id: TabId) -> bool {
+        if self.is_last(id) {
+            return false;
+        }
         let Some(pane_ix) = self.pane_of(id) else {
             return false;
         };
         if self.take(pane_ix, id).is_none() {
             return false;
         }
-        if self.drop_if_empty(pane_ix) {
-            return true;
-        }
-        let replacement = self.allocate();
-        if let Some(pane) = self.all.get_mut(pane_ix)
-            && pane.tabs.is_empty()
-        {
-            pane.tabs.push(Tab::new(replacement, Location::default()));
-        }
+        self.drop_if_empty(pane_ix);
         true
     }
 
@@ -587,11 +588,7 @@ fn describe(location: &Location, snapshot: &Snapshot) -> (Option<Status>, String
         return (status, key.kind.label().to_owned(), key.name.clone());
     }
     if location.page.is_flock() {
-        return (
-            None,
-            FLOCK_KIND.to_owned(),
-            location.page.label().to_owned(),
-        );
+        return (None, String::new(), location.page.label().to_owned());
     }
     if let Some(target) = &location.logs {
         return (None, LOGS_KIND.to_owned(), target.label());
@@ -764,11 +761,9 @@ mod tests {
         assert_eq!(panes.active().id(), pods);
         assert!(panes.close(pods));
         assert_eq!(panes.active().id(), first);
-        assert!(panes.close(first));
-        assert_eq!(panes.focused().tabs().len(), 1);
-        assert_ne!(panes.active().id(), first);
-        assert_eq!(panes.active().location(), &Location::default());
+        assert!(panes.is_last(first));
         assert!(!panes.close(first));
+        assert_eq!(panes.active().id(), first);
     }
 
     #[test]
@@ -882,9 +877,9 @@ mod tests {
         assert_eq!(panes.focused_index(), 0);
         assert_eq!(panes.active().location(), &at(Page::Nodes));
         let last = panes.active().id();
-        assert!(panes.close(last));
-        assert_eq!(panes.panes().len(), 1);
-        assert_eq!(panes.active().location(), &Location::default());
+        assert!(panes.is_last(last));
+        assert!(!panes.close(last));
+        assert_eq!(panes.active().location(), &at(Page::Nodes));
     }
 
     #[test]
@@ -1043,7 +1038,7 @@ mod tests {
         let flock = title(&Location::flock(Page::GitOps), &snapshot);
         assert_eq!(
             (flock.kind.as_str(), flock.label.as_str(), flock.cluster),
-            (FLOCK_KIND, "GitOps", None)
+            ("", "GitOps", None)
         );
         let nodes = title(&at(Page::Nodes), &snapshot);
         assert_eq!(
