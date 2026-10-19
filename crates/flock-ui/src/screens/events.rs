@@ -4,7 +4,7 @@ use flock_core::emptiness::Noun;
 use flock_core::events::{self, Event, EventFilter, filter_counts, filter_events};
 use flock_core::filter::label_values;
 use flock_core::overview::plural;
-use flock_core::resources::EVENT_LIST;
+use flock_core::resources::{EVENT_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
 use flock_core::time::age;
 use flock_core::{
@@ -12,11 +12,13 @@ use flock_core::{
 };
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, Styled, Window, div,
+    ParentElement, Render, Styled, Window, div,
 };
 
 use super::event_inspector::{EventInspector, slot};
-use super::{ListShape, ScreenEvent, empty_list};
+use super::{
+    ALL_NAMESPACES, ListShape, ScreenEvent, chosen_namespace, empty_list, set_namespace_options,
+};
 use crate::kit::{
     Column, FilterBar, FilterEvent, Presence, Select, SelectEvent, ShowAll, StatusGlyph,
     StatusText, Table, TableEvent, chip_label,
@@ -28,7 +30,6 @@ use crate::theme::{
 };
 
 const NO_NAMESPACE: &str = "—";
-const ALL_NAMESPACES: &str = "All namespaces";
 
 pub struct EventsScreen {
     cluster: Option<ClusterId>,
@@ -98,15 +99,8 @@ impl EventsScreen {
                 .width(SEARCH_WIDTH)
         });
         cx.subscribe(&namespaces, |this, select, _: &SelectEvent, cx| {
-            let label = select.read(cx).selected_label().cloned();
-            let Some(label) = label else {
-                return;
-            };
-            let scope = if label.as_ref() == ALL_NAMESPACES {
-                NamespaceSelection::All
-            } else {
-                NamespaceSelection::Named(label.to_string())
-            };
+            let chosen = chosen_namespace(select.read(cx));
+            let scope = NamespaceSelection::of(chosen.as_deref());
             this.choose_namespace(scope, cx);
         })
         .detach();
@@ -168,26 +162,15 @@ impl EventsScreen {
         self.preferences = preferences.clone();
         self.events.clone_from(&detail.events);
         let scope = self.preferences.namespace_selection(EVENT_LIST);
-        let mut names = std::collections::BTreeSet::new();
-        names.extend(detail.namespaces.iter().map(|ns| ns.name.clone()));
-        names.extend(
+        let counts = namespace_counts(
+            detail.namespaces.iter().map(|ns| ns.name.as_str()),
             self.events
                 .iter()
-                .filter_map(|event| event.namespace.clone()),
+                .filter_map(|event| event.namespace.as_deref()),
+            scope.namespace(),
         );
-        if let Some(namespace) = scope.namespace() {
-            names.insert(namespace.into());
-        }
-        let mut options: Vec<SharedString> = vec![ALL_NAMESPACES.into()];
-        options.extend(names.into_iter().map(SharedString::from));
-        let selected = scope
-            .namespace()
-            .and_then(|ns| options.iter().position(|option| option.as_ref() == ns))
-            .unwrap_or_default();
-        self.namespaces.update(cx, |select, cx| {
-            select.set_options(options, cx);
-            select.set_selected(selected, cx);
-        });
+        let total = self.events.len();
+        set_namespace_options(&self.namespaces, &counts, total, scope.namespace(), cx);
         self.refresh(cx);
     }
 

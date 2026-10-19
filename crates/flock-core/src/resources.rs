@@ -112,14 +112,32 @@ impl ResourceKind {
 pub const POD_LIST: &str = "Pod";
 pub const EVENT_LIST: &str = "Event";
 
-pub fn namespace_choices(
-    known: impl IntoIterator<Item = String>,
-    chosen: Option<&str>,
-) -> Vec<String> {
-    let mut names: Vec<String> = known.into_iter().chain(chosen.map(str::to_owned)).collect();
-    names.sort();
-    names.dedup();
-    names
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NamespaceCount {
+    pub name: String,
+    pub count: usize,
+}
+
+pub fn namespace_counts<'a>(
+    cluster: impl IntoIterator<Item = &'a str>,
+    rows: impl IntoIterator<Item = &'a str>,
+    chosen: Option<&'a str>,
+) -> Vec<NamespaceCount> {
+    let mut counts: BTreeMap<&str, usize> = cluster
+        .into_iter()
+        .chain(chosen)
+        .map(|name| (name, 0))
+        .collect();
+    for namespace in rows {
+        *counts.entry(namespace).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(name, count)| NamespaceCount {
+            name: name.to_owned(),
+            count,
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -174,13 +192,6 @@ pub fn explain(resources: &mut BTreeMap<ResourceKind, Vec<Resource>>, events: &[
 
 pub fn filter_counts(rows: &[Resource]) -> Vec<(StatusFilter, usize)> {
     StatusFilter::counts(rows.iter().map(|row| row.status))
-}
-
-pub fn namespaces_of(rows: &[Resource]) -> Vec<String> {
-    let mut names: Vec<String> = rows.iter().map(|row| row.namespace.clone()).collect();
-    names.sort();
-    names.dedup();
-    names
 }
 
 #[cfg(test)]
@@ -297,22 +308,22 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn namespace_choices_include_the_pick_even_before_it_loads() {
-        let known = ["web".to_owned(), "payments".to_owned(), "web".to_owned()];
-        assert_eq!(
-            namespace_choices(known.clone(), Some("loco-system")),
-            ["loco-system", "payments", "web"]
-        );
-        assert_eq!(namespace_choices(known, None), ["payments", "web"]);
-    }
-
-    #[test]
-    fn namespaces_are_sorted_and_unique() {
-        let rows = vec![
-            resource("web", "a", Status::Ok),
-            resource("payments", "b", Status::Ok),
-            resource("web", "c", Status::Ok),
-        ];
-        assert_eq!(namespaces_of(&rows), ["payments", "web"]);
+    fn namespace_counts_list_every_cluster_namespace_with_zeroes() {
+        let cluster = ["web", "default", "kube-public", "payments"];
+        let rows = ["web", "payments", "web", "stray"];
+        let counts: Vec<(String, usize)> = namespace_counts(cluster, rows, Some("loco-system"))
+            .into_iter()
+            .map(|ns| (ns.name, ns.count))
+            .collect();
+        let expected = [
+            ("default", 0),
+            ("kube-public", 0),
+            ("loco-system", 0),
+            ("payments", 1),
+            ("stray", 1),
+            ("web", 2),
+        ]
+        .map(|(name, count)| (name.to_owned(), count));
+        assert_eq!(counts, expected);
     }
 }

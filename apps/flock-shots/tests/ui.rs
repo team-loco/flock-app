@@ -2994,3 +2994,66 @@ fn a_job_page_follows_the_logs_of_all_its_pods() -> anyhow::Result<()> {
     assert!(location.logs.is_some());
     Ok(())
 }
+
+#[test]
+fn the_pod_namespace_picker_lists_every_cluster_namespace() -> anyhow::Result<()> {
+    for appearance in [
+        flock_ui::theme::Appearance::Dark,
+        flock_ui::theme::Appearance::Light,
+    ] {
+        let mut ui = Ui::with(Screen::Pods, flock::Preset::default(), appearance)?;
+        let state = ui.state();
+        let cluster = state
+            .location()
+            .cluster
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("cluster"))?;
+        let mut names: Vec<String> = state
+            .snapshot
+            .details
+            .get(&cluster)
+            .ok_or_else(|| anyhow::anyhow!("details"))?
+            .namespaces
+            .iter()
+            .map(|ns| ns.name.clone())
+            .collect();
+        let with_pods: std::collections::BTreeSet<&str> = state
+            .snapshot
+            .pods
+            .iter()
+            .filter(|pod| pod.cluster == cluster)
+            .map(|pod| pod.namespace.as_str())
+            .collect();
+        let empty = names
+            .iter()
+            .find(|name| !with_pods.contains(name.as_str()))
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("the demo cluster has a namespace without pods"))?;
+        names.extend(with_pods.iter().map(|ns| (*ns).to_owned()));
+        names.sort();
+        names.dedup();
+        ui.click("pod-namespace")?;
+        let last = selector(format!("pod-namespace-option-{}", names.len()));
+        let past = selector(format!("pod-namespace-option-{}", names.len() + 1));
+        assert!(ui.bounds(last).is_some());
+        assert!(ui.bounds(past).is_none());
+        let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+        ui.save_png(&dir.join(format!("pod-namespace-picker-{appearance:?}.png")))?;
+        let ix = names
+            .iter()
+            .position(|name| *name == empty)
+            .ok_or_else(|| anyhow::anyhow!("{empty} is listed"))?;
+        ui.click(selector(format!("pod-namespace-option-{}", ix + 1)))?;
+        let chosen = ui.state().snapshot.catalog.get(&cluster).map(|settings| {
+            settings
+                .preferences
+                .namespace_selection(flock_core::resources::POD_LIST)
+        });
+        assert_eq!(
+            chosen.as_ref().and_then(|scope| scope.namespace()),
+            Some(empty.as_str())
+        );
+        assert!(ui.bounds("empty-state-namespace").is_some());
+    }
+    Ok(())
+}

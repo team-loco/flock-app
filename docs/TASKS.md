@@ -103,3 +103,4 @@ Spec column points at `design/`.
 | DOG1 | flock-loco kind cluster with real Loco, Flux states and ~30 workspaces; verify and Loco live journeys (#229) | claude | dogfood-loco-cluster | done |
 | MENUBAR | Menu-bar health, problem links and persisted setting (#233) | claude | menu-bar-status | done |
 | REL1 | detail pages for every kind, Namespace page, Related section in every inspector (#240) | claude | drilldown-detail-pages | done |
+| NS1 | namespace picker lists every namespace from the Namespace watch, with per-kind counts (#241) | claude | ns-picker-fixes | done |

@@ -23,12 +23,14 @@ pub mod settings;
 pub mod workload;
 
 use flock_core::emptiness::{Emptiness, Noun};
+use flock_core::resources::NamespaceCount;
 use flock_core::{ClusterSummary, Command, Counts, Page, ResourceKind, ResourceRef, Snapshot};
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, FocusHandle, IntoElement, Subscription, Window,
+    AnyElement, App, AppContext, Context, Entity, FocusHandle, IntoElement, SharedString,
+    Subscription, Window,
 };
 
-use crate::kit::{EmptyState, FilterBar, Link, MenuItem, ShowAll};
+use crate::kit::{EmptyState, FilterBar, Link, MenuItem, Select, ShowAll};
 
 pub use events::EventsScreen;
 pub use flux_list::FluxListScreen;
@@ -36,6 +38,39 @@ pub use namespaces::NamespacesScreen;
 pub use nodes::NodesScreen;
 pub use overview::OverviewScreen;
 pub use resources::ResourcesScreen;
+
+pub(crate) const ALL_NAMESPACES: &str = "All namespaces";
+
+pub(crate) fn chosen_namespace(select: &Select) -> Option<String> {
+    select
+        .selected_label()
+        .filter(|label| label.as_ref() != ALL_NAMESPACES)
+        .map(ToString::to_string)
+}
+
+pub(crate) fn set_namespace_options(
+    select: &Entity<Select>,
+    counts: &[NamespaceCount],
+    total: usize,
+    chosen: Option<&str>,
+    cx: &mut App,
+) {
+    let names = counts.iter().map(|ns| SharedString::from(ns.name.clone()));
+    let options: Vec<SharedString> = std::iter::once(ALL_NAMESPACES.into())
+        .chain(names)
+        .collect();
+    let numbers: Vec<usize> = std::iter::once(total)
+        .chain(counts.iter().map(|ns| ns.count))
+        .collect();
+    let selected = chosen
+        .and_then(|ns| options.iter().position(|option| option.as_ref() == ns))
+        .unwrap_or_default();
+    select.update(cx, |select, cx| {
+        select.set_options(options, cx);
+        select.set_counts(numbers, cx);
+        select.set_selected(selected, cx);
+    });
+}
 
 pub(crate) struct ListShape<'a> {
     pub shown: usize,

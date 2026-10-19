@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::filter::TextFilter;
 use std::time::Duration;
@@ -358,15 +358,6 @@ impl PodQuery {
     }
 }
 
-pub fn namespaces(pods: &[Pod], cluster: &ClusterId) -> Vec<String> {
-    let unique: BTreeSet<&str> = pods
-        .iter()
-        .filter(|pod| &pod.cluster == cluster)
-        .map(|pod| pod.namespace.as_str())
-        .collect();
-    unique.into_iter().map(str::to_owned).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -597,7 +588,6 @@ mod tests {
         };
         assert_eq!(failing.apply(&pods, &prod).len(), 1);
         assert_eq!(failing.base(&pods, &prod).len(), 3);
-        assert_eq!(namespaces(&pods, &prod), ["ml", "payments", "web"]);
     }
 
     #[test]
