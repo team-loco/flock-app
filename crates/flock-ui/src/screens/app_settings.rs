@@ -22,6 +22,8 @@ use crate::theme::{
 };
 use crate::updater::{self, Updater};
 
+const MENU_BAR: &str = "Show in menu bar";
+const MENU_BAR_HINT: &str = "Show fleet health and keep Flock running when the last window closes.";
 const APPEARANCE: &str = "Appearance";
 const THEME: &str = "Theme";
 const THEME_HINT: &str = "System follows macOS as it switches between light and dark.";
@@ -286,6 +288,15 @@ impl AppSettingsScreen {
                 }
             });
         section(APPEARANCE, palette).child(row(THEME, THEME_HINT, choices, palette))
+    }
+
+    fn menu_bar(current: &AppSettings, palette: &Palette) -> AnyElement {
+        let toggle =
+            Toggle::new("settings-menu-bar", current.show_in_menu_bar).on_toggle(|on, _, cx| {
+                let on = *on;
+                change(cx, |s| s.show_in_menu_bar = on);
+            });
+        row(MENU_BAR, MENU_BAR_HINT, toggle, palette)
     }
 
     fn highlights(
@@ -575,7 +586,11 @@ impl Render for AppSettingsScreen {
             .max_w(SETTINGS_COLUMN)
             .px(SETTINGS_INSET)
             .pb(SPACE_8)
-            .child(appearance.children(highlights))
+            .child(
+                appearance
+                    .children(highlights)
+                    .child(Self::menu_bar(&current, &palette)),
+            )
             .child(Self::refresh(&current, &palette, cx))
             .child(Self::notifications(&current, &palette, cx))
             .child(updates(&current, &palette, cx))

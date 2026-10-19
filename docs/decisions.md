@@ -294,3 +294,19 @@ Settled; change only with a new entry that says why.
     `INSPECTOR_POD` 360px so the pod list keeps its row actions in view); a dragged width is still
     remembered per inspector and wins. A reveal into another namespace keeps the inspector open
     until the namespace preference round-trips. Loco lists and the workload page are unchanged.
+38. **Menu-bar health** (#233; amends 17 and 27): macOS shows a status item by default, built from
+    the shared Store's snapshots: the worst health glyph and error/warning counts (`✕ 3 ▲ 6`, a calm
+    `●` when healthy) and up to ten problems, errors first, each `cluster · kind/name (namespace) ·
+    reason`. The reason is the problem's own message, the same text the Overview problems list shows;
+    #239's per-object diagnosis is derived for list rows and is not part of the problem snapshot.
+    A problem, and Settings…, open as a tab in the frontmost Flock window (focusing an existing tab
+    at that location) and bring it to the front; with no window they open a new one. Open Flock
+    brings the frontmost window forward or opens one; Quit exits regardless of windows.
+    Settings → Appearance → Show in menu bar is persisted in `AppSettings`. Enabled, closing the last
+    window (its close button, ⌘⇧W, or closing its last tab per 23) keeps Flock and its backend
+    running in the menu bar and drops that window's saved tabs, so reopening does not bring back a
+    window the user closed; disabled, the last window closing quits and keeps its tabs for the next
+    launch as before. The pinned gpui has no status-item API: `apps/flock/src/menubar/native.rs`
+    owns the AppKit objects on the main thread (`MainThreadMarker`) and queues menu actions into
+    gpui, each menu item retaining its target. The workspace denies unsafe code, allowed only in
+    that module.

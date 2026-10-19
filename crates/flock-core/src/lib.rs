@@ -18,6 +18,7 @@ pub mod home;
 pub mod id;
 #[cfg(feature = "loco")]
 pub mod loco;
+pub mod menubar;
 pub mod multilog;
 pub mod nav;
 pub mod nodes;

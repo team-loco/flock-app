@@ -12,9 +12,10 @@ const RED_SHIFT: u32 = 16;
 const GREEN_SHIFT: u32 = 8;
 const CHANNEL: u32 = 0xFF;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
+    pub show_in_menu_bar: bool,
     pub inspector_widths: BTreeMap<String, u16>,
     pub theme: ThemeChoice,
     pub primary: Highlight,
@@ -22,6 +23,27 @@ pub struct AppSettings {
     pub refresh: Refresh,
     pub notifications: Notifications,
     pub updates: Updates,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            show_in_menu_bar: true,
+            inspector_widths: BTreeMap::default(),
+            theme: ThemeChoice::default(),
+            primary: Highlight::default(),
+            secondary: Highlight::default(),
+            refresh: Refresh::default(),
+            notifications: Notifications::default(),
+            updates: Updates::default(),
+        }
+    }
+}
+
+impl AppSettings {
+    pub fn keeps_running_in_menu_bar(&self) -> bool {
+        cfg!(target_os = "macos") && self.show_in_menu_bar
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -328,6 +350,7 @@ mod tests {
     #[test]
     fn settings_round_trip_through_json() {
         let settings = AppSettings {
+            show_in_menu_bar: false,
             theme: ThemeChoice::Dark,
             primary: Highlight::Custom(Rgb {
                 r: 0x3a,
@@ -394,7 +417,19 @@ mod tests {
         };
         assert_eq!(read.ok(), Some(expected));
         let updates = AppSettings::default().updates;
+        assert!(AppSettings::default().show_in_menu_bar);
         assert!(updates.automatic);
         assert!(!updates.prereleases);
+    }
+
+    #[test]
+    fn only_macos_with_the_menu_bar_enabled_keeps_running_without_windows() {
+        let mut settings = AppSettings::default();
+        assert_eq!(
+            settings.keeps_running_in_menu_bar(),
+            cfg!(target_os = "macos")
+        );
+        settings.show_in_menu_bar = false;
+        assert!(!settings.keeps_running_in_menu_bar());
     }
 }
