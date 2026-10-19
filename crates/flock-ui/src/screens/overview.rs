@@ -1,22 +1,26 @@
+use std::rc::Rc;
+
 use flock_core::events::Event;
+use flock_core::events::EventFilter;
 use flock_core::nodes::NodeSummary;
 use flock_core::overview::{
     Capacity, PodPhases, TimeRange, Utilization, UtilizationSource, WorkloadHealth, percent,
     plural, thousands,
 };
 use flock_core::time::age;
-use flock_core::{ClusterDetail, ClusterId, ClusterSummary, Command, Page, Status};
+use flock_core::{ClusterDetail, ClusterId, ClusterSummary, Command, Page, ResourceRef, Status};
 use gpui::{
     AnyElement, App, AppContext, Context, ElementId, Entity, EventEmitter, FontWeight, Hsla,
-    InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, px,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Render, SharedString,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, div, px,
 };
 
 use super::ScreenEvent;
+use super::event_inspector::{EventInspector, slot};
 use crate::kit::{
     Button, CapacityMeter, ClickableSection, Column, EmptyState, ErrorState, LineChart, Link,
-    MetaLine, SectionHeader, SectionLabel, Segmented, Series, StackedBar, StatusText, Table,
-    TableEvent, Tooltip,
+    MetaLine, Presence, SectionHeader, SectionLabel, Segmented, Series, StackedBar, StatusText,
+    Table, TableEvent, Tooltip,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, METER, Palette, RADIUS_SMALL, RULE, SPACE_1, SPACE_3, SPACE_4, SPACE_5,
@@ -29,6 +33,8 @@ const LIVE_TOOLTIP: &str = "Follow new data; turn off to hold the current view";
 const CHART_MAX: f32 = 100.;
 const Y_LABELS: [&str; 5] = ["100%", "75%", "50%", "25%", "0"];
 const SEPARATOR: &str = " · ";
+const NO_NAMESPACE: &str = "—";
+const OBJECT_LINK: &str = "warning-object";
 const ALL_EVENTS: &str = "All events →";
 const UTILIZATION: &str = "Utilization";
 const RETRY: &str = "Retry";
@@ -91,26 +97,65 @@ impl OverviewData {
     }
 }
 
+#[derive(Clone)]
+struct WarningRow {
+    event: Event,
+    target: Option<ResourceRef>,
+}
+
+struct Warnings {
+    rows: Vec<WarningRow>,
+    events: Vec<Event>,
+}
+
+impl Warnings {
+    fn new(cluster: &ClusterSummary, detail: &ClusterDetail) -> Self {
+        let rows = detail
+            .recent_warnings(RECENT_WARNINGS)
+            .into_iter()
+            .map(|event| WarningRow {
+                target: event.target(&cluster.id),
+                event,
+            })
+            .collect();
+        Self {
+            rows,
+            events: detail.events.clone(),
+        }
+    }
+}
+
 pub struct OverviewScreen {
     data: Option<OverviewData>,
-    paused: Option<(OverviewData, Vec<Event>)>,
+    paused: Option<(OverviewData, Warnings)>,
     live: bool,
     range: TimeRange,
-    warnings: Entity<Table<Event>>,
+    events: Vec<Event>,
+    selected: Option<String>,
+    presence: Presence<Event>,
+    warnings: Entity<Table<WarningRow>>,
+}
+
+fn presence_of(screen: &mut OverviewScreen) -> &mut Presence<Event> {
+    &mut screen.presence
 }
 
 impl EventEmitter<ScreenEvent> for OverviewScreen {}
 
 impl OverviewScreen {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        let screen = cx.weak_entity();
         let warnings = cx.new(|cx| {
-            Table::new("overview-warnings", warning_columns(), cx)
+            Table::new("overview-warnings", warning_columns(screen), cx)
                 .empty("No warnings.")
                 .fit_content()
+                .click_opens()
+                .row_key(|row: &WarningRow| row.event.key().into())
         });
-        cx.subscribe(&warnings, |_, _, event: &TableEvent, cx| {
-            if let TableEvent::Opened(_) = event {
-                cx.emit(ScreenEvent::Navigate(Page::Events));
+        cx.subscribe(&warnings, |this, table, event: &TableEvent, cx| {
+            if let TableEvent::Opened(ix) = event {
+                this.selected = table.read(cx).row(*ix).map(|row| row.event.key());
+                cx.notify();
             }
         })
         .detach();
@@ -119,8 +164,47 @@ impl OverviewScreen {
             paused: None,
             live: true,
             range: TimeRange::default(),
+            events: Vec::new(),
+            selected: None,
+            presence: Presence::default(),
             warnings,
         }
+    }
+
+    pub fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.selected.is_none() {
+            return false;
+        }
+        self.close(cx);
+        true
+    }
+
+    fn close(&mut self, cx: &mut Context<Self>) {
+        self.selected = None;
+        self.warnings.update(cx, |table, cx| table.select(None, cx));
+        cx.notify();
+    }
+
+    fn inspector(&self, event: &Event, cx: &mut Context<Self>) -> AnyElement {
+        let target = self
+            .data
+            .as_ref()
+            .and_then(|data| event.target(&data.cluster));
+        let close_screen = cx.weak_entity();
+        let open_screen = cx.weak_entity();
+        EventInspector {
+            event,
+            events: &self.events,
+            target,
+            close: Rc::new(move |_, cx| {
+                let _ = close_screen.update(cx, OverviewScreen::close);
+            }),
+            open: Rc::new(move |target, _, cx| {
+                let command = Command::OpenResource(target);
+                let _ = open_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+            }),
+        }
+        .into_element()
     }
 
     pub fn set(
@@ -130,28 +214,37 @@ impl OverviewScreen {
         cx: &mut Context<Self>,
     ) {
         let data = OverviewData::new(cluster, detail);
-        let recent = detail.recent_warnings(RECENT_WARNINGS);
         if self.live || self.data.is_none() {
-            self.show(data, recent, cx);
+            if self.data.as_ref() != Some(&data) {
+                self.show(data, Warnings::new(cluster, detail), cx);
+            }
         } else {
-            self.paused = Some((data, recent));
+            self.paused = Some((data, Warnings::new(cluster, detail)));
         }
     }
 
-    fn show(&mut self, data: OverviewData, recent: Vec<Event>, cx: &mut Context<Self>) {
+    fn show(&mut self, data: OverviewData, warnings: Warnings, cx: &mut Context<Self>) {
         if self.data.as_ref() == Some(&data) {
             return;
         }
+        if self
+            .data
+            .as_ref()
+            .is_some_and(|shown| shown.cluster != data.cluster)
+        {
+            self.selected = None;
+        }
         self.data = Some(data);
+        self.events = warnings.events;
         self.warnings
-            .update(cx, |table, cx| table.set_rows(recent, cx));
+            .update(cx, |table, cx| table.set_rows(warnings.rows, cx));
         cx.notify();
     }
 
     fn toggle_live(&mut self, cx: &mut Context<Self>) {
         self.live = !self.live;
-        if let Some((data, recent)) = self.paused.take().filter(|_| self.live) {
-            self.show(data, recent, cx);
+        if let Some((data, warnings)) = self.paused.take().filter(|_| self.live) {
+            self.show(data, warnings, cx);
         }
         cx.notify();
     }
@@ -422,6 +515,54 @@ impl Render for OverviewScreen {
         let Some(data) = self.data.clone() else {
             return div().into_any_element();
         };
+        let all_events =
+            Link::new("all-events", ALL_EVENTS).on_click(cx.listener(|_, _, _, cx| {
+                cx.emit(ScreenEvent::ShowEvents(EventFilter::Warnings));
+            }));
+        let current = self
+            .selected
+            .as_ref()
+            .and_then(|key| self.events.iter().find(|event| &event.key() == key))
+            .cloned();
+        let mut presence = std::mem::take(&mut self.presence);
+        let inspector = slot(
+            current,
+            &mut presence,
+            presence_of,
+            |event, cx| self.inspector(event, cx),
+            cx,
+        );
+        self.presence = presence;
+        let content = div()
+            .id("overview-scroll")
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .overflow_y_scroll()
+            .child(self.sections(&data, &palette, all_events, cx));
+        div()
+            .size_full()
+            .flex()
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" && this.selected.is_some() {
+                    this.close(cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(content)
+            .children(inspector)
+            .into_any_element()
+    }
+}
+
+impl OverviewScreen {
+    fn sections(
+        &self,
+        data: &OverviewData,
+        palette: &Palette,
+        all_events: Link,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let middle = div()
             .flex()
             .border_b(RULE)
@@ -435,25 +576,21 @@ impl Render for OverviewScreen {
                     .py(SPACE_7)
                     .border_r(RULE)
                     .border_color(palette.line)
-                    .child(self.utilization(&data, &palette, cx)),
+                    .child(self.utilization(data, palette, cx)),
             )
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .child(Self::workloads(&data, &palette, cx)),
+                    .child(Self::workloads(data, palette, cx)),
             );
-        let all_events =
-            Link::new("all-events", ALL_EVENTS).on_click(cx.listener(|_, _, _, cx| {
-                cx.emit(ScreenEvent::Navigate(Page::Events));
-            }));
         div()
             .flex()
             .flex_col()
             .tab_group()
             .pb(SPACE_8)
             .child(MetaLine::new(data.meta.clone()))
-            .child(Self::capacity(&data, &palette, cx))
+            .child(Self::capacity(data, palette, cx))
             .child(middle)
             .child(
                 SectionHeader::new("Warnings")
@@ -461,7 +598,7 @@ impl Render for OverviewScreen {
                         div()
                             .font_family(FONT_MONO)
                             .text_size(TEXT_SMALL)
-                            .text_color(warnings_color(data.warnings, &palette))
+                            .text_color(warnings_color(data.warnings, palette))
                             .child(data.warnings.to_string()),
                     )
                     .end(div().text_size(TEXT_CONTROL).child(all_events)),
@@ -476,43 +613,77 @@ impl Render for OverviewScreen {
     }
 }
 
-fn warning_columns() -> Vec<Column<Event>> {
+fn warning_columns(screen: WeakEntity<OverviewScreen>) -> Vec<Column<WarningRow>> {
     vec![
-        Column::new("Reason", |e: &Event, _| {
-            StatusText::new(e.status, e.reason.clone()).into_any_element()
+        Column::new("Reason", |row: &WarningRow, _| {
+            StatusText::new(row.event.status, row.event.reason.clone()).into_any_element()
         })
         .fixed(REASON_WIDTH),
-        Column::text("Object", |e: &Event| e.object.clone().into())
-            .mono()
-            .flex(OBJECT_WEIGHT, OBJECT_MIN),
+        Column::new("Object", move |row: &WarningRow, _| {
+            object_cell(row, &screen)
+        })
+        .flex(OBJECT_WEIGHT, OBJECT_MIN),
         Column::colored_text(
             "Namespace",
-            |e: &Event| e.namespace.clone().unwrap_or_else(|| "—".into()).into(),
+            |row: &WarningRow| {
+                row.event
+                    .namespace
+                    .clone()
+                    .unwrap_or_else(|| NO_NAMESPACE.into())
+                    .into()
+            },
             |_, palette| palette.fg2,
         )
         .fixed(NAMESPACE_WIDTH),
         Column::colored_text(
             "Message",
-            |e: &Event| e.message.clone().into(),
+            |row: &WarningRow| row.event.message.clone().into(),
             |_, palette| palette.fg2,
         )
+        .selectable()
+        .tooltip(|row: &WarningRow| row.event.message.clone().into())
         .flex(MESSAGE_WEIGHT, MESSAGE_MIN),
         Column::colored_text(
             "Age",
-            |e: &Event| age(e.age).into(),
+            |row: &WarningRow| age(row.event.age).into(),
             |_, palette| palette.mute,
         )
         .mono()
         .fixed(AGE_WIDTH),
         Column::colored_text(
             "Count",
-            |e: &Event| e.count.to_string().into(),
+            |row: &WarningRow| row.event.count.to_string().into(),
             |_, palette| palette.mute,
         )
         .mono()
         .end()
         .fixed(COUNT_WIDTH),
     ]
+}
+
+fn object_cell(row: &WarningRow, screen: &WeakEntity<OverviewScreen>) -> AnyElement {
+    let object = row.event.object.clone();
+    let Some(target) = row.target.clone() else {
+        return div()
+            .truncate()
+            .font_family(FONT_MONO)
+            .child(object)
+            .into_any_element();
+    };
+    let screen = screen.clone();
+    let id = format!("{OBJECT_LINK}-{object}");
+    let link = Link::new(SharedString::from(id), object)
+        .mono()
+        .on_click(move |_, _, cx| {
+            let command = Command::OpenResource(target.clone());
+            let _ = screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+        });
+    div()
+        .min_w_0()
+        .overflow_hidden()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(link)
+        .into_any_element()
 }
 
 fn warnings_color(warnings: usize, palette: &Palette) -> Hsla {

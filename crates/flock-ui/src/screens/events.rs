@@ -1,4 +1,5 @@
-use crate::kit::SelectableText;
+use std::rc::Rc;
+
 use flock_core::emptiness::Noun;
 use flock_core::events::{self, Event, EventFilter, filter_counts, filter_events};
 use flock_core::filter::label_values;
@@ -14,20 +15,18 @@ use gpui::{
     ParentElement, Render, SharedString, Styled, Window, div,
 };
 
+use super::event_inspector::{EventInspector, slot};
 use super::{ListShape, ScreenEvent, empty_list};
 use crate::kit::{
-    Column, FilterBar, FilterEvent, IconButton, Inspector, KeyValue, Link, Presence, Select,
-    SelectEvent, ShowAll, StatusGlyph, StatusText, Table, TableEvent, chip_label, slide_in,
-    slide_out,
+    Column, FilterBar, FilterEvent, Presence, Select, SelectEvent, ShowAll, StatusGlyph,
+    StatusText, Table, TableEvent, chip_label,
 };
 use crate::theme::{
     EVENT_AGE_WIDTH, EVENT_COUNT_WIDTH, EVENT_MESSAGE_MIN, EVENT_MESSAGE_WEIGHT,
     EVENT_NAMESPACE_WIDTH, EVENT_OBJECT_MIN, EVENT_OBJECT_WEIGHT, EVENT_REASON_WIDTH, GLYPH_SLOT,
-    INSPECTOR, SEARCH_WIDTH, SPACE_3, SPACE_4,
+    SEARCH_WIDTH, SPACE_3, SPACE_4,
 };
 
-const INSPECTOR_ID: &str = "event-inspector";
-const MESSAGE_SELECTOR: &str = "event-message";
 const NO_NAMESPACE: &str = "—";
 const ALL_NAMESPACES: &str = "All namespaces";
 
@@ -39,13 +38,14 @@ pub struct EventsScreen {
     preferences: Preferences,
     namespaces: Entity<Select>,
     selected: Option<String>,
+    requested: Option<EventFilter>,
     presence: Presence<Event>,
     events: Vec<Event>,
     filter: Entity<FilterBar>,
     table: Entity<Table<Event>>,
 }
 
-fn presence(screen: &mut EventsScreen) -> &mut Presence<Event> {
+fn presence_of(screen: &mut EventsScreen) -> &mut Presence<Event> {
     &mut screen.presence
 }
 
@@ -62,6 +62,11 @@ impl EventsScreen {
 
     pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
         gpui::Focusable::focus_handle(&self.table, cx)
+    }
+
+    pub fn show_filter(&mut self, filter: EventFilter, cx: &mut Context<Self>) {
+        self.requested = Some(filter);
+        self.refresh(cx);
     }
 
     pub fn filter_bar(&self) -> &Entity<FilterBar> {
@@ -115,6 +120,7 @@ impl EventsScreen {
             preferences: Preferences::default(),
             namespaces,
             selected: None,
+            requested: None,
             presence: Presence::default(),
             events: Vec::new(),
             filter,
@@ -193,24 +199,30 @@ impl EventsScreen {
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let scope = self.preferences.namespace_selection(EVENT_LIST);
         let scoped = events::in_namespace(&self.events, scope.namespace());
-        let (query, chip) = {
-            let bar = self.filter.read(cx);
-            (bar.query().clone(), bar.chip())
-        };
+        let query = self.filter.read(cx).query().clone();
         let chips = filter_counts(&scoped, &query)
             .into_iter()
             .map(|(filter, count)| chip_label(filter.label(), count))
             .collect();
+        let requested = self
+            .requested
+            .take()
+            .and_then(|filter| EventFilter::ALL.iter().position(|known| *known == filter));
+        let chip = self.filter.update(cx, |bar, cx| {
+            bar.set_chips(chips, cx);
+            if let Some(ix) = requested {
+                bar.select_chip(ix, cx);
+            }
+            bar.chip()
+        });
         let filter = EventFilter::ALL.get(chip).copied().unwrap_or_default();
         let rows = filter_events(&scoped, filter, &query);
         let shown = rows.len();
         self.shown = shown;
         self.in_scope = scoped.len();
         let total = scoped.len();
-        self.filter.update(cx, |bar, cx| {
-            bar.set_chips(chips, cx);
-            bar.set_matches(shown, total, cx);
-        });
+        self.filter
+            .update(cx, |bar, cx| bar.set_matches(shown, total, cx));
         if self
             .selected
             .as_ref()
@@ -233,72 +245,25 @@ impl EventsScreen {
     }
 
     fn inspector(&self, event: &Event, cx: &mut Context<Self>) -> AnyElement {
-        let close = IconButton::glyph("close-event", "×", "Close")
-            .on_click(cx.listener(|this, _, _, cx| this.close(cx)));
-        let details = &event.details;
-        let first_seen = seen(details.first_age, details.first_seen.as_deref());
-        let last_seen = seen(Some(event.age), details.last_seen.as_deref());
-        let facts = KeyValue::new()
-            .sans()
-            .text("Reason", event.reason.clone())
-            .row("Type", StatusText::new(event.status, event_type(event)))
-            .text("Count", event.count.to_string())
-            .text("First seen", first_seen)
-            .text("Last seen", last_seen)
-            .text("Component", value(&details.source_component))
-            .text("Host", value(&details.source_host));
         let target = self
             .cluster
             .as_ref()
             .and_then(|cluster| event.target(cluster));
-        let object = match target {
-            Some(target) => {
-                let weak = cx.weak_entity();
-                Link::new("event-object", event.object.clone())
-                    .mono()
-                    .on_click(move |_, _, cx| {
-                        let command = Command::OpenResource(target.clone());
-                        let _ = weak.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
-                    })
-                    .into_any_element()
-            }
-            None => SelectableText::new(value(&event.object)).into_any_element(),
-        };
-        let related = self
-            .events
-            .iter()
-            .filter(|other| event.same_object(other) && event.key() != other.key())
-            .map(|other| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(SPACE_3)
-                    .child(StatusText::new(
-                        other.status,
-                        format!("{} · {} ago", other.reason, age(other.age)),
-                    ))
-                    .child(SelectableText::new(other.message.clone()))
-            })
-            .collect::<Vec<_>>();
-        let related = if related.is_empty() {
-            div().child("No other events for this object.")
-        } else {
-            div().flex().flex_col().gap(SPACE_4).children(related)
-        };
-        Inspector::new(INSPECTOR_ID, event.reason.clone())
-            .status(event.status, event_type(event))
-            .actions(close)
-            .section(
-                Some("Message"),
-                div()
-                    .debug_selector(|| MESSAGE_SELECTOR.to_owned())
-                    .min_w_0()
-                    .child(SelectableText::new(event.message.clone())),
-            )
-            .section(Some("Details"), facts)
-            .section(Some("Involved object"), object)
-            .section(Some("Other events"), related)
-            .into_any_element()
+        let close_screen = cx.weak_entity();
+        let open_screen = cx.weak_entity();
+        EventInspector {
+            event,
+            events: &self.events,
+            target,
+            close: Rc::new(move |_, cx| {
+                let _ = close_screen.update(cx, EventsScreen::close);
+            }),
+            open: Rc::new(move |target, _, cx| {
+                let command = Command::OpenResource(target);
+                let _ = open_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+            }),
+        }
+        .into_element()
     }
 }
 
@@ -309,7 +274,6 @@ impl Render for EventsScreen {
             .as_ref()
             .and_then(|key| self.events.iter().find(|event| &event.key() == key))
             .cloned();
-        self.presence.track(current.as_ref(), presence, cx);
         let scope = self.preferences.namespace_selection(EVENT_LIST);
         let shape = ListShape {
             shown: self.shown,
@@ -321,23 +285,22 @@ impl Render for EventsScreen {
             cluster: &self.cluster_name,
         };
         let screen = cx.weak_entity();
-        let show_all: ShowAll = std::rc::Rc::new(move |_, cx| {
+        let show_all: ShowAll = Rc::new(move |_, cx| {
             let _ = screen.update(cx, EventsScreen::show_all_namespaces);
         });
         let body: AnyElement = match empty_list(&shape, &self.filter, Some(show_all), cx) {
             Some(empty) => empty.into_any_element(),
             None => self.table.clone().into_any_element(),
         };
-        let inspector = match current {
-            Some(event) => {
-                let panel = self.inspector(&event, cx);
-                Some(slide_in(panel, INSPECTOR_ID, &event.key(), INSPECTOR))
-            }
-            None => self.presence.leaving().cloned().map(|event| {
-                let panel = self.inspector(&event, cx);
-                slide_out(panel, INSPECTOR_ID, INSPECTOR)
-            }),
-        };
+        let mut presence = std::mem::take(&mut self.presence);
+        let inspector = slot(
+            current,
+            &mut presence,
+            presence_of,
+            |event, cx| self.inspector(event, cx),
+            cx,
+        );
+        self.presence = presence;
         div()
             .size_full()
             .flex()
@@ -421,30 +384,4 @@ fn columns() -> Vec<Column<Event>> {
         .fixed(EVENT_COUNT_WIDTH)
         .sort_by_key(|e: &Event| e.count),
     ]
-}
-
-fn value(text: &str) -> String {
-    if text.is_empty() {
-        "Unknown".into()
-    } else {
-        text.into()
-    }
-}
-
-fn event_type(event: &Event) -> String {
-    if !event.details.event_type.is_empty() {
-        return event.details.event_type.clone();
-    }
-    if event.is_warning() {
-        "Warning".into()
-    } else {
-        "Normal".into()
-    }
-}
-
-fn seen(duration: Option<std::time::Duration>, absolute: Option<&str>) -> String {
-    match (duration, absolute) {
-        (Some(duration), Some(absolute)) => format!("{} ago · {absolute}", age(duration)),
-        _ => "Unknown".into(),
-    }
 }

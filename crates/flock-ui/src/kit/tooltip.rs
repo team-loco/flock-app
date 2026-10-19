@@ -1,11 +1,13 @@
 use gpui::{
-    AnyView, App, AppContext, Context, IntoElement, ParentElement, Render, SharedString, Styled,
-    Window, div,
+    AnyView, App, AppContext, Context, InteractiveElement, IntoElement, ParentElement, Render,
+    SharedString, Styled, Window, div,
 };
 
 use crate::theme::{
     ActiveTheme, FONT_SANS, RADIUS, RULE, SPACE_2, SPACE_4, TEXT_SMALL, TOOLTIP_MAX_WIDTH,
 };
+
+pub const TOOLTIP_SELECTOR: &str = "tooltip";
 
 pub struct Tooltip {
     text: SharedString,
@@ -25,6 +27,7 @@ impl Render for Tooltip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = cx.palette();
         div()
+            .debug_selector(|| TOOLTIP_SELECTOR.to_owned())
             .max_w(TOOLTIP_MAX_WIDTH)
             .px(SPACE_4)
             .py(SPACE_2)

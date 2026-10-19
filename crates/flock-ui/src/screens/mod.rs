@@ -3,6 +3,7 @@ pub mod app_settings;
 pub mod changes;
 pub mod command;
 pub mod compare;
+mod event_inspector;
 mod events;
 pub mod flock;
 mod flux_list;
@@ -82,6 +83,7 @@ pub fn new_tab_item(open: Command, emit: impl Fn(Command, &mut App) + 'static) -
 pub enum ScreenEvent {
     Command(Command),
     Navigate(Page),
+    ShowEvents(flock_core::events::EventFilter),
 }
 
 pub struct ClusterPages {
@@ -225,11 +227,17 @@ impl ClusterPages {
         match page {
             Page::Nodes => self.nodes.update(cx, NodesScreen::close_inspector),
             Page::Events => self.events.update(cx, EventsScreen::close_inspector),
+            Page::ClusterOverview => self.overview.update(cx, OverviewScreen::close_inspector),
             other if ResourceKind::for_page(other).is_some() => {
                 self.resources.update(cx, ResourcesScreen::close_inspector)
             }
             _ => false,
         }
+    }
+
+    pub fn show_event_filter(&self, filter: flock_core::events::EventFilter, cx: &mut App) {
+        self.events
+            .update(cx, |screen, cx| screen.show_filter(filter, cx));
     }
 
     pub fn list_focus(&self, page: Page, cx: &mut App) -> Option<FocusHandle> {
