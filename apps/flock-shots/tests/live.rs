@@ -15,7 +15,7 @@ mod kubeconfig;
 
 const E2E_VAR: &str = "FLOCK_E2E";
 const CLUSTER: &str = "kind-fleet-a";
-const CLUSTERS: [&str; 2] = ["kind-fleet-a", "kind-fleet-b"];
+const CLUSTERS: [&str; 3] = ["kind-fleet-a", "kind-fleet-b", "kind-flock-loco"];
 const WINDOW: u64 = 7;
 const WAIT: Duration = Duration::from_secs(120);
 const DATA_DIR: &str = "data";

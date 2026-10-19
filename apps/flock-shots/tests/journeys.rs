@@ -21,7 +21,11 @@ use flock_ui::theme::Appearance;
 mod kubeconfig;
 
 const E2E_VAR: &str = "FLOCK_E2E";
-const CLUSTERS: [(&str, &str); 2] = [("fleet-a", "kind-fleet-a"), ("fleet-b", "kind-fleet-b")];
+const CLUSTERS: [(&str, &str); 3] = [
+    ("fleet-a", "kind-fleet-a"),
+    ("fleet-b", "kind-fleet-b"),
+    ("flock-loco", "kind-flock-loco"),
+];
 const DATA_DIR: &str = "data";
 const LOCO_SECTION: &str = "Loco";
 const CONNECT: Duration = Duration::from_secs(120);
@@ -1408,4 +1412,117 @@ fn live_the_switcher_moves_between_clusters_and_back_to_all() -> anyhow::Result<
         "⌘[ did not return to the cluster"
     );
     check_invariants(&mut ui, &before, "switching clusters")
+}
+
+#[cfg(feature = "loco")]
+const LOCO_CLUSTER: &str = "flock-loco";
+#[cfg(feature = "loco")]
+const LOCO_APPLICATIONS: usize = 60;
+#[cfg(feature = "loco")]
+const LOCO_BUILDS: usize = 8;
+#[cfg(feature = "loco")]
+const LOCO_ROUTES: usize = 29;
+#[cfg(feature = "loco")]
+const LOCO_PAGES: [(Page, &str); 4] = [
+    (Page::LocoPlatform, "loco-components-row-0"),
+    (Page::LocoApplications, "loco-apps-row-1"),
+    (Page::LocoBuilds, "loco-builds-row-0"),
+    (Page::LocoRoutes, "loco-routes-row-0"),
+];
+
+#[cfg(feature = "loco")]
+fn loco_loaded(state: &AppState, page: Page) -> bool {
+    let Some(loco) = state.snapshot.loco.get(&ClusterId::new(LOCO_CLUSTER)) else {
+        return false;
+    };
+    let counted = state
+        .snapshot
+        .cluster(&ClusterId::new(LOCO_CLUSTER))
+        .and_then(|cluster| cluster.nav.get(&page))
+        .is_some_and(|counts| match page {
+            Page::LocoPlatform => counts.warn > 0,
+            Page::LocoBuilds => counts.err > 0,
+            _ => counts.total.is_some() && counts.err + counts.warn > 0,
+        });
+    let rows = match page {
+        Page::LocoPlatform => !loco.platform.components.is_empty(),
+        Page::LocoApplications => loco.applications.total >= LOCO_APPLICATIONS,
+        Page::LocoBuilds => loco.builds.builds.len() >= LOCO_BUILDS,
+        Page::LocoRoutes => loco.routes.total >= LOCO_ROUTES,
+        _ => false,
+    };
+    ready_here(state) && counted && rows
+}
+
+#[cfg(feature = "loco")]
+fn loco_summary(state: &AppState, page: Page) -> String {
+    let id = ClusterId::new(LOCO_CLUSTER);
+    let counts = state
+        .snapshot
+        .cluster(&id)
+        .and_then(|cluster| cluster.nav.get(&page).copied());
+    let loco = state.snapshot.loco.get(&id).map(|loco| {
+        (
+            loco.platform.components.len(),
+            loco.applications.total,
+            loco.builds.builds.len(),
+            loco.routes.total,
+        )
+    });
+    format!("counts {counts:?}, components/applications/builds/routes {loco:?}")
+}
+
+#[cfg(feature = "loco")]
+#[test]
+fn live_every_loco_page_loads_real_loco_with_counts_and_no_toasts() -> anyhow::Result<()> {
+    let Some(make) = kind()? else {
+        return Ok(());
+    };
+    let (mut ui, before) = opened(&make, Screen::Flock)?;
+    switch_to(&mut ui, CLUSTERS[0].0)?;
+    anyhow::ensure!(
+        ui.bounds(nav(Page::LocoPlatform)).is_none(),
+        "{} shows the Loco section without Loco",
+        CLUSTERS[0].0
+    );
+    switch_to(&mut ui, LOCO_CLUSTER)?;
+    for round in ["first visit", "return"] {
+        for (page, row) in LOCO_PAGES {
+            let step = format!("{round} to {LOCO_CLUSTER} {page:?}");
+            visit(&mut ui, page)?;
+            ui.wait_until(PAGE_TIMEOUT, |state| loco_loaded(state, page))
+                .with_context(|| {
+                    format!(
+                        "{step} never loaded its Loco rows and counts: {}",
+                        loco_summary(&ui.state(), page)
+                    )
+                })?;
+            anyhow::ensure!(
+                ui.bounds("loading-skeleton").is_none(),
+                "{step} is stuck loading"
+            );
+            anyhow::ensure!(
+                ui.bounds("error-state").is_none(),
+                "{step} shows an error state"
+            );
+            ui.click(row)
+                .with_context(|| format!("{step} has no {row}"))?;
+            ui.pause(Duration::from_secs(1))?;
+            anyhow::ensure!(
+                ui.bounds("error-state").is_none(),
+                "{step}: selecting {row} shows an error state"
+            );
+            if ui.state().location().page != page {
+                ui.press("cmd-[")?;
+                ui.wait_until(PAGE_TIMEOUT, ready_here)?;
+            }
+            anyhow::ensure!(
+                ui.state().location().page == page,
+                "{step}: going back after {row} landed on {:?}",
+                ui.state().location().page
+            );
+            check_invariants(&mut ui, &before, &step)?;
+        }
+    }
+    Ok(())
 }

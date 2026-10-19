@@ -27,10 +27,10 @@ Every tool is pinned in `mise.toml`. `mise run <task>`:
   (`<table>-row-<ix>`) carry debug selectors named after their element ids.
 - Live UI journeys live in `apps/flock-shots/tests/journeys.rs` (`FLOCK_E2E=1`, run by `e2e:test`):
   `flock_shots::Ui::live(screen, preset, factory)` drives the same shell on a `LiveBackend` over a
-  temporary kubeconfig holding only `kind-fleet-a` and `kind-fleet-b`, with `wait_until(..)` and
+  temporary kubeconfig holding only `kind-fleet-a`, `kind-fleet-b` and `kind-flock-loco` (real Loco), with `wait_until(..)` and
   `pause(..)` for real time. The ignored `live_pages_render_for_review` renders every live page
   dark, light and with non-default highlights into `target/qa/`.
-- `e2e:up` / `e2e:down` create and remove the kind + Flux scenario clusters
+- `e2e:up` / `e2e:down` create and remove the kind + Flux scenario clusters (fleet-a, fleet-b, and flock-loco with real Loco)
 - `e2e:test` brings them up, verifies, and runs every `FLOCK_E2E` test (flags: `--skip-up`, `--no-teardown`)
 
 ## Verifying the UI
