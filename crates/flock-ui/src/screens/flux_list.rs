@@ -8,8 +8,12 @@ use gpui::{
 };
 
 use super::{ListShape, ScreenEvent, empty_list};
-use crate::kit::{Column, FilterBar, FilterEvent, MenuItem, Table, TableEvent, chip_label};
+use crate::kit::{
+    Column, FilterBar, FilterEvent, MenuItem, Table, TableEvent, chip_label, reason_cell,
+    reason_tooltip,
+};
 use crate::screens::{edit_item, new_tab_item};
+use crate::theme::{REASON_MIN, REASON_WEIGHT};
 
 const NAME_WEIGHT: f32 = 1.;
 const NAME_MIN: Pixels = px(220.);
@@ -17,6 +21,7 @@ const NAMESPACE_WIDTH: Pixels = px(130.);
 const KIND_WIDTH: Pixels = px(130.);
 const STATUS_WEIGHT: f32 = 2.;
 const STATUS_MIN: Pixels = px(300.);
+const REASON: &str = "Reason";
 
 pub struct FluxListScreen {
     cluster_name: String,
@@ -235,5 +240,11 @@ fn columns() -> Vec<Column<FluxObject>> {
             .sort_by_key(|o: &FluxObject| o.key.kind.label()),
         Column::text("Status", |o: &FluxObject| o.sentence.plain().into())
             .flex(STATUS_WEIGHT, STATUS_MIN),
+        Column::new(REASON, |o: &FluxObject, palette| {
+            reason_cell(o.status(), o.current_diagnosis(), palette)
+        })
+        .tooltip(|o: &FluxObject| reason_tooltip(o.current_diagnosis()))
+        .flex(REASON_WEIGHT, REASON_MIN)
+        .sort_by_key(|o: &FluxObject| o.current_diagnosis().map(|d| d.reason.clone())),
     ]
 }

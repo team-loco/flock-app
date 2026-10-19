@@ -2773,3 +2773,99 @@ fn edit_yaml_states_render_for_review() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+fn top(ui: &mut Ui, selector: &'static str) -> anyhow::Result<Pixels> {
+    ui.bounds(selector)
+        .map(|b| b.origin.y)
+        .ok_or_else(|| anyhow::anyhow!("no {selector}"))
+}
+
+#[test]
+fn unhealthy_job_inspector_leads_with_whats_wrong_then_conditions_events_and_yaml()
+-> anyhow::Result<()> {
+    for appearance in [
+        flock_ui::theme::Appearance::Dark,
+        flock_ui::theme::Appearance::Light,
+    ] {
+        let mut ui = Ui::with(Screen::JobInspector, flock::Preset::default(), appearance)?;
+        assert!(ui.bounds("reason-cell").is_some());
+        let wrong = top(&mut ui, "whats-wrong")?;
+        let conditions = top(&mut ui, "condition-table")?;
+        let events = top(&mut ui, "object-events")?;
+        let yaml = top(&mut ui, "code-horizontal")?;
+        assert!(wrong < conditions && conditions < events && events < yaml);
+        let pane = ui
+            .bounds("resource-inspector-pane")
+            .ok_or_else(|| anyhow::anyhow!("no inspector"))?;
+        let block = ui
+            .bounds("whats-wrong")
+            .ok_or_else(|| anyhow::anyhow!("no summary"))?;
+        assert!(block.origin.x + block.size.width <= pane.origin.x + pane.size.width);
+    }
+    Ok(())
+}
+
+#[test]
+fn healthy_objects_have_no_reason_or_whats_wrong() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::ResourceInspector)?;
+    assert!(ui.bounds("resource-inspector-pane").is_some());
+    assert!(ui.bounds("whats-wrong").is_none());
+    assert!(ui.bounds("reason-cell").is_none());
+    assert!(ui.bounds("object-events").is_none());
+    Ok(())
+}
+
+#[test]
+fn inspector_width_defaults_per_kind_and_a_dragged_width_wins() -> anyhow::Result<()> {
+    use flock_ui::theme::{INSPECTOR_RESOURCE, INSPECTOR_WORKLOAD};
+    use gpui::{point, px};
+    let width = |ui: &mut Ui| ui.bounds("resource-inspector-pane").map(|b| b.size.width);
+    let mut job = Ui::open(Screen::JobInspector)?;
+    assert_eq!(width(&mut job), Some(INSPECTOR_WORKLOAD));
+    let mut config = Ui::open(Screen::ResourceInspector)?;
+    assert_eq!(width(&mut config), Some(INSPECTOR_RESOURCE));
+    job.drag("resource-inspector-resize", point(px(40.), px(0.)))?;
+    assert_eq!(width(&mut job), Some(INSPECTOR_WORKLOAD - px(40.)));
+    job.click("close-resource")?;
+    job.click("resources-Job-row-2")?;
+    assert_eq!(width(&mut job), Some(INSPECTOR_WORKLOAD - px(40.)));
+    Ok(())
+}
+
+#[test]
+fn crashing_pod_inspector_says_whats_wrong_above_conditions_and_events() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    let wrong = top(&mut ui, "whats-wrong")?;
+    let conditions = top(&mut ui, "condition-table")?;
+    let events = top(&mut ui, "object-events")?;
+    assert!(wrong < conditions && conditions < events);
+    let pane = ui
+        .bounds("pod-inspector-pane")
+        .ok_or_else(|| anyhow::anyhow!("no inspector"))?;
+    assert_eq!(pane.size.width, flock_ui::theme::INSPECTOR_POD);
+    Ok(())
+}
+
+#[test]
+fn cordoned_node_shows_its_reason_in_the_list_and_inspector() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Nodes)?;
+    assert!(ui.bounds("reason-cell").is_some());
+    ui.click("nodes-row-9")?;
+    assert!(ui.bounds("whats-wrong").is_some());
+    assert!(ui.bounds("condition-table").is_some());
+    ui.click("nodes-row-0")?;
+    assert!(ui.bounds("whats-wrong").is_none());
+    assert!(ui.bounds("condition-table").is_some());
+    Ok(())
+}
+
+#[test]
+fn failing_flux_list_and_page_name_the_reason() -> anyhow::Result<()> {
+    let mut list = Ui::open(Screen::Kustomizations)?;
+    assert!(list.bounds("reason-cell").is_some());
+    let mut page = Ui::open(Screen::Kustomization)?;
+    let wrong = top(&mut page, "whats-wrong")?;
+    let conditions = top(&mut page, "condition-table")?;
+    assert!(wrong < conditions);
+    Ok(())
+}

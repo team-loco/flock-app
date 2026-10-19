@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use flock_core::home::Problem;
-use flock_core::{ClusterId, ResourceRef, Status};
+use flock_core::{ClusterId, Diagnosis, ResourceRef, Status};
 use jiff::Timestamp;
-use k8s_openapi::api::core::v1::{Node, Pod, PodCondition};
+use k8s_openapi::api::core::v1::{ContainerStatus, Node, Pod, PodCondition};
 
 use crate::clock::{age, since};
 use crate::manager::ConnectionStatus;
@@ -31,6 +31,7 @@ const NOT_READY_GRACE: Duration = Duration::from_secs(120);
 const ELLIPSIS: char = '…';
 const CORDONED: &str = "Cordoned (SchedulingDisabled)";
 const NOT_READY: &str = "NotReady";
+const SINGLE: i32 = 1;
 const UNSCHEDULABLE_TAINT: &str = "node.kubernetes.io/unschedulable";
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -86,6 +87,7 @@ pub enum Issue {
         message: String,
         restarts: i32,
         exit: Option<i32>,
+        last: Option<String>,
     },
     Unschedulable {
         message: String,
@@ -101,6 +103,38 @@ impl Issue {
             Self::Waiting { .. } => Status::Err,
             Self::Unschedulable { .. } => Status::Warn,
             Self::NotReady { .. } => Status::Warn,
+        }
+    }
+
+    pub fn diagnosis(&self) -> Diagnosis {
+        match self {
+            Self::Waiting {
+                reason,
+                restarts,
+                last,
+                ..
+            } if reason == CRASH_LOOP => {
+                let noun = if *restarts == SINGLE {
+                    "restart"
+                } else {
+                    "restarts"
+                };
+                let message = match last {
+                    Some(last) => format!("{restarts} {noun}, last {last}"),
+                    None => format!("{restarts} {noun}"),
+                };
+                Diagnosis::new(reason.clone(), message)
+            }
+            Self::Waiting {
+                reason, message, ..
+            } => Diagnosis::new(reason.clone(), message.clone()),
+            Self::Unschedulable { message } => Diagnosis::new(UNSCHEDULABLE, message.clone()),
+            Self::NotReady {
+                container: Some(container),
+            } => Diagnosis::new(NOT_READY, format!("{container} is running but not ready")),
+            Self::NotReady { container: None } => {
+                Diagnosis::new(NOT_READY, "running but not ready")
+            }
         }
     }
 
@@ -141,6 +175,19 @@ fn clause(reason: &str, message: &str) -> String {
     } else {
         format!("{reason}: {message}")
     }
+}
+
+pub(crate) fn last_exit(container: &ContainerStatus) -> Option<String> {
+    let terminated = container.last_state.as_ref()?.terminated.as_ref()?;
+    let code = terminated.exit_code;
+    let reason = terminated
+        .reason
+        .as_deref()
+        .filter(|reason| !reason.is_empty());
+    Some(match reason {
+        Some(reason) => format!("exit {reason} ({code})"),
+        None => format!("exit {code}"),
+    })
 }
 
 fn condition<'a>(pod: &'a Pod, kind: &str) -> Option<&'a PodCondition> {
@@ -186,6 +233,7 @@ fn waiting_issue(pod: &Pod) -> Option<Issue> {
                 message: waiting.message.clone().unwrap_or_default(),
                 restarts: container.restart_count,
                 exit,
+                last: last_exit(container),
             })
         })
 }

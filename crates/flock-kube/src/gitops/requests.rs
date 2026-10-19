@@ -91,6 +91,8 @@ mod tests {
             spec: Vec::new(),
             yaml: String::new(),
             detail: FluxDetail::Kustomization,
+            conditions: Vec::new(),
+            diagnosis: None,
         }
     }
 

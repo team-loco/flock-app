@@ -62,6 +62,24 @@ impl Event {
         })
     }
 
+    pub fn is_about(&self, kind: &str, namespace: Option<&str>, name: &str) -> bool {
+        let Some((object_kind, object_name)) = self.object.split_once('/') else {
+            return false;
+        };
+        let event_kind = if self.details.kind.is_empty() {
+            object_kind
+        } else {
+            &self.details.kind
+        };
+        let event_namespace = self
+            .details
+            .object_namespace
+            .as_deref()
+            .or(self.namespace.as_deref());
+        let same_namespace = namespace.is_none_or(|ns| event_namespace == Some(ns));
+        object_name == name && event_kind.eq_ignore_ascii_case(kind) && same_namespace
+    }
+
     pub fn same_object(&self, other: &Self) -> bool {
         match (&self.details.object_uid, &other.details.object_uid) {
             (Some(left), Some(right)) => left == right,

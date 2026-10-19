@@ -1,7 +1,9 @@
 use flock_core::emptiness::Noun;
+use flock_core::events::Event;
 use flock_core::filter::{StatusFilter, label_values};
 use flock_core::nodes::{Node, NodeSummary, Usage};
 use flock_core::overview::{Capacity, Commitment, percent};
+use flock_core::pods::PodEvent;
 use flock_core::time::age;
 use flock_core::units::{CPU_UNIT, MEMORY_UNIT};
 use flock_core::{
@@ -14,14 +16,15 @@ use gpui::{
 
 use super::{NODE_KIND, ScreenEvent};
 use crate::kit::{
-    Button, CapacityMeter, Column, ConfirmDialog, FilterBar, FilterEvent, IconButton, Inspector,
-    KeyValue, MenuItem, MetaLine, Meter, MiniMeter, Presence, SectionLabel, StatusGlyph,
-    StatusText, Table, TableEvent, chip_label, confirm, slide_in, slide_out,
+    Button, CONDITIONS, CapacityMeter, Column, ConditionTable, ConfirmDialog, EVENTS, EventList,
+    FilterBar, FilterEvent, IconButton, Inspector, KeyValue, MenuItem, MetaLine, Meter, MiniMeter,
+    Presence, SectionLabel, SelectableText, StatusText, Table, TableEvent, WHATS_WRONG, WhatsWrong,
+    chip_label, confirm, reason_cell, reason_tooltip, slide_in, slide_out,
 };
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, INSPECTOR, Palette, SPACE_2, SPACE_3, SPACE_4, SPACE_5, TEXT_MONO,
-    TEXT_SMALL,
+    ActiveTheme, FONT_MONO, INSPECTOR_NODE, Palette, REASON_MIN, REASON_WEIGHT, SPACE_2, SPACE_3,
+    SPACE_4, SPACE_5, TEXT_MONO, TEXT_SMALL,
 };
 
 const NONE: &str = "none";
@@ -38,7 +41,7 @@ const PODS_WIDTH: Pixels = px(60.);
 const VERSION_WIDTH: Pixels = px(64.);
 const AGE_WIDTH: Pixels = px(40.);
 const INSPECTOR_LABEL: Pixels = px(84.);
-const CONDITION_LABEL: Pixels = px(112.);
+const REASON: &str = "Reason";
 const INSPECTOR_ID: &str = "node-inspector";
 
 pub struct NodesScreen {
@@ -47,6 +50,7 @@ pub struct NodesScreen {
     shown: usize,
     summary: NodeSummary,
     nodes: Vec<Node>,
+    events: Vec<Event>,
     confirm_destructive: bool,
     selected: Option<String>,
     table: Entity<Table<Node>>,
@@ -102,6 +106,7 @@ impl NodesScreen {
             shown: 0,
             summary: NodeSummary::default(),
             nodes: Vec::new(),
+            events: Vec::new(),
             confirm_destructive: true,
             selected: None,
             table,
@@ -123,6 +128,10 @@ impl NodesScreen {
         if self.confirm_destructive != confirm_destructive {
             self.confirm_destructive = confirm_destructive;
             self.refresh(cx);
+        }
+        if self.events != detail.events {
+            self.events.clone_from(&detail.events);
+            cx.notify();
         }
         if self.nodes == detail.nodes {
             return;
@@ -271,50 +280,25 @@ impl NodesScreen {
             .text("runtime", node.runtime.clone())
             .text("age", age(node.age));
         let capacity = node_capacity(node, palette);
-        let conditions = node.conditions.iter().map(|c| {
-            let status = if c.healthy { Status::Ok } else { Status::Err };
-            div()
-                .flex()
-                .items_center()
-                .gap(SPACE_4)
-                .child(StatusGlyph::new(status))
-                .child(
-                    div()
-                        .w(CONDITION_LABEL)
-                        .flex_none()
-                        .truncate()
-                        .child(c.kind.clone()),
-                )
-                .child(
-                    div()
-                        .font_family(FONT_MONO)
-                        .text_size(TEXT_SMALL)
-                        .text_color(palette.fg2)
-                        .flex_none()
-                        .child(c.value.clone()),
-                )
-                .child(
-                    div()
-                        .truncate()
-                        .text_color(palette.mute)
-                        .child(c.message.clone()),
-                )
-        });
-        Inspector::new(INSPECTOR_ID, node.name.clone())
+        let events: Vec<PodEvent> =
+            flock_core::diagnosis::about(&self.events, NODE_KIND, None, &node.name)
+                .into_iter()
+                .map(PodEvent::from)
+                .collect();
+        let mut inspector = Inspector::new(INSPECTOR_ID, node.name.clone())
             .mono()
+            .width(INSPECTOR_NODE)
             .status(node.status, node.state.clone())
-            .actions(div().flex().gap(SPACE_3).children(primary).child(close))
+            .actions(div().flex().gap(SPACE_3).children(primary).child(close));
+        if let Some(diagnosis) = node.diagnosis() {
+            inspector =
+                inspector.section(Some(WHATS_WRONG), WhatsWrong::new(node.status, diagnosis));
+        }
+        inspector
+            .section(Some(CONDITIONS), ConditionTable::new(&node.conditions))
+            .section(Some(EVENTS), EventList::new(events))
             .section(None, facts.into_any_element())
             .section(Some("Capacity"), capacity.into_any_element())
-            .section(
-                Some("Conditions"),
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(SPACE_3)
-                    .children(conditions)
-                    .into_any_element(),
-            )
             .section(Some("Taints"), label_list(&node.taints, palette))
             .section(Some("Labels"), label_list(&node.labels, palette))
             .into_any_element()
@@ -342,11 +326,11 @@ impl Render for NodesScreen {
         let inspector = match current {
             Some(node) => {
                 let panel = self.inspector(&node, &palette, cx);
-                Some(slide_in(panel, INSPECTOR_ID, motion, INSPECTOR))
+                Some(slide_in(panel, INSPECTOR_ID, motion, INSPECTOR_NODE))
             }
             None => self.presence.leaving().cloned().map(|node| {
                 let panel = self.inspector(&node, &palette, cx);
-                slide_out(panel, INSPECTOR_ID, INSPECTOR)
+                slide_out(panel, INSPECTOR_ID, INSPECTOR_NODE)
             }),
         };
         div()
@@ -455,7 +439,12 @@ fn label_list(items: &[String], palette: &Palette) -> AnyElement {
     } else {
         items
             .iter()
-            .map(|item| div().truncate().child(item.clone()).into_any_element())
+            .map(|item| {
+                div()
+                    .min_w_0()
+                    .child(SelectableText::new(item.clone()))
+                    .into_any_element()
+            })
             .collect()
     };
     div()
@@ -612,6 +601,11 @@ fn columns() -> Vec<Column<Node>> {
         )
         .mono()
         .fixed(VERSION_WIDTH),
+        Column::new(REASON, |n: &Node, palette| {
+            reason_cell(n.status, n.diagnosis().as_ref(), palette)
+        })
+        .tooltip(|n: &Node| reason_tooltip(n.diagnosis().as_ref()))
+        .flex(REASON_WEIGHT, REASON_MIN),
         Column::colored_text("Age", |n: &Node| age(n.age).into(), |_, p| p.mute)
             .mono()
             .fixed(AGE_WIDTH)

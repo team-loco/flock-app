@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use flock_core::diagnosis::{self, claim, from_conditions};
 use flock_core::resources::{Resource, ResourceKind};
 use flock_core::time::age as age_label;
-use flock_core::{Counts, Status, Uid};
+use flock_core::{Condition, Counts, Diagnosis, Status, Uid};
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
@@ -15,6 +16,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::api::PartialObjectMeta;
 
 use crate::clock::{age, between};
+use crate::conditions::conditions;
 use crate::detail::PodIndex;
 use crate::manager::ClusterHandle;
 use crate::problems::OwnerKey;
@@ -45,7 +47,29 @@ fn row(meta: &ObjectMeta, status: Status, cells: Vec<String>, now: Timestamp) ->
         age: age(meta, now),
         yaml: String::new(),
         labels,
+        conditions: Vec::new(),
+        diagnosis: None,
     }
+}
+
+fn explained(
+    mut resource: Resource,
+    conditions: Vec<Condition>,
+    diagnosis: Option<Diagnosis>,
+) -> Resource {
+    resource.diagnosis = diagnosis.filter(|_| diagnosis::needs_diagnosis(resource.status));
+    resource.conditions = conditions;
+    resource
+}
+
+fn workload_diagnosis(
+    pods: &PodIndex,
+    meta: &ObjectMeta,
+    kind: ResourceKind,
+    conditions: &[Condition],
+) -> Option<Diagnosis> {
+    pods.diagnosis(&owner(meta, kind))
+        .or_else(|| from_conditions(conditions))
 }
 
 fn owner(meta: &ObjectMeta, kind: ResourceKind) -> OwnerKey {
@@ -117,7 +141,14 @@ pub fn deployment(item: &Deployment, pods: &PodIndex, now: Timestamp) -> Resourc
         available.to_string(),
         image(spec.map(|s| &s.template)),
     ];
-    row(&item.metadata, health, cells, now)
+    let conditions = conditions(status.and_then(|s| s.conditions.as_ref()), now);
+    let kind = ResourceKind::Deployment;
+    let diagnosis = workload_diagnosis(pods, &item.metadata, kind, &conditions);
+    explained(
+        row(&item.metadata, health, cells, now),
+        conditions,
+        diagnosis,
+    )
 }
 
 fn stateful_set_replicas(item: &StatefulSet) -> (i32, i32) {
@@ -151,7 +182,16 @@ pub fn stateful_set(item: &StatefulSet, pods: &PodIndex, now: Timestamp) -> Reso
         or_missing(service),
         image(spec.map(|s| &s.template)),
     ];
-    row(&item.metadata, stateful_set_status(item, pods), cells, now)
+    let status = item.status.as_ref();
+    let conditions = conditions(status.and_then(|s| s.conditions.as_ref()), now);
+    let kind = ResourceKind::StatefulSet;
+    let diagnosis = workload_diagnosis(pods, &item.metadata, kind, &conditions);
+    let health = stateful_set_status(item, pods);
+    explained(
+        row(&item.metadata, health, cells, now),
+        conditions,
+        diagnosis,
+    )
 }
 
 fn daemon_set_pods(item: &DaemonSet) -> (i32, i32) {
@@ -186,7 +226,16 @@ pub fn daemon_set(item: &DaemonSet, pods: &PodIndex, now: Timestamp) -> Resource
         or_missing(selector),
         image(spec.map(|s| &s.template)),
     ];
-    row(&item.metadata, daemon_set_status(item, pods), cells, now)
+    let status = item.status.as_ref();
+    let conditions = conditions(status.and_then(|s| s.conditions.as_ref()), now);
+    let kind = ResourceKind::DaemonSet;
+    let diagnosis = workload_diagnosis(pods, &item.metadata, kind, &conditions);
+    let health = daemon_set_status(item, pods);
+    explained(
+        row(&item.metadata, health, cells, now),
+        conditions,
+        diagnosis,
+    )
 }
 
 fn job_outcome(item: &Job) -> (Status, &'static str) {
@@ -214,7 +263,16 @@ fn job_outcome(item: &Job) -> (Status, &'static str) {
     }
 }
 
-pub fn job(item: &Job, now: Timestamp) -> Resource {
+fn job_status(item: &Job, pods: &PodIndex) -> Status {
+    let (outcome, _) = job_outcome(item);
+    let issue = pods.issue(&owner(&item.metadata, ResourceKind::Job));
+    match (outcome, issue) {
+        (Status::Progress, Some(issue)) => issue.max(outcome),
+        _ => outcome,
+    }
+}
+
+pub fn job(item: &Job, pods: &PodIndex, now: Timestamp) -> Resource {
     let status = item.status.as_ref();
     let completions = item
         .spec
@@ -230,13 +288,21 @@ pub fn job(item: &Job, now: Timestamp) -> Resource {
         || MISSING.to_owned(),
         |started| age_label(between(started, finished)),
     );
-    let (health, label) = job_outcome(item);
+    let (_, label) = job_outcome(item);
     let cells = vec![
         format!("{succeeded}/{completions}"),
         duration,
         label.to_owned(),
     ];
-    row(&item.metadata, health, cells, now)
+    let conditions = conditions(status.and_then(|s| s.conditions.as_ref()), now);
+    let owner = owner(&item.metadata, ResourceKind::Job);
+    let diagnosis = from_conditions(&conditions).or_else(|| pods.diagnosis(&owner));
+    let health = job_status(item, pods);
+    explained(
+        row(&item.metadata, health, cells, now),
+        conditions,
+        diagnosis,
+    )
 }
 
 fn cron_job_status(item: &CronJob) -> Status {
@@ -347,7 +413,14 @@ pub fn pvc(item: &PersistentVolumeClaim, now: Timestamp) -> Resource {
         ),
         or_missing(spec.and_then(|s| s.volume_name.clone()).unwrap_or_default()),
     ];
-    row(&item.metadata, health, cells, now)
+    let conditions = conditions(status.and_then(|s| s.conditions.as_ref()), now);
+    let phase = status.and_then(|s| s.phase.as_deref()).unwrap_or_default();
+    let diagnosis = claim(phase, &conditions);
+    explained(
+        row(&item.metadata, health, cells, now),
+        conditions,
+        diagnosis,
+    )
 }
 
 fn sorted(mut rows: Vec<Resource>) -> Vec<Resource> {
@@ -378,7 +451,7 @@ pub fn rows(
         ResourceKind::DaemonSet => {
             map(&handle.objects::<DaemonSet>(), |i| daemon_set(i, pods, now))
         }
-        ResourceKind::Job => map(&handle.objects::<Job>(), |i| job(i, now)),
+        ResourceKind::Job => map(&handle.objects::<Job>(), |i| job(i, pods, now)),
         ResourceKind::CronJob => map(&handle.objects::<CronJob>(), |i| cron_job(i, now)),
         ResourceKind::Service => map(&handle.objects::<Service>(), |i| service(i, now)),
         ResourceKind::Ingress => map(&handle.objects::<Ingress>(), |i| ingress(i, now)),
@@ -409,7 +482,7 @@ pub fn counts(handle: &ClusterHandle, kind: ResourceKind, pods: &PodIndex) -> Co
         ResourceKind::DaemonSet => tally(&handle.objects::<DaemonSet>(), |i| {
             daemon_set_status(i, pods)
         }),
-        ResourceKind::Job => tally(&handle.objects::<Job>(), |i| job_outcome(i).0),
+        ResourceKind::Job => tally(&handle.objects::<Job>(), |i| job_status(i, pods)),
         ResourceKind::CronJob => tally(&handle.objects::<CronJob>(), cron_job_status),
         ResourceKind::Service => Counts::total(count(handle.objects::<Service>().len())),
         ResourceKind::Ingress => Counts::total(count(handle.objects::<Ingress>().len())),
@@ -480,7 +553,13 @@ mod tests {
             )],
             now(),
         );
-        assert_eq!(deployment(&item, &crashing, now()).status, Status::Err);
+        let crashed = deployment(&item, &crashing, now());
+        assert_eq!(crashed.status, Status::Err);
+        assert_eq!(
+            crashed.diagnosis.map(|d| d.reason),
+            Some("CrashLoopBackOff".into())
+        );
+        assert_eq!(rolling.diagnosis, None);
     }
 
     #[test]
@@ -493,9 +572,63 @@ mod tests {
                 "conditions": [{ "type": "Failed", "status": "True" }]
             }
         }));
-        let row = job(&item, now());
+        let quiet = PodIndex::build(&[], now());
+        let row = job(&item, &quiet, now());
         assert_eq!(row.cells, ["0/1", "14m", "Failed"]);
         assert_eq!(row.status, Status::Err);
+        assert_eq!(row.diagnosis.map(|d| d.reason), Some("Failed".into()));
+    }
+
+    #[test]
+    fn failed_jobs_explain_the_deadline_and_running_jobs_their_pods() {
+        let item: Arc<Job> = parse(json!({
+            "metadata": { "name": "backfill", "namespace": "data" },
+            "spec": { "template": {}, "activeDeadlineSeconds": 600 },
+            "status": {
+                "startTime": at(14),
+                "conditions": [
+                    { "type": "FailureTarget", "status": "True", "reason": "DeadlineExceeded", "message": "Job was active longer than specified deadline" },
+                    { "type": "Failed", "status": "True", "reason": "DeadlineExceeded", "message": "Job was active longer than specified deadline", "lastTransitionTime": at(4) }
+                ]
+            }
+        }));
+        let quiet = PodIndex::build(&[], now());
+        let row = job(&item, &quiet, now());
+        assert_eq!(
+            row.diagnosis,
+            Some(Diagnosis::new(
+                "DeadlineExceeded",
+                "Job was active longer than specified deadline"
+            ))
+        );
+        assert_eq!(row.conditions.len(), 2);
+        assert_eq!(
+            row.conditions[1].age,
+            Some(std::time::Duration::from_secs(240))
+        );
+        let running: Arc<Job> = parse(json!({
+            "metadata": { "name": "import", "namespace": "payments" },
+            "spec": { "template": {} },
+            "status": { "active": 1 }
+        }));
+        let mut pod = (*replica_pod("import-x", "import", "1", &crash_status())).clone();
+        if let Some(owner) = pod
+            .metadata
+            .owner_references
+            .as_mut()
+            .and_then(|o| o.first_mut())
+        {
+            owner.kind = "Job".into();
+            owner.name = "import".into();
+        }
+        let pod_index = PodIndex::build(&[Arc::new(pod)], now());
+        let row = job(&running, &pod_index, now());
+        assert_eq!(row.status, Status::Err);
+        assert_eq!(
+            row.diagnosis.map(|d| d.reason),
+            Some("CrashLoopBackOff".into())
+        );
+        assert_eq!(job(&running, &quiet, now()).diagnosis, None);
     }
 
     #[test]
@@ -516,6 +649,7 @@ mod tests {
         let row = pvc(&claim, now());
         assert_eq!(row.cells, ["Pending", "—", "standard", "—"]);
         assert_eq!(row.status, Status::Warn);
+        assert_eq!(row.diagnosis, Some(Diagnosis::new("Pending", "")));
     }
 
     #[test]

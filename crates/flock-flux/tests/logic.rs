@@ -3,8 +3,8 @@ use std::{error::Error, io::Write};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use flate2::{Compression, write::GzEncoder};
 use flock_flux::{
-    GitOpsObject, InventoryEntry, ObjectError, ObjectKind, Status, actions, generated,
-    helm_storage, matrix, redact, summarize,
+    GitOpsObject, InventoryEntry, ObjectError, ObjectKind, Status, actions, failing_condition,
+    generated, helm_storage, matrix, redact, summarize,
 };
 use k8s_openapi::api::core::v1::Secret;
 use serde::Deserialize;
@@ -88,6 +88,35 @@ fn a_retry_after_a_failure_stays_failed_until_it_succeeds() -> TestResult {
     assert_eq!(summarize(&succeeded, None).status, Status::Ok);
     fresh.carry_failure(remembered);
     assert_eq!(summarize(&fresh, None).status, Status::Progress);
+    Ok(())
+}
+
+#[test]
+fn failing_condition_names_ready_released_or_stalled() -> TestResult {
+    let [failed, retrying, _] = retry_cycle()?;
+    let reason = |object: &GitOpsObject| failing_condition(object).map(|c| c.reason.clone());
+    assert_eq!(reason(&failed).as_deref(), Some("ArtifactFailed"));
+    let mut carried = retrying.clone();
+    carried.carry_failure(failing_condition(&failed).cloned());
+    assert_eq!(reason(&carried).as_deref(), Some("ArtifactFailed"));
+    let mut release = object(HELMRELEASE)?;
+    release.conditions = serde_json::from_value(json!([
+        {"type": "Ready", "status": "False", "reason": "UpgradeFailed", "message": "Helm upgrade failed"},
+        {"type": "Released", "status": "False", "reason": "UpgradeFailed",
+         "message": "Helm upgrade failed for release monitoring/kube-prometheus-stack: timed out waiting for the condition"}
+    ]))?;
+    let released = failing_condition(&release).map(|c| c.message.clone());
+    assert!(released.is_some_and(|m| m.contains("timed out waiting")));
+    release.conditions.push(serde_json::from_value(json!(
+        {"type": "Stalled", "status": "True", "reason": "RetriesExceeded", "message": "Failed to upgrade after 3 attempts"}
+    ))?);
+    assert_eq!(reason(&release).as_deref(), Some("RetriesExceeded"));
+    release.suspended = true;
+    assert!(failing_condition(&release).is_none());
+    let ready = object(KUSTOMIZATION)?;
+    assert!(failing_condition(&ready).is_none());
+    let source = object(SOURCE)?;
+    assert_eq!(reason(&source).as_deref(), Some("GitOperationFailed"));
     Ok(())
 }
 

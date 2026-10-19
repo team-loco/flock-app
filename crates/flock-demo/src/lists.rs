@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::time::Duration;
 
-use flock_core::Status;
-use flock_core::Uid;
+use flock_core::diagnosis::from_conditions;
 use flock_core::resources::{Resource, ResourceKind};
 use flock_core::time::age;
+use flock_core::{Condition, Diagnosis, Status, Uid};
 
 use crate::detail::{days, hours, minutes};
 
@@ -28,6 +28,9 @@ const CLUSTER_AGE_DAYS: u64 = 214;
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0100_0000_01b3;
 const UID_GROUPS: [usize; 5] = [8, 4, 4, 4, 12];
+const TRUE: &str = "True";
+const FALSE: &str = "False";
+const DEADLINE_MESSAGE: &str = "Job was active longer than specified deadline";
 
 struct Deploy {
     ns: &'static str,
@@ -963,8 +966,110 @@ const CHECKOUT_CONFIG: &str = "  app.yaml: |\n    server:\n      port: 8080\n   
 const ROOT_CA_KEYS: &[&str] = &["ca.crt"];
 const CHECKOUT: &str = "checkout-api";
 
+fn deployment_conditions(available: bool, progressing: Condition) -> Vec<Condition> {
+    let available = if available {
+        Condition::new("Available", TRUE)
+            .reason("MinimumReplicasAvailable")
+            .message("Deployment has minimum availability.")
+    } else {
+        Condition::new("Available", FALSE)
+            .reason("MinimumReplicasUnavailable")
+            .message("Deployment does not have minimum availability.")
+    };
+    vec![
+        available.age(Some(hours(3))),
+        progressing.age(Some(hours(3))),
+    ]
+}
+
+fn rolled_out(name: &str) -> Condition {
+    Condition::new("Progressing", TRUE)
+        .reason("NewReplicaSetAvailable")
+        .message(format!(
+            "ReplicaSet \"{name}\" has successfully progressed."
+        ))
+}
+
+struct Trouble {
+    kind: ResourceKind,
+    name: &'static str,
+    conditions: Vec<Condition>,
+    diagnosis: Option<Diagnosis>,
+}
+
+fn troubles() -> Vec<Trouble> {
+    let stalled = Condition::new("Progressing", FALSE)
+        .reason("ProgressDeadlineExceeded")
+        .message("ReplicaSet \"checkout-api-7f9c6d\" has timed out progressing.");
+    let deadline = Condition::new("Failed", TRUE)
+        .reason("DeadlineExceeded")
+        .message(DEADLINE_MESSAGE)
+        .age(Some(minutes(108)));
+    let target = Condition::new("FailureTarget", TRUE)
+        .reason("DeadlineExceeded")
+        .message(DEADLINE_MESSAGE)
+        .age(Some(minutes(108)));
+    let unready = Condition::new("Ready", FALSE)
+        .reason("PodNotReady")
+        .message("1 of 1 replicas are not ready")
+        .age(Some(minutes(40)));
+    vec![
+        Trouble {
+            kind: ResourceKind::Deployment,
+            name: CHECKOUT,
+            conditions: deployment_conditions(true, stalled),
+            diagnosis: Some(Diagnosis::new(
+                "CrashLoopBackOff",
+                "14 restarts, last exit Error (1)",
+            )),
+        },
+        Trouble {
+            kind: ResourceKind::Deployment,
+            name: "grafana",
+            conditions: deployment_conditions(false, rolled_out("grafana-6b8d9")),
+            diagnosis: Some(Diagnosis::new(
+                "FailedMount",
+                "MountVolume.SetUp failed for volume \"dashboards\" : configmap \"grafana-dashboards\" not found",
+            )),
+        },
+        Trouble {
+            kind: ResourceKind::StatefulSet,
+            name: "search-indexer",
+            conditions: vec![unready],
+            diagnosis: Some(Diagnosis::new(
+                "NotReady",
+                "Readiness probe failed: HTTP probe failed with statuscode: 503",
+            )),
+        },
+        Trouble {
+            kind: ResourceKind::Job,
+            name: "backfill-orders-28770412",
+            conditions: vec![target, deadline],
+            diagnosis: None,
+        },
+    ]
+}
+
+fn explain(kind: ResourceKind, mut rows: Vec<Resource>) -> Vec<Resource> {
+    for row in &mut rows {
+        if kind == ResourceKind::Deployment && row.status == Status::Ok {
+            let replica_set = format!("{}-{}", row.name, crate::derive::suffix(row.name.len()));
+            row.conditions = deployment_conditions(true, rolled_out(&replica_set));
+        }
+    }
+    for trouble in troubles().into_iter().filter(|t| t.kind == kind) {
+        if let Some(row) = rows.iter_mut().find(|row| row.name == trouble.name) {
+            row.diagnosis = trouble
+                .diagnosis
+                .or_else(|| from_conditions(&trouble.conditions));
+            row.conditions = trouble.conditions;
+        }
+    }
+    rows
+}
+
 pub fn prod_us_east() -> BTreeMap<ResourceKind, Vec<Resource>> {
-    BTreeMap::from([
+    let lists = [
         (ResourceKind::Deployment, deployments()),
         (ResourceKind::StatefulSet, statefulsets()),
         (ResourceKind::DaemonSet, daemonsets()),
@@ -975,7 +1080,11 @@ pub fn prod_us_east() -> BTreeMap<ResourceKind, Vec<Resource>> {
         (ResourceKind::ConfigMap, configmaps()),
         (ResourceKind::Secret, secrets()),
         (ResourceKind::PersistentVolumeClaim, pvcs()),
-    ])
+    ];
+    lists
+        .into_iter()
+        .map(|(kind, rows)| (kind, explain(kind, rows)))
+        .collect()
 }
 
 fn metadata(api: &str, kind: ResourceKind, ns: &str, name: &str) -> String {
@@ -1002,6 +1111,8 @@ fn row(
         age,
         yaml: body.to_owned(),
         labels: BTreeMap::from([("app.kubernetes.io/name".into(), name.into())]),
+        conditions: Vec::new(),
+        diagnosis: None,
     }
 }
 
@@ -1116,7 +1227,7 @@ fn job(
         "spec:\n  completions: 1\n  backoffLimit: 6\n  template:\n    spec:\n      restartPolicy: Never\n      containers:\n        - name: main\n          image: {image}\nstatus:\n  succeeded: {succeeded}\n  failed: {failed}\n"
     );
     if matches!(outcome, JobOutcome::Failed) {
-        yaml.push_str("  conditions:\n    - type: Failed\n      reason: BackoffLimitExceeded\n");
+        yaml.push_str("  conditions:\n    - type: FailureTarget\n      status: \"True\"\n      reason: DeadlineExceeded\n      message: Job was active longer than specified deadline\n    - type: Failed\n      status: \"True\"\n      reason: DeadlineExceeded\n      message: Job was active longer than specified deadline\n");
     }
     let cells = vec![format!("{succeeded}/1"), age(took), label.into()];
     row(ns, name, status, cells, started, &yaml)
@@ -1461,6 +1572,26 @@ mod tests {
         for (kind, n) in expected {
             assert_eq!(count(kind), n, "{kind:?}");
         }
+    }
+
+    #[test]
+    fn every_unhealthy_row_says_why() {
+        for (kind, rows) in prod_us_east() {
+            for row in rows {
+                let flagged = matches!(row.status, Status::Err | Status::Warn);
+                assert_eq!(row.diagnosis.is_some(), flagged, "{kind:?} {}", row.name);
+            }
+        }
+        let jobs = prod_us_east()
+            .remove(&ResourceKind::Job)
+            .unwrap_or_default();
+        let failed = jobs
+            .iter()
+            .find(|job| job.name == "backfill-orders-28770412");
+        assert_eq!(
+            failed.and_then(|job| job.diagnosis.clone()),
+            Some(Diagnosis::new("DeadlineExceeded", DEADLINE_MESSAGE))
+        );
     }
 
     #[test]

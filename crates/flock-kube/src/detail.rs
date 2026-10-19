@@ -3,14 +3,15 @@ use std::sync::Arc;
 
 use flock_core::cluster::Namespace;
 use flock_core::events::{Event, warnings_first};
-use flock_core::nodes::{self, NodeCondition};
+use flock_core::nodes;
 use flock_core::overview::{Commitment, PodPhases};
-use flock_core::{Counts, Status, Uid};
+use flock_core::{Counts, Diagnosis, Status, Uid};
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::{self as core, Node, Pod};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 
 use crate::clock::{age, between};
+use crate::conditions::conditions;
 use crate::metrics::{NodeUsage, PodUsage, Usage, cpu_millicores, parse_quantity};
 use crate::problems::{OwnerKey, is_active, owner_of, pod_issue};
 use crate::snapshot::{PodHealth, node_ready, pod_health, schedulable};
@@ -21,9 +22,6 @@ const MEMORY: &str = "memory";
 const PODS: &str = "pods";
 const PHASE_PENDING: &str = "Pending";
 const PHASE_SUCCEEDED: &str = "Succeeded";
-const READY_CONDITION: &str = "Ready";
-const CONDITION_TRUE: &str = "True";
-const CONDITION_FALSE: &str = "False";
 const STATE_READY: &str = "Ready";
 const STATE_NOT_READY: &str = "NotReady";
 const STATE_CORDONED: &str = "SchedulingDisabled";
@@ -76,7 +74,7 @@ impl NamespaceFacts {
 
 #[derive(Debug, Default)]
 pub struct PodIndex {
-    pub issues: HashMap<OwnerKey, Status>,
+    pub issues: HashMap<OwnerKey, (Status, Diagnosis)>,
     pub phases: PodPhases,
     namespaces: HashMap<String, NamespaceFacts>,
     per_node: HashMap<String, u32>,
@@ -144,8 +142,14 @@ impl PodIndex {
             index.requests.add(requests);
             index.limits.add(limits);
             if let Some((issue, _)) = pod_issue(pod, now) {
-                let entry = index.issues.entry(owner_of(pod)).or_default();
-                *entry = (*entry).max(issue.status());
+                let status = issue.status();
+                let entry = index
+                    .issues
+                    .entry(owner_of(pod))
+                    .or_insert_with(|| (status, issue.diagnosis()));
+                if status > entry.0 {
+                    *entry = (status, issue.diagnosis());
+                }
             }
         }
         index
@@ -156,7 +160,13 @@ impl PodIndex {
     }
 
     pub fn issue(&self, owner: &OwnerKey) -> Option<Status> {
-        self.issues.get(owner).copied()
+        self.issues.get(owner).map(|(status, _)| *status)
+    }
+
+    pub fn diagnosis(&self, owner: &OwnerKey) -> Option<Diagnosis> {
+        self.issues
+            .get(owner)
+            .map(|(_, diagnosis)| diagnosis.clone())
     }
 }
 
@@ -194,14 +204,6 @@ fn first_label(labels: Option<&BTreeMap<String, String>>, keys: &[&str]) -> Opti
     keys.iter().find_map(|key| labels.get(*key).cloned())
 }
 
-fn condition_healthy(kind: &str, value: &str) -> bool {
-    if kind == READY_CONDITION {
-        value == CONDITION_TRUE
-    } else {
-        value == CONDITION_FALSE
-    }
-}
-
 fn taint_label(taint: &core::Taint) -> String {
     match taint.value.as_deref().filter(|v| !v.is_empty()) {
         Some(value) => format!("{}={value}:{}", taint.key, taint.effect),
@@ -231,17 +233,7 @@ pub fn node(node: &Node, pods: u32, usage: Option<&Usage>, now: Timestamp) -> no
     };
     let platform = info.map(|i| format!("{}/{}", i.operating_system, i.architecture));
     let capacity = allocatable(node);
-    let conditions = status
-        .and_then(|s| s.conditions.as_ref())
-        .into_iter()
-        .flatten()
-        .map(|c| NodeCondition {
-            kind: c.type_.clone(),
-            value: c.status.clone(),
-            healthy: condition_healthy(&c.type_, &c.status),
-            message: c.message.clone().unwrap_or_default(),
-        })
-        .collect();
+    let conditions = conditions(status.and_then(|s| s.conditions.as_ref()), now);
     let taints = node
         .spec
         .as_ref()
@@ -587,6 +579,13 @@ mod tests {
             name: "api".into(),
         };
         assert_eq!(index.issue(&owner), Some(Status::Err));
+        assert_eq!(
+            index.diagnosis(&owner),
+            Some(Diagnosis::new(
+                "CrashLoopBackOff",
+                "14 restarts, last exit 1"
+            ))
+        );
     }
 
     #[test]
@@ -612,7 +611,7 @@ mod tests {
         assert_eq!((row.memory.used, row.memory.allocatable), (2., 8.));
         assert_eq!(row.taints, ["gpu=present:NoSchedule"]);
         assert_eq!(row.age, Duration::from_secs(3600));
-        assert!(row.conditions.iter().all(|c| c.healthy));
+        assert!(row.conditions.iter().all(flock_core::Condition::is_healthy));
         assert!(row.is_ready());
     }
 

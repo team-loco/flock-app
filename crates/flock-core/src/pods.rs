@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::filter::TextFilter;
 use std::time::Duration;
 
+use crate::diagnosis::{self, Condition, Diagnosis};
 use crate::{ClusterId, Counts, ResourceRef, Status, Uid, units};
 
 pub const POD_KIND: &str = "Pod";
@@ -73,6 +74,7 @@ pub struct Container {
     pub restarts: u32,
     pub ports: Vec<ContainerPort>,
     pub note: Option<String>,
+    pub message: String,
 }
 
 impl Container {
@@ -111,13 +113,6 @@ impl Usage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Condition {
-    pub kind: String,
-    pub ok: bool,
-    pub reason: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Volume {
     pub name: String,
     pub source: String,
@@ -130,6 +125,18 @@ pub struct PodEvent {
     pub message: String,
     pub count: u32,
     pub age: Duration,
+}
+
+impl From<&crate::events::Event> for PodEvent {
+    fn from(event: &crate::events::Event) -> Self {
+        Self {
+            status: event.status,
+            reason: event.reason.clone(),
+            message: event.message.clone(),
+            count: event.count,
+            age: event.age,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -205,6 +212,22 @@ impl Pod {
         self.containers
             .iter()
             .flat_map(|c| c.ports.iter().map(move |p| (c, p)))
+    }
+
+    pub fn diagnosis(&self) -> Option<Diagnosis> {
+        if !diagnosis::needs_diagnosis(self.status) {
+            return None;
+        }
+        let failing = |status: Status| {
+            self.containers
+                .iter()
+                .find(|c| c.status == status)
+                .map(|c| Diagnosis::new(c.reason.clone(), c.message.clone()))
+        };
+        failing(Status::Err)
+            .or_else(|| diagnosis::from_conditions(&self.conditions))
+            .or_else(|| failing(Status::Warn))
+            .or_else(|| Some(Diagnosis::new(self.reason.clone(), String::new())))
     }
 
     pub fn sentence(&self) -> String {
@@ -367,6 +390,7 @@ mod tests {
             restarts,
             ports: Vec::new(),
             note: None,
+            message: String::new(),
         }
     }
 
@@ -418,6 +442,36 @@ mod tests {
             containers: vec![trainer],
             ..Pod::default()
         }
+    }
+
+    #[test]
+    fn diagnosis_prefers_failing_containers_then_conditions() {
+        let mut pod = crashing();
+        pod.containers[0].message = "OOMKilled, exit 137".into();
+        assert_eq!(
+            pod.diagnosis(),
+            Some(Diagnosis::new("CrashLoopBackOff", "OOMKilled, exit 137"))
+        );
+        let mut waiting = pending();
+        waiting.containers[0].reason = "Pending".into();
+        waiting.conditions = vec![
+            Condition::new("PodScheduled", "False")
+                .reason("Unschedulable")
+                .message("0/3 nodes are available: insufficient nvidia.com/gpu."),
+        ];
+        assert_eq!(
+            waiting.diagnosis(),
+            Some(Diagnosis::new(
+                "Unschedulable",
+                "0/3 nodes are available: insufficient nvidia.com/gpu."
+            ))
+        );
+        waiting.conditions.clear();
+        assert_eq!(
+            waiting.diagnosis().map(|d| d.reason),
+            Some("Pending".into())
+        );
+        assert_eq!(healthy("web", "web").diagnosis(), None);
     }
 
     #[test]

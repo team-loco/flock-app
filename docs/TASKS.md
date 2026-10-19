@@ -99,3 +99,4 @@ Spec column points at `design/`.
 | C185 | Linux e2e coverage and restart rollback revision selection (#185, #186) | codex | fix-ci-e2e-rollback | done (#195) |
 | MLOG | multi-pod log streaming: merged, colour-coded, legend toggles, pause, pods join and leave (#230) | claude | multi-pod-logs | done |
 | EDIT1 | Edit YAML: editor tab, dry-run server-side diff, UID/resourceVersion-pinned apply with conflict rebase, Secrets redacted unless revealed (#231) | claude | yaml-edit-apply | done |
+| WHY1 | Reason column on every list; inspectors lead with what's wrong, conditions and events; per-kind inspector widths (#239) | claude | list-reasons-inspectors | done |

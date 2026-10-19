@@ -360,6 +360,8 @@ fn checkout_row(template: &[Resource], checkout: &Checkout) -> Option<Resource> 
             image,
         ],
         yaml,
+        conditions: Vec::new(),
+        diagnosis: None,
         ..base.clone()
     })
 }

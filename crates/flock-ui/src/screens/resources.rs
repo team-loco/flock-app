@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use flock_core::emptiness::Noun;
+use flock_core::events::Event;
 use flock_core::filter::{StatusFilter, label_values};
+use flock_core::pods::PodEvent;
 use flock_core::resources::{
     Resource, filter_counts, filter_resources, namespace_choices, namespaces_of,
 };
@@ -20,13 +22,14 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    Button, CodeView, Column, ConfirmDialog, EmptyState, FilterBar, FilterEvent, IconButton,
-    Inspector, MenuItem, Presence, Select, SelectEvent, ShowAll, Skeleton, Table, TableEvent,
-    chip_label, confirm, slide_in, slide_out,
+    Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, EVENTS, EmptyState,
+    EventList, FilterBar, FilterEvent, IconButton, Inspector, MenuItem, Presence, Select,
+    SelectEvent, ShowAll, Skeleton, Table, TableEvent, WHATS_WRONG, WhatsWrong, chip_label,
+    confirm, reason_cell, reason_tooltip, slide_in, slide_out,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{EDIT_YAML, ListShape, edit_item, empty_list, new_tab_item};
-use crate::theme::SPACE_3;
+use crate::theme::{INSPECTOR_RESOURCE, INSPECTOR_WORKLOAD, REASON_MIN, REASON_WEIGHT, SPACE_3};
 
 const ALL_NAMESPACES: &str = "All namespaces";
 const NAME_WEIGHT: f32 = 1.4;
@@ -34,8 +37,9 @@ const NAME_MIN: Pixels = px(200.);
 const NAMESPACE_WIDTH: Pixels = px(130.);
 const AGE_WIDTH: Pixels = px(44.);
 const SELECT_WIDTH: Pixels = px(180.);
-const YAML_INSPECTOR: Pixels = px(480.);
 const INSPECTOR_ID: &str = "resource-inspector";
+const REASON: &str = "Reason";
+const YAML: &str = "YAML";
 const STATUS_COLUMNS: [&str; 2] = ["Ready", "Status"];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -89,6 +93,14 @@ const PVC_CELLS: [Cell; 4] = [
     Cell::Flex(1., px(200.)),
 ];
 
+pub fn inspector_width(kind: ResourceKind) -> Pixels {
+    if kind.is_workload() {
+        INSPECTOR_WORKLOAD
+    } else {
+        INSPECTOR_RESOURCE
+    }
+}
+
 fn cell_widths(kind: ResourceKind) -> &'static [Cell] {
     match kind {
         ResourceKind::Deployment => &DEPLOYMENT_CELLS,
@@ -109,9 +121,11 @@ pub struct ResourcesScreen {
     cluster_name: String,
     kind: ResourceKind,
     rows: Vec<Resource>,
+    events: Vec<Event>,
     shown: usize,
     confirm_destructive: bool,
     namespace: Option<String>,
+    awaiting: Option<String>,
     preferences: Preferences,
     selected: Option<(String, String)>,
     revealed: Option<(ResourceKind, String, String)>,
@@ -170,9 +184,11 @@ impl ResourcesScreen {
             cluster_name: String::new(),
             kind: ResourceKind::Deployment,
             rows: Vec::new(),
+            events: Vec::new(),
             shown: 0,
             confirm_destructive: true,
             namespace: None,
+            awaiting: None,
             preferences: Preferences::default(),
             selected: None,
             revealed: None,
@@ -194,11 +210,23 @@ impl ResourcesScreen {
         cx: &mut Context<Self>,
     ) {
         let rows = detail.resources(kind);
-        self.preferences = preferences.clone();
         let namespace = preferences
             .namespace_selection(kind.name())
             .namespace()
             .map(str::to_owned);
+        let stale = self
+            .awaiting
+            .as_ref()
+            .is_some_and(|chosen| namespace.as_ref() != Some(chosen));
+        if !stale {
+            self.awaiting = None;
+            self.preferences = preferences.clone();
+        }
+        let namespace = if stale {
+            self.namespace.clone()
+        } else {
+            namespace
+        };
         let rescoped = self.namespace != namespace;
         self.namespace = namespace;
         if self.confirm_destructive != confirm_destructive {
@@ -206,6 +234,10 @@ impl ResourcesScreen {
             self.refresh(cx);
         }
         let switched = self.kind != kind || self.cluster.as_ref() != Some(&cluster.id);
+        if self.events != detail.events {
+            self.events.clone_from(&detail.events);
+            cx.notify();
+        }
         if !switched && !rescoped && self.rows == rows {
             return;
         }
@@ -261,6 +293,7 @@ impl ResourcesScreen {
     fn show_namespace_of(&mut self, namespace: &str, cx: &mut Context<Self>) {
         if self.namespace.as_ref().is_some_and(|ns| ns != namespace) {
             self.choose_namespace(Some(namespace.to_owned()), cx);
+            self.awaiting = Some(namespace.to_owned());
         }
     }
 
@@ -268,6 +301,7 @@ impl ResourcesScreen {
         let Some(cluster) = self.cluster.clone() else {
             return;
         };
+        self.awaiting = None;
         let selection = NamespaceSelection::of(choice.as_deref());
         self.preferences
             .select_namespace(self.kind.name(), selection);
@@ -492,12 +526,26 @@ impl ResourcesScreen {
                 .yaml()
                 .into_any_element()
         };
-        Inspector::new(INSPECTOR_ID, row.name.clone())
+        let events: Vec<PodEvent> = row
+            .events(self.kind, &self.events)
+            .into_iter()
+            .map(PodEvent::from)
+            .collect();
+        let mut inspector = Inspector::new(INSPECTOR_ID, row.name.clone())
             .mono()
-            .width(YAML_INSPECTOR)
+            .width(inspector_width(self.kind))
             .status(row.status, subtitle)
-            .actions(actions)
-            .section(None, yaml)
+            .actions(actions);
+        if let Some(diagnosis) = row.diagnosis.clone() {
+            inspector =
+                inspector.section(Some(WHATS_WRONG), WhatsWrong::new(row.status, diagnosis));
+        }
+        if !row.conditions.is_empty() {
+            inspector = inspector.section(Some(CONDITIONS), ConditionTable::new(&row.conditions));
+        }
+        inspector
+            .section(Some(EVENTS), EventList::new(events))
+            .section(Some(YAML), yaml)
             .into_any_element()
     }
 }
@@ -515,14 +563,15 @@ impl Render for ResourcesScreen {
             .map(|row| format!("{}/{}", row.namespace, row.name));
         let shown = current.as_ref().zip(selection.as_deref());
         let motion = self.presence.track(shown, presence, cx);
+        let width = inspector_width(self.kind);
         let inspector = match current {
             Some(row) => {
                 let panel = self.inspector(&row, cx);
-                Some(slide_in(panel, INSPECTOR_ID, motion, YAML_INSPECTOR))
+                Some(slide_in(panel, INSPECTOR_ID, motion, width))
             }
             None => self.presence.leaving().cloned().map(|row| {
                 let panel = self.inspector(&row, cx);
-                slide_out(panel, INSPECTOR_ID, YAML_INSPECTOR)
+                slide_out(panel, INSPECTOR_ID, width)
             }),
         };
         let inspecting = inspector.is_some();
@@ -602,6 +651,12 @@ fn columns(kind: ResourceKind) -> Vec<Column<Resource>> {
         .zip(cell_widths(kind))
         .enumerate()
         .map(|(ix, (title, width))| cell_column(ix, title, *width));
+    let reason = Column::new(REASON, |r: &Resource, palette| {
+        reason_cell(r.status, r.diagnosis.as_ref(), palette)
+    })
+    .tooltip(|r: &Resource| reason_tooltip(r.diagnosis.as_ref()))
+    .flex(REASON_WEIGHT, REASON_MIN)
+    .sort_by_key(|r: &Resource| r.diagnosis.as_ref().map(|d| d.reason.clone()));
     let age_column = Column::colored_text("Age", |r: &Resource| age(r.age).into(), |_, p| p.mute)
         .mono()
         .fixed(AGE_WIDTH)
@@ -609,6 +664,7 @@ fn columns(kind: ResourceKind) -> Vec<Column<Resource>> {
     std::iter::once(name)
         .chain(std::iter::once(namespace))
         .chain(cells)
+        .chain(std::iter::once(reason))
         .chain(std::iter::once(age_column))
         .collect()
 }
@@ -664,6 +720,8 @@ mod tests {
             age: std::time::Duration::ZERO,
             yaml: String::new(),
             labels: std::collections::BTreeMap::new(),
+            conditions: Vec::new(),
+            diagnosis: None,
         }
     }
 
@@ -679,6 +737,17 @@ mod tests {
         assert_eq!(text, "1 of 2 need attention");
         assert_eq!(note(&rows, None).1, "2 of 3 need attention");
         assert_eq!(note(&rows, Some("search")).1, "0");
+    }
+
+    #[test]
+    fn workloads_and_jobs_open_a_wider_inspector() {
+        assert_eq!(inspector_width(ResourceKind::Job), INSPECTOR_WORKLOAD);
+        assert_eq!(
+            inspector_width(ResourceKind::Deployment),
+            INSPECTOR_WORKLOAD
+        );
+        assert_eq!(inspector_width(ResourceKind::ConfigMap), INSPECTOR_RESOURCE);
+        assert!(INSPECTOR_WORKLOAD > INSPECTOR_RESOURCE);
     }
 
     #[test]

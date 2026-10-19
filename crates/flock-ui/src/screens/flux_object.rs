@@ -12,17 +12,17 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Button, CodeView, Column, ConfirmDialog, DiffView, InspectorPane, KeyValue,
-    MenuItem, PageHeader, Prose, SectionHeader, SectionLabel, Segmented, StatusGlyph, Table,
-    TableEvent, Toast, confirm, parse_unified, toast,
+    ActionMenu, Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, DiffView,
+    InspectorPane, KeyValue, MenuItem, PageHeader, Prose, SectionHeader, SectionLabel, Segmented,
+    StatusGlyph, Table, TableEvent, Toast, WHATS_WRONG, WhatsWrong, confirm, parse_unified, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{EDIT_DESCRIPTION, EDIT_YAML};
 use crate::screens::{FullView, full_view_link};
 use crate::theme::{
     ASIDE_WIDTH, ActiveTheme, FONT_MONO, FONT_SANS, LINE_PROSE, Palette, ROW_DOCUMENT,
-    ROW_TABLE_MIN, RULE, SPACE_2, SPACE_3, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_MONO,
-    TEXT_SMALL,
+    ROW_TABLE_MIN, RULE, SPACE_2, SPACE_3, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY,
+    TEXT_MONO, TEXT_SMALL,
 };
 
 pub(crate) const FLUX_CONTEXT: &str = "FluxObject";
@@ -507,6 +507,29 @@ impl FluxObjectPage {
             .into_any_element()
     }
 
+    fn diagnosis_section(object: &FluxObject) -> AnyElement {
+        let whats_wrong = object.current_diagnosis().map(|diagnosis| {
+            div().child(SectionHeader::new(WHATS_WRONG)).child(
+                div()
+                    .px(SPACE_8)
+                    .pb(SPACE_5)
+                    .child(WhatsWrong::new(object.status(), diagnosis.clone())),
+            )
+        });
+        let conditions = (!object.conditions.is_empty()).then(|| {
+            div().child(SectionHeader::new(CONDITIONS)).child(
+                div()
+                    .px(SPACE_8)
+                    .pb(SPACE_5)
+                    .child(ConditionTable::new(&object.conditions)),
+            )
+        });
+        div()
+            .children(whats_wrong)
+            .children(conditions)
+            .into_any_element()
+    }
+
     fn history_section(&self, palette: &Palette) -> AnyElement {
         div()
             .child(SectionHeader::new("History"))
@@ -571,6 +594,7 @@ impl FluxObjectPage {
             .h_full()
             .overflow_y_scroll()
             .child(self.header(object, cx))
+            .child(Self::diagnosis_section(object))
             .children(body)
             .when(self.yaml_open, |main| {
                 main.child(Self::yaml_section(object, cx))

@@ -199,6 +199,8 @@ fn cluster_detail(
         |prometheus| prometheus_history(prometheus, requests),
     );
     let mut resources = watched_lists(handle, index, now);
+    let events = detail::events(events, selection.event_limit, now);
+    flock_core::resources::explain(&mut resources, &events);
     for (target, yaml) in selection.yaml.iter().copied() {
         let row = resources
             .iter_mut()
@@ -227,7 +229,7 @@ fn cluster_detail(
             extras.pod_usage.as_deref(),
             now,
         ),
-        events: detail::events(events, selection.event_limit, now),
+        events,
         resources,
     }
 }

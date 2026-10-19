@@ -2,16 +2,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use flock_core::pods::{
-    Condition, Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Qos, Usage,
-    Volume,
+    Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Qos, Usage, Volume,
 };
 use flock_core::{ClusterId, ResourceRef, Status, Uid};
 use jiff::Timestamp;
 use k8s_openapi::api::core::v1::{self as core, ContainerStatus};
 
 use crate::clock::age;
+use crate::conditions::conditions;
 use crate::detail;
 use crate::metrics::PodUsage;
+use crate::problems::last_exit;
 use crate::snapshot::{FAILING_WAIT_REASONS, PodHealth, pod_health};
 
 const POD_KIND: &str = "Pod";
@@ -20,7 +21,6 @@ const RUNNING: &str = "Running";
 const NOT_READY: &str = "Running · not ready";
 const PENDING: &str = "Pending";
 const SCHEDULED_CONDITION: &str = "PodScheduled";
-const CONDITION_TRUE: &str = "True";
 const CONDITION_FALSE: &str = "False";
 const DEFAULT_PROTOCOL: &str = "TCP";
 const BYTES_PER_MIB: f64 = 1_048_576.;
@@ -88,14 +88,22 @@ pub(crate) fn container(
     let restarts = status
         .and_then(|s| u32::try_from(s.restart_count).ok())
         .unwrap_or_default();
-    let last_exit = status
+    let last_code = status
         .and_then(|s| s.last_state.as_ref())
         .and_then(|l| l.terminated.as_ref())
         .map(|t| format!("exit {}", t.exit_code));
+    let last = status.and_then(last_exit);
     let running = state.is_some_and(|s| s.running.is_some());
-    let (kind, health, reason, note) = if running {
+    let (kind, health, reason, note, message) = if running {
         let health = if ready { Status::Ok } else { Status::Warn };
-        (ContainerState::Running, health, RUNNING.to_owned(), None)
+        let message = last.map(|last| format!("last {last}")).unwrap_or_default();
+        (
+            ContainerState::Running,
+            health,
+            RUNNING.to_owned(),
+            None,
+            message,
+        )
     } else if let Some(terminated) = state.and_then(|s| s.terminated.as_ref()) {
         let health = if terminated.exit_code == 0 {
             Status::Ok
@@ -104,18 +112,24 @@ pub(crate) fn container(
         };
         let reason = terminated.reason.clone().unwrap_or_default();
         let note = Some(format!("exit {}", terminated.exit_code));
-        (ContainerState::Terminated, health, reason, note)
+        let message = terminated
+            .message
+            .clone()
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(|| format!("exit {}", terminated.exit_code));
+        (ContainerState::Terminated, health, reason, note, message)
     } else if let Some(waiting) = state.and_then(|s| s.waiting.as_ref()) {
         let reason = waiting.reason.clone().unwrap_or_default();
         let failing = FAILING_WAIT_REASONS.contains(&reason.as_str());
         let health = if failing { Status::Err } else { Status::Warn };
-        let message = waiting.message.clone().filter(|m| !m.is_empty());
-        let note = if reason == CRASH_LOOP {
-            last_exit
+        let waiting_message = waiting.message.clone().filter(|m| !m.is_empty());
+        let (note, message) = if reason == CRASH_LOOP {
+            let message = last.map(|last| format!("last {last}")).unwrap_or_default();
+            (last_code, message)
         } else {
-            message
+            (waiting_message.clone(), waiting_message.unwrap_or_default())
         };
-        (ContainerState::Waiting, health, reason, note)
+        (ContainerState::Waiting, health, reason, note, message)
     } else {
         let note = waiting_note.map(str::to_owned);
         (
@@ -123,6 +137,7 @@ pub(crate) fn container(
             Status::Warn,
             PENDING.to_owned(),
             note,
+            String::new(),
         )
     };
     Container {
@@ -135,6 +150,7 @@ pub(crate) fn container(
         restarts,
         ports,
         note,
+        message,
     }
 }
 
@@ -229,16 +245,7 @@ pub fn pod(
             namespace: Some(namespace.clone()),
             name: o.name.clone(),
         });
-    let conditions = status
-        .and_then(|s| s.conditions.as_ref())
-        .into_iter()
-        .flatten()
-        .map(|c| Condition {
-            kind: c.type_.clone(),
-            ok: c.status == CONDITION_TRUE,
-            reason: c.reason.clone(),
-        })
-        .collect();
+    let conditions = conditions(status.and_then(|s| s.conditions.as_ref()), now);
     let volumes = pod
         .spec
         .iter()
@@ -376,6 +383,8 @@ mod tests {
         let mut status = crash_status();
         status["podIP"] = json!("10.244.0.12");
         status["qosClass"] = json!("Guaranteed");
+        status["containerStatuses"][0]["lastState"] =
+            json!({ "terminated": { "exitCode": 137, "reason": "OOMKilled" } });
         let raw = with_spec(&status);
         let event: Arc<core::Event> = parse(json!({
             "metadata": { "name": "e", "namespace": "payments" },
@@ -406,9 +415,10 @@ mod tests {
         let api = &pod.containers[0];
         assert_eq!(
             (api.state, api.status, api.restarts, api.note.as_deref()),
-            (ContainerState::Waiting, Status::Err, 14, Some("exit 1"))
+            (ContainerState::Waiting, Status::Err, 14, Some("exit 137"))
         );
         assert_eq!(api.ports[0].label(), "8080/TCP http");
+        assert_eq!(api.message, "last exit OOMKilled (137)");
         let sources: Vec<&str> = pod.volumes.iter().map(|v| v.source.as_str()).collect();
         assert_eq!(sources, ["configmap checkout-config", "pvc checkout-data"]);
         assert_eq!(pod.events.len(), 1);
@@ -439,7 +449,14 @@ mod tests {
             row.containers[0].note.as_deref(),
             Some("0/1 nodes are available")
         );
-        assert_eq!(row.conditions[0].reason.as_deref(), Some("Unschedulable"));
+        assert_eq!(row.conditions[0].reason, "Unschedulable");
+        assert_eq!(
+            row.diagnosis(),
+            Some(flock_core::Diagnosis::new(
+                "Unschedulable",
+                "0/1 nodes are available"
+            ))
+        );
     }
 
     #[test]

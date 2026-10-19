@@ -10,4 +10,4 @@ pub mod summary;
 pub use object::{
     Condition, GitOpsObject, InventoryEntry, ObjectError, ObjectIdentity, ObjectKind, ResourceRef,
 };
-pub use summary::{Status, Summary, summarize};
+pub use summary::{Status, Summary, failing_condition, summarize};

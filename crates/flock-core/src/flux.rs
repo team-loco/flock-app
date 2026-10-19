@@ -3,7 +3,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ClusterId, Page, ResourceRef, Snapshot, Status, Uid, time, units};
+use crate::{
+    ClusterId, Condition, Diagnosis, Page, ResourceRef, Snapshot, Status, Uid, time, units,
+};
 
 const FILTER_HIDES_ALL: &str = "Nothing matches this filter.";
 const NOTHING_APPLIED_RECONCILING: &str =
@@ -357,11 +359,19 @@ pub struct FluxObject {
     pub spec: Vec<SpecRow>,
     pub yaml: String,
     pub detail: FluxDetail,
+    pub conditions: Vec<Condition>,
+    pub diagnosis: Option<Diagnosis>,
 }
 
 impl FluxObject {
     pub fn status(&self) -> Status {
         self.phase.status()
+    }
+
+    pub fn current_diagnosis(&self) -> Option<&Diagnosis> {
+        self.diagnosis
+            .as_ref()
+            .filter(|_| crate::diagnosis::needs_diagnosis(self.status()))
     }
 
     pub fn inventory(&self, filter: InventoryFilter) -> Vec<ManagedObject> {
@@ -531,7 +541,21 @@ pub(crate) mod tests {
             spec: Vec::new(),
             yaml: String::new(),
             detail: FluxDetail::Kustomization,
+            conditions: Vec::new(),
+            diagnosis: None,
         }
+    }
+
+    #[test]
+    fn a_reconciling_object_hides_its_last_failure() {
+        let mut failing = object("east", Phase::Failing, "abc");
+        failing.diagnosis = Some(Diagnosis::new("HealthCheckFailed", "timeout"));
+        assert_eq!(
+            failing.current_diagnosis().map(|d| d.reason.as_str()),
+            Some("HealthCheckFailed")
+        );
+        failing.phase = Phase::Reconciling;
+        assert_eq!(failing.current_diagnosis(), None);
     }
 
     fn flock(objects: Vec<FluxObject>) -> Snapshot {
