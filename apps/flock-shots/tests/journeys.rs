@@ -1811,3 +1811,124 @@ fn live_flux_events_stream_from_every_cluster_and_open_their_object() -> anyhow:
     }
     Ok(())
 }
+
+const DRIFT_CONTEXT: &str = "kind-fleet-a";
+const DRIFT_ANNOTATION: &str = "flock-drift";
+const DRIFT_EXTRA: &str = "flock-drift-extra";
+const DRIFT_MANAGER: &str = "--field-manager=flock-e2e";
+const DRIFT_TIMEOUT: Duration = Duration::from_secs(120);
+
+struct DriftScenario {
+    manifest: PathBuf,
+}
+
+impl DriftScenario {
+    fn start() -> anyhow::Result<Self> {
+        let annotation = format!("{DRIFT_ANNOTATION}=e2e");
+        let annotate = [
+            "-n",
+            "web",
+            "annotate",
+            DRIFT_MANAGER,
+            "--overwrite",
+            "service/podinfo",
+        ];
+        kubectl(
+            DRIFT_CONTEXT,
+            &[annotate.as_slice(), &[annotation.as_str()]].concat(),
+        )?;
+        let manifest = std::env::temp_dir().join(format!("{DRIFT_EXTRA}.json"));
+        let extra = format!(
+            r#"{{"apiVersion":"v1","kind":"Service","metadata":{{"name":"{DRIFT_EXTRA}","namespace":"web","labels":{{"kustomize.toolkit.fluxcd.io/name":"apps","kustomize.toolkit.fluxcd.io/namespace":"flux-system"}}}},"spec":{{"ports":[{{"port":80}}],"selector":{{"app":"{DRIFT_EXTRA}"}}}}}}"#
+        );
+        std::fs::write(&manifest, extra)?;
+        let path = manifest.to_string_lossy().into_owned();
+        let scenario = Self { manifest };
+        kubectl(DRIFT_CONTEXT, &["apply", "-f", path.as_str()])?;
+        Ok(scenario)
+    }
+}
+
+impl Drop for DriftScenario {
+    fn drop(&mut self) {
+        let path = self.manifest.to_string_lossy().into_owned();
+        let removed = format!("{DRIFT_ANNOTATION}-");
+        let delete = ["delete", "--ignore-not-found", "-f", path.as_str()];
+        let _ = kubectl(DRIFT_CONTEXT, &delete);
+        let annotate = [
+            "-n",
+            "web",
+            "annotate",
+            DRIFT_MANAGER,
+            "service/podinfo",
+            removed.as_str(),
+        ];
+        let _ = kubectl(DRIFT_CONTEXT, &annotate);
+        let _ = std::fs::remove_file(&self.manifest);
+    }
+}
+
+fn drift_of<'a>(state: &'a AppState, location: &Location) -> Option<&'a flock_core::flux::Drift> {
+    let key = location.flux_object.as_ref()?;
+    let object = state.snapshot.flux_object(key)?;
+    match &object.detail {
+        flock_core::flux::FluxDetail::Kustomization(drift) => drift.as_ref(),
+        _ => None,
+    }
+}
+
+fn drift_found(state: &AppState, location: &Location) -> bool {
+    use flock_core::flux::DriftState;
+    drift_of(state, location).is_some_and(|drift| {
+        let changed = drift.objects.iter().any(|object| {
+            object.state == DriftState::Changed
+                && object.name == "podinfo"
+                && object.fields.iter().any(|field| {
+                    field.path == format!("metadata.annotations.{DRIFT_ANNOTATION}")
+                        && field.manager == "flock-e2e"
+                })
+        });
+        let extra = drift
+            .objects
+            .iter()
+            .any(|object| object.state == DriftState::Extra && object.name == DRIFT_EXTRA);
+        changed && extra
+    })
+}
+
+#[test]
+fn live_kustomization_drift_flags_changed_and_extra_objects() -> anyhow::Result<()> {
+    let Some(make) = kind()? else {
+        return Ok(());
+    };
+    let scenario = DriftScenario::start()?;
+    let mut ui = open(Screen::Flock, &make)?;
+    ui.wait_until(PAGE_TIMEOUT, flux_loaded)?;
+    switch_to(&mut ui, "fleet-a")?;
+    open_flux_object(&mut ui, Page::Kustomizations, "apps")?;
+    let location = ui.state().location().clone();
+    ui.wait_until(DRIFT_TIMEOUT, |state| drift_found(state, &location))
+        .context("drift did not show the annotated and the extra Service")?;
+    anyhow::ensure!(ui.bounds("flux-drift").is_some(), "no drift section");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(SHOTS_DIR);
+    let ready = |state: &AppState, location: &Location| drift_found(state, location);
+    for (label, appearance) in [("dark", Appearance::Dark), ("light", Appearance::Light)] {
+        let shots = LiveShots {
+            appearance,
+            highlights: Highlights::default(),
+            timeout: DRIFT_TIMEOUT,
+            ready: &ready,
+        };
+        flock_shots::render_live(
+            &make,
+            &shots,
+            std::slice::from_ref(&location),
+            |_, image| {
+                let path = dir.join(format!("fleet-a-kustomization-apps-drift-{label}.png"));
+                flock_shots::save(&image, &path)
+            },
+        )?;
+    }
+    drop(scenario);
+    Ok(())
+}

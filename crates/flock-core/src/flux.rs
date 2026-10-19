@@ -336,9 +336,76 @@ pub struct SourceDetail {
     pub fetched: Duration,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DriftState {
+    Missing,
+    Extra,
+    Changed,
+}
+
+impl DriftState {
+    pub const fn status(self) -> Status {
+        match self {
+            Self::Missing => Status::Err,
+            Self::Extra => Status::Warn,
+            Self::Changed => Status::Warn,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Missing => "missing from the cluster",
+            Self::Extra => "labelled for this Kustomization but not in its inventory",
+            Self::Changed => "changed since kustomize-controller last applied it",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DriftField {
+    pub path: String,
+    pub value: String,
+    pub manager: String,
+    pub age: Option<Duration>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DriftedObject {
+    pub state: DriftState,
+    pub kind: String,
+    pub namespace: Option<String>,
+    pub name: String,
+    pub fields: Vec<DriftField>,
+}
+
+impl DriftedObject {
+    pub fn resource(&self, cluster: &ClusterId) -> ResourceRef {
+        ResourceRef {
+            cluster: cluster.clone(),
+            kind: self.kind.clone(),
+            namespace: self.namespace.clone(),
+            name: self.name.clone(),
+        }
+    }
+
+    pub fn path(&self) -> String {
+        match &self.namespace {
+            Some(namespace) => format!("{}/{namespace}/{}", self.kind, self.name),
+            None => format!("{}/{}", self.kind, self.name),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Drift {
+    pub checked: usize,
+    pub objects: Vec<DriftedObject>,
+    pub unreadable: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FluxDetail {
-    Kustomization,
+    Kustomization(Option<Drift>),
     HelmRelease(HelmDetail),
     Source(SourceDetail),
 }
@@ -540,7 +607,7 @@ pub(crate) mod tests {
             history: Vec::new(),
             spec: Vec::new(),
             yaml: String::new(),
-            detail: FluxDetail::Kustomization,
+            detail: FluxDetail::Kustomization(None),
             conditions: Vec::new(),
             diagnosis: None,
         }

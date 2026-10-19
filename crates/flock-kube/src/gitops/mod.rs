@@ -1,5 +1,6 @@
 mod changes;
 mod convert;
+mod drift;
 mod focus;
 mod git;
 mod grid;
@@ -176,6 +177,7 @@ impl GitOpsState {
                 let detail = focused.map(|focus| lock(&focus.detail));
                 let history = detail.as_ref().and_then(|d| d.history(now));
                 let releases = detail.as_ref().and_then(|d| d.releases(now));
+                let drift = detail.as_ref().and_then(|d| d.drift());
                 drop(detail);
                 let inputs = Inputs {
                     cluster: &cluster.id,
@@ -184,6 +186,7 @@ impl GitOpsState {
                     health: &health,
                     history,
                     releases,
+                    drift,
                 };
                 if let Some(mut object) = flux_object(parsed, inputs) {
                     let handled = parsed.object.last_handled_reconcile_at.as_deref();

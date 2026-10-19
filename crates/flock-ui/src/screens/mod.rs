@@ -8,6 +8,7 @@ pub mod edit;
 mod event_inspector;
 mod events;
 pub mod flock;
+mod flux_drift;
 mod flux_events;
 mod flux_graph;
 mod flux_list;
