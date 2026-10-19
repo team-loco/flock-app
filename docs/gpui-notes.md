@@ -53,11 +53,13 @@ gpui_platform::application()
 ## Menu-bar verification
 
 The pinned gpui exposes no status-item API. `apps/flock/src/menubar/native.rs` owns the AppKit
-status item and menu on the main thread; action targets queue intents back into gpui. The menu-bar
+status item and menu on the main thread; action targets queue intents back into gpui. A window's
+shell is reached through `Root::view()` downcast to `Shell`. The menu-bar
 model subscribes to the same Store as the windows, so monitoring continues with no windows open.
 
 Headless coverage verifies snapshot labels, counts, severity ordering, bounded problem menus,
-resource targets, settings persistence and the Settings toggle. Dark/light Settings shots cover
+resource targets, routing a menu action into the front window's shell (or a new window), the
+last-window rule, settings persistence and the Settings toggle. Dark/light Settings shots cover
 the in-app control. AppKit's actual status-item rendering, native menu interaction, activation and
 process exit are not exercised by the headless platform and require a manual macOS check. Do not
 launch the GUI or synthesize system input for automated verification.

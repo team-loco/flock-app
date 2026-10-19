@@ -29,4 +29,4 @@ headers; the shell routes navigation to the owning pane.
 
 Settings uses the shared Toggle and persisted AppSettings for “Show in menu bar” under Appearance.
 The macOS menu-bar item uses native AppKit menus and system typography; its health glyphs follow
-Flock's status vocabulary. Its lifecycle and problem click-through follow decision 35.
+Flock's status vocabulary. Its lifecycle and problem click-through follow decision 38.

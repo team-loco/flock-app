@@ -59,8 +59,8 @@ pub(crate) fn record(window: u64, saved: SavedWindow, cx: &mut App) {
 }
 
 pub(crate) fn closed(window: u64, cx: &mut App) {
-    let menu_bar = cfg!(target_os = "macos") && crate::settings::current(cx).show_in_menu_bar;
-    if cx.windows().is_empty() && !menu_bar {
+    let stays = crate::settings::current(cx).keeps_running_in_menu_bar();
+    if cx.windows().is_empty() && !stays {
         return;
     }
     if cx.default_global::<Sessions>().windows.forget(window) {

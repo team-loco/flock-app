@@ -278,7 +278,7 @@ fn launch(
     cx.set_menus(menus());
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_window_closed(|cx, _| {
-        if cx.windows().is_empty() && !keep_running(flock_ui::settings::current(cx)) {
+        if cx.windows().is_empty() && !flock_ui::settings::current(cx).keeps_running_in_menu_bar() {
             cx.quit();
         }
     })
@@ -301,8 +301,35 @@ fn launch(
     Ok(())
 }
 
-fn keep_running(settings: &flock_core::AppSettings) -> bool {
-    cfg!(target_os = "macos") && settings.show_in_menu_bar
+#[cfg(any(target_os = "macos", test))]
+fn bring_to_front(store: gpui::Entity<Store>, command: Option<Command>, cx: &mut App) {
+    let front = cx
+        .window_stack()
+        .and_then(|stack| stack.first().copied())
+        .or_else(|| cx.windows().first().copied());
+    let shell = front
+        .and_then(|handle| handle.downcast::<Root>())
+        .and_then(|root| root.read(cx).ok().map(|root| root.view().clone()))
+        .and_then(|view| view.downcast::<Shell>().ok());
+    let (Some(front), Some(shell)) = (front, shell) else {
+        let initial = command.into_iter().collect();
+        if let Err(error) = open_flock_window(store, initial, None, cx) {
+            tracing::error!(%error, "opening a Flock window");
+        }
+        return;
+    };
+    let shown = front.update(cx, |_, window, cx| {
+        if let Some(command) = command {
+            shell.update(cx, |shell, cx| {
+                shell.dispatch(Command::NewTab(Box::new(command)), cx);
+            });
+        }
+        window.activate_window();
+    });
+    if let Err(error) = shown {
+        tracing::error!(%error, "bringing a Flock window to the front");
+    }
+    cx.activate(true);
 }
 
 fn install_tabs(store: TabStore, cx: &mut App) -> Vec<SavedWindow> {
@@ -393,12 +420,47 @@ fn open_flock_window(
 mod tests {
     use super::*;
 
-    #[test]
-    fn last_window_stays_running_only_when_the_menu_bar_is_enabled_on_macos() {
-        let mut settings = flock_core::AppSettings::default();
-        assert_eq!(keep_running(&settings), cfg!(target_os = "macos"));
-        settings.show_in_menu_bar = false;
-        assert!(!keep_running(&settings));
+    #[gpui::test]
+    fn bringing_flock_to_front_opens_in_the_front_window_or_a_new_one(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (backend, updates) = async_channel::unbounded();
+        let (commands, _received) = async_channel::unbounded();
+        let snapshot = flock_demo::snapshot();
+        let target = snapshot
+            .home
+            .problems
+            .iter()
+            .map(|problem| problem.target.clone())
+            .find(|target| flock_core::FluxKind::from_label(&target.kind).is_none())
+            .unwrap_or_else(|| panic!("the demo snapshot has no problems"));
+        let store = cx.update(|cx| {
+            flock_ui::init(Some(Appearance::Dark), cx)
+                .unwrap_or_else(|error| panic!("UI init: {error}"));
+            cx.new(|cx| Store::new(updates, commands, cx))
+        });
+        assert!(
+            backend
+                .try_send(flock_core::Update::Snapshot(Box::new(snapshot)))
+                .is_ok()
+        );
+        cx.update(|cx| bring_to_front(store.clone(), None, cx));
+        cx.run_until_parked();
+        let first = cx
+            .read(|cx| cx.windows().into_iter().next())
+            .unwrap_or_else(|| panic!("no window opened"));
+        let open = Command::OpenResource(target.clone());
+        cx.update(|cx| bring_to_front(store.clone(), Some(open), cx));
+        cx.run_until_parked();
+        assert_eq!(cx.read(App::windows), vec![first]);
+        let shown = cx.update(|cx| {
+            first
+                .downcast::<Root>()
+                .and_then(|root| root.read(cx).ok().map(|root| root.view().clone()))
+                .and_then(|view| view.downcast::<Shell>().ok())
+                .map(|shell| shell.read(cx).state().location().resource.clone())
+        });
+        assert_eq!(shown, Some(Some(target)));
     }
 
     #[gpui::test]

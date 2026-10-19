@@ -1,7 +1,9 @@
+use crate::home::Problem;
 use crate::{ResourceRef, Snapshot, Status};
 
 const PROBLEM_LIMIT: usize = 10;
-const REASON_LIMIT: usize = 160;
+const REASON_LIMIT: usize = 80;
+const ELLIPSIS: char = '…';
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProblemItem {
@@ -18,64 +20,69 @@ pub struct MenuBar {
 impl MenuBar {
     pub fn from_snapshot(snapshot: &Snapshot) -> Self {
         let problems = &snapshot.home.problems;
-        let counts = crate::home::problems_badge(problems);
-        let statuses = snapshot.clusters.iter().map(|cluster| cluster.status);
-        let statuses = statuses.chain(problems.iter().map(|problem| problem.status));
-        let worst = Status::worst(statuses);
-        let mut labels = Vec::new();
-        if counts.err > 0 {
-            labels.push(format!("{} {}", Status::Err.glyph(), counts.err));
-        }
-        if counts.warn > 0 {
-            labels.push(format!("{} {}", Status::Warn.glyph(), counts.warn));
-        }
-        if worst > counts.status() || labels.is_empty() {
-            labels.insert(0, worst.glyph().to_owned());
-        }
-        let mut sorted: Vec<_> = problems.iter().collect();
+        let mut sorted: Vec<&Problem> = problems.iter().collect();
         sorted.sort_by_key(|problem| std::cmp::Reverse(problem.status));
-        let problems = sorted
+        let items = sorted
             .into_iter()
             .take(PROBLEM_LIMIT)
-            .map(|problem| {
-                let target = &problem.target;
-                let cluster = snapshot
-                    .cluster(&target.cluster)
-                    .map_or_else(|| target.cluster.as_str(), |cluster| cluster.name.as_str());
-                let reason = problem
-                    .message
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let mut shortened: String = reason.chars().take(REASON_LIMIT).collect();
-                if reason.chars().count() > REASON_LIMIT {
-                    shortened.push('…');
-                }
-                let namespace = target
-                    .namespace
-                    .as_ref()
-                    .map(|ns| format!(" ({ns})"))
-                    .unwrap_or_default();
-                ProblemItem {
-                    title: format!(
-                        "{cluster} · {}/{}{namespace} · {shortened}",
-                        target.kind, target.name
-                    ),
-                    target: target.clone(),
-                }
-            })
+            .map(|problem| item(snapshot, problem))
             .collect();
         Self {
-            label: labels.join(" "),
-            problems,
+            label: label(snapshot),
+            problems: items,
         }
+    }
+}
+
+fn label(snapshot: &Snapshot) -> String {
+    let problems = &snapshot.home.problems;
+    let counts = crate::home::problems_badge(problems);
+    let clusters = snapshot.clusters.iter().map(|cluster| cluster.status);
+    let statuses = clusters.chain(problems.iter().map(|problem| problem.status));
+    let worst = Status::worst(statuses);
+    let mut parts = Vec::new();
+    if counts.err > 0 {
+        parts.push(format!("{} {}", Status::Err.glyph(), counts.err));
+    }
+    if counts.warn > 0 {
+        parts.push(format!("{} {}", Status::Warn.glyph(), counts.warn));
+    }
+    if worst > counts.status() || parts.is_empty() {
+        parts.insert(0, worst.glyph().to_owned());
+    }
+    parts.join(" ")
+}
+
+fn item(snapshot: &Snapshot, problem: &Problem) -> ProblemItem {
+    let target = &problem.target;
+    let cluster = snapshot
+        .cluster(&target.cluster)
+        .map_or_else(|| target.cluster.as_str(), |cluster| cluster.name.as_str());
+    let words: Vec<&str> = problem.message.split_whitespace().collect();
+    let reason = words.join(" ");
+    let mut shortened: String = reason.chars().take(REASON_LIMIT).collect();
+    if reason.chars().count() > REASON_LIMIT {
+        shortened.push(ELLIPSIS);
+    }
+    let namespace = target
+        .namespace
+        .as_ref()
+        .map(|namespace| format!(" ({namespace})"))
+        .unwrap_or_default();
+    let title = format!(
+        "{cluster} · {}/{}{namespace} · {shortened}",
+        target.kind, target.name
+    );
+    ProblemItem {
+        title,
+        target: target.clone(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ClusterId, home::Problem};
+    use crate::ClusterId;
     use std::{collections::BTreeMap, time::Duration};
 
     fn problem(status: Status, name: &str) -> Problem {

@@ -8,6 +8,12 @@ use objc2_foundation::{MainThreadMarker, NSObject, NSObjectProtocol, NSString};
 use super::Action;
 use flock_core::{Sender, menubar::MenuBar};
 
+const TOOLTIP: &str = "Flock fleet health";
+const NO_PROBLEMS: &str = "No problems";
+const OPEN: &str = "Open Flock";
+const SETTINGS: &str = "Settings…";
+const QUIT: &str = "Quit";
+
 struct TargetState {
     sender: Sender<Action>,
     action: Action,
@@ -45,13 +51,13 @@ impl Item {
     pub(super) fn update(&mut self, model: &MenuBar, sender: &Sender<Action>) {
         if let Some(button) = self.item.button(self.mtm) {
             button.setTitle(&NSString::from_str(&model.label));
-            button.setToolTip(Some(&NSString::from_str("Flock fleet health")));
+            button.setToolTip(Some(&NSString::from_str(TOOLTIP)));
         }
         let menu = NSMenu::new(self.mtm);
         menu.setAutoenablesItems(false);
         if model.problems.is_empty() {
             let empty = NSMenuItem::new(self.mtm);
-            empty.setTitle(&NSString::from_str("No problems"));
+            empty.setTitle(&NSString::from_str(NO_PROBLEMS));
             empty.setEnabled(false);
             menu.addItem(&empty);
         }
@@ -61,9 +67,9 @@ impl Item {
         }
         menu.addItem(&NSMenuItem::separatorItem(self.mtm));
         for (title, action) in [
-            ("Open Flock", Action::Open),
-            ("Settings…", Action::Settings),
-            ("Quit", Action::Quit),
+            (OPEN, Action::Open),
+            (SETTINGS, Action::Settings),
+            (QUIT, Action::Quit),
         ] {
             self.add(&menu, title, action, sender);
         }

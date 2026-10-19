@@ -30,45 +30,34 @@ struct Owner {
 impl Global for Owner {}
 
 pub(super) fn install(store: Entity<Store>, cx: &mut App) {
-    let mtm = MainThreadMarker::new()
-        .unwrap_or_else(|| panic!("menu bar must be installed on the main thread"));
+    let Some(mtm) = MainThreadMarker::new() else {
+        tracing::error!("the menu bar item can only be created on the main thread");
+        return;
+    };
     let updates = store.update(cx, |store, _| store.subscribe());
     let state = cx.new(|cx: &mut Context<MenuBarState>| {
         let (sender, actions) = async_channel::unbounded();
-        let settings = cx.observe_global::<settings::Settings>(|this, cx| {
-            this.refresh(cx);
-            if cx.windows().is_empty() && !settings::current(cx).show_in_menu_bar {
-                cx.quit();
-            }
-        });
+        let settings = cx.observe_global::<settings::Settings>(|this, cx| this.refresh(cx));
         let updates = cx.spawn(async move |this, cx| {
             while let Ok(update) = updates.recv().await {
-                if let Update::Snapshot(snapshot) = update {
-                    let result = this.update(cx, |this, cx| {
-                        let model = MenuBar::from_snapshot(&snapshot);
-                        if this.model != model {
-                            this.model = model;
-                            this.refresh(cx);
-                        }
-                    });
-                    if result.is_err() {
-                        break;
+                let Update::Snapshot(snapshot) = update else {
+                    continue;
+                };
+                let model = MenuBar::from_snapshot(&snapshot);
+                let result = this.update(cx, |this, _| {
+                    if this.model != model {
+                        this.model = model;
+                        this.redraw();
                     }
+                });
+                if result.is_err() {
+                    break;
                 }
             }
         });
         let actions = cx.spawn(async move |_, cx| {
             while let Ok(action) = actions.recv().await {
-                cx.update(|cx| match action {
-                    Action::Quit => cx.quit(),
-                    Action::Open => open(store.clone(), Vec::new(), cx),
-                    Action::Settings => {
-                        open(store.clone(), vec![Command::SelectPage(Page::Settings)], cx);
-                    }
-                    Action::Problem(target) => {
-                        open(store.clone(), vec![Command::OpenResource(target)], cx);
-                    }
-                });
+                cx.update(|cx| run(action, store.clone(), cx));
             }
         });
         let mut state = MenuBarState {
@@ -86,26 +75,35 @@ pub(super) fn install(store: Entity<Store>, cx: &mut App) {
     cx.set_global(Owner { _state: state });
 }
 
-impl MenuBarState {
-    fn refresh(&mut self, cx: &mut App) {
-        if settings::current(cx).show_in_menu_bar {
-            let item = self.item.get_or_insert_with(|| native::Item::new(self.mtm));
-            item.update(&self.model, &self.sender);
-        } else {
-            self.item.take();
+fn run(action: Action, store: Entity<Store>, cx: &mut App) {
+    match action {
+        Action::Quit => cx.quit(),
+        Action::Open => super::bring_to_front(store, None, cx),
+        Action::Settings => {
+            let settings = Command::SelectPage(Page::Settings);
+            super::bring_to_front(store, Some(settings), cx);
+        }
+        Action::Problem(target) => {
+            super::bring_to_front(store, Some(Command::OpenResource(target)), cx);
         }
     }
 }
 
-fn open(store: Entity<Store>, initial: Vec<Command>, cx: &mut App) {
-    if initial.is_empty()
-        && let Some(window) = cx.windows().first()
-    {
-        let _ = window.update(cx, |_, window, _| window.activate_window());
-        cx.activate(true);
-        return;
+impl MenuBarState {
+    fn refresh(&mut self, cx: &mut App) {
+        let wanted = settings::current(cx).keeps_running_in_menu_bar();
+        if wanted && self.item.is_none() {
+            self.item = Some(native::Item::new(self.mtm));
+            self.redraw();
+        }
+        if !wanted {
+            self.item = None;
+        }
     }
-    if let Err(error) = super::open_flock_window(store, initial, None, cx) {
-        tracing::error!(%error, "opening Flock from the menu bar");
+
+    fn redraw(&mut self) {
+        if let Some(item) = &mut self.item {
+            item.update(&self.model, &self.sender);
+        }
     }
 }

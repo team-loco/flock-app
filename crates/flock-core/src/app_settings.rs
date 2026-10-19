@@ -40,6 +40,12 @@ impl Default for AppSettings {
     }
 }
 
+impl AppSettings {
+    pub fn keeps_running_in_menu_bar(&self) -> bool {
+        cfg!(target_os = "macos") && self.show_in_menu_bar
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ThemeChoice {
@@ -414,5 +420,16 @@ mod tests {
         assert!(AppSettings::default().show_in_menu_bar);
         assert!(updates.automatic);
         assert!(!updates.prereleases);
+    }
+
+    #[test]
+    fn only_macos_with_the_menu_bar_enabled_keeps_running_without_windows() {
+        let mut settings = AppSettings::default();
+        assert_eq!(
+            settings.keeps_running_in_menu_bar(),
+            cfg!(target_os = "macos")
+        );
+        settings.show_in_menu_bar = false;
+        assert!(!settings.keeps_running_in_menu_bar());
     }
 }

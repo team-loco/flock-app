@@ -381,7 +381,7 @@ impl Shell {
         cx.notify();
     }
 
-    pub(super) fn dispatch(&mut self, command: Command, cx: &mut Context<Self>) {
+    pub fn dispatch(&mut self, command: Command, cx: &mut Context<Self>) {
         let command = self.with_gesture(command);
         let before = self.state.location().clone();
         if let Command::NewTab(inner) = &command {

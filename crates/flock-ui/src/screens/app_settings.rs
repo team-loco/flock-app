@@ -287,14 +287,16 @@ impl AppSettingsScreen {
                     change(cx, |s| s.theme = choice);
                 }
             });
-        let menu_bar =
+        section(APPEARANCE, palette).child(row(THEME, THEME_HINT, choices, palette))
+    }
+
+    fn menu_bar(current: &AppSettings, palette: &Palette) -> AnyElement {
+        let toggle =
             Toggle::new("settings-menu-bar", current.show_in_menu_bar).on_toggle(|on, _, cx| {
                 let on = *on;
                 change(cx, |s| s.show_in_menu_bar = on);
             });
-        section(APPEARANCE, palette)
-            .child(row(THEME, THEME_HINT, choices, palette))
-            .child(row(MENU_BAR, MENU_BAR_HINT, menu_bar, palette))
+        row(MENU_BAR, MENU_BAR_HINT, toggle, palette)
     }
 
     fn highlights(
@@ -584,7 +586,11 @@ impl Render for AppSettingsScreen {
             .max_w(SETTINGS_COLUMN)
             .px(SETTINGS_INSET)
             .pb(SPACE_8)
-            .child(appearance.children(highlights))
+            .child(
+                appearance
+                    .children(highlights)
+                    .child(Self::menu_bar(&current, &palette)),
+            )
             .child(Self::refresh(&current, &palette, cx))
             .child(Self::notifications(&current, &palette, cx))
             .child(updates(&current, &palette, cx))
