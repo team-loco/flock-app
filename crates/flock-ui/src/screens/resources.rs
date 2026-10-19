@@ -318,6 +318,7 @@ impl ResourcesScreen {
             let ix = match *event {
                 TableEvent::Selected(ix) => ix,
                 TableEvent::Opened(ix) => ix,
+                TableEvent::Marked => return,
             };
             let key = table
                 .read(cx)

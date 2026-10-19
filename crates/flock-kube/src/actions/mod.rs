@@ -3,6 +3,7 @@ pub mod exec;
 pub mod failure;
 pub mod forward;
 pub mod logs;
+pub mod multi_logs;
 pub mod mutate;
 pub mod pending;
 pub mod rollout;
@@ -11,8 +12,8 @@ use std::sync::{Arc, Mutex};
 
 use flock_core::action::Notice;
 use flock_core::{
-    ClusterId, Command, ExecRequest, Forward, LogRequest, Receiver, ResourceRef, Seen, Sender,
-    Snapshot, Status, Update,
+    ClusterId, Command, ExecRequest, Forward, LogEvent, LogRequest, MultiLogRequest, Receiver,
+    ResourceRef, Seen, Sender, Snapshot, Status, Update,
 };
 use pending::Mutation;
 
@@ -56,6 +57,7 @@ pub struct Actions {
 pub fn cluster_of(command: &Command) -> Option<&ClusterId> {
     match command {
         Command::StreamLogs(request) => Some(&request.pod.cluster),
+        Command::StreamPodLogs(request) => Some(request.target.cluster()),
         Command::Exec(request) => Some(&request.target.pod.cluster),
         Command::PortForward { service, .. } => Some(&service.cluster),
         Command::Cordon(seen) => Some(&seen.target.cluster),
@@ -108,6 +110,7 @@ impl Actions {
         match command {
             Command::StopPortForward { local } => self.stop_forward(*local),
             Command::StreamLogs(request) => Self::stream_logs(request, handle),
+            Command::StreamPodLogs(request) => Self::stream_pod_logs(request, handle),
             Command::Exec(request) => Self::exec(request, handle),
             Command::PortForward {
                 service,
@@ -185,6 +188,15 @@ impl Actions {
         }
         let line = logs::marker(&Error::NotConnected.to_string());
         request.sink.send_blocking(line);
+    }
+
+    fn stream_pod_logs(request: &MultiLogRequest, handle: Option<ClusterHandle>) {
+        if let Some(handle) = handle {
+            tokio::spawn(multi_logs::stream(handle, request.clone()));
+            return;
+        }
+        let reason = action_failure(&Error::NotConnected).reason;
+        request.sink.send_blocking(LogEvent::Failed(reason));
     }
 
     fn exec(request: &ExecRequest, handle: Option<ClusterHandle>) {

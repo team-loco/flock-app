@@ -593,6 +593,9 @@ fn describe(location: &Location, snapshot: &Snapshot) -> (Option<Status>, String
             location.page.label().to_owned(),
         );
     }
+    if let Some(target) = &location.logs {
+        return (None, LOGS_KIND.to_owned(), target.label());
+    }
     let Some(resource) = &location.resource else {
         return (
             None,

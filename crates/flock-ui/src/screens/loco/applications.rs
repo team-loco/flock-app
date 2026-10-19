@@ -3,7 +3,7 @@ use flock_core::filter::{TextFilter, label_values};
 use flock_core::loco::{
     AppFilter, Application, Applications, ControllerObject, LocoCommand, Workspace, short_digest,
 };
-use flock_core::{Command, Page, ResourceRef, Status};
+use flock_core::{Command, LogTarget, Page, ResourceRef, Status};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
@@ -311,7 +311,7 @@ impl ApplicationsScreen {
             .disabled(logs_target.is_none())
             .on_click(cx.listener(move |_, _, _, cx| {
                 if let Some(target) = logs_target.clone() {
-                    cx.emit(Command::FollowLogs(target));
+                    cx.emit(Command::FollowLogs(LogTarget::Workload(target)));
                 }
             }));
         let status = div()

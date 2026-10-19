@@ -14,6 +14,7 @@ use crate::screens::flock::FlockScreen;
 use crate::screens::flux_object::FluxObjectPage;
 use crate::screens::gitops::GitOpsScreen;
 use crate::screens::logs::LogsScreen;
+use crate::screens::multilog::MultiLogsScreen;
 use crate::screens::pods::PodsScreen;
 use crate::screens::settings::SettingsScreen;
 use crate::screens::workload::WorkloadScreen;
@@ -75,6 +76,7 @@ pub(super) struct PaneScreens {
     pub(super) pods: Entity<PodsScreen>,
     pub(super) workload: Option<(Entity<WorkloadScreen>, Subscription)>,
     pub(super) logs: Option<(Entity<LogsScreen>, Subscription)>,
+    pub(super) multi_logs: Option<(Entity<MultiLogsScreen>, Subscription)>,
     pub(super) load: LoadClock,
     pub(super) strip: ScrollHandle,
     pub(super) shown: Option<TabId>,
@@ -152,6 +154,7 @@ impl PaneScreens {
             pods,
             workload: None,
             logs: None,
+            multi_logs: None,
             load: LoadClock::default(),
             strip: ScrollHandle::default(),
             shown: None,

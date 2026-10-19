@@ -1,7 +1,9 @@
 use clap::ValueEnum;
 use flock_core::history::Location;
 use flock_core::tabs::{SavedPane, SavedWindow};
-use flock_core::{AddClusterStep, ClusterId, Command, FluxKey, FluxKind, Page, ResourceRef};
+use flock_core::{
+    AddClusterStep, ClusterId, Command, FluxKey, FluxKind, LogTarget, Page, ResourceRef,
+};
 use flock_ui::actions::{CheckForUpdates, NewWindow, OpenSettings, Quit};
 use flock_ui::theme::Appearance;
 use flock_ui::{Gallery, GalleryPage, Shell, Store};
@@ -136,6 +138,7 @@ pub enum Screen {
     Split,
     Pods,
     PodsShell,
+    Logs,
     Kustomization,
     Helmrelease,
     Source,
@@ -188,6 +191,10 @@ impl Screen {
             Self::Split => vec![sample, Command::OpenResource(preset.deployment())],
             Self::Pods => vec![sample, Command::SelectPage(Page::Pods)],
             Self::PodsShell => vec![sample, Command::SelectPage(Page::Pods)],
+            Self::Logs => vec![
+                sample,
+                Command::FollowLogs(LogTarget::Workload(preset.deployment())),
+            ],
             Self::Kustomization => flux_screen(preset.flux(
                 SAMPLE_CLUSTER,
                 FluxKind::Kustomization,
@@ -355,6 +362,7 @@ pub fn root_view(
         Screen::Split => shell_view(store, screen, preset, window, cx),
         Screen::Pods => shell_view(store, screen, preset, window, cx),
         Screen::PodsShell => shell_view(store, screen, preset, window, cx),
+        Screen::Logs => shell_view(store, screen, preset, window, cx),
         Screen::Kustomization => shell_view(store, screen, preset, window, cx),
         Screen::Helmrelease => shell_view(store, screen, preset, window, cx),
         Screen::Source => shell_view(store, screen, preset, window, cx),

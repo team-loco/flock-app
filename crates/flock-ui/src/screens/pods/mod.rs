@@ -1,13 +1,14 @@
 use crate::kit::SelectableText;
 use flock_core::emptiness::Noun;
 use flock_core::filter::label_values;
+use flock_core::multilog::LabelSelector;
 use flock_core::pods::{
     Container, Pod, PodFilter, PodQuery, filter_counts, namespaces, nav_counts,
 };
 use flock_core::resources::{POD_LIST, namespace_choices};
 use flock_core::settings::NamespaceSelection;
 use flock_core::{
-    ClusterId, Command, Counts, Page, Preferences, ResourceRef, Seen, Snapshot, Status,
+    ClusterId, Command, Counts, LogTarget, Page, Preferences, ResourceRef, Seen, Snapshot, Status,
 };
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
@@ -28,8 +29,8 @@ use crate::kit::{
 use crate::screens::{ListShape, empty_list, new_tab_item};
 use crate::theme::{
     ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, LINE_PROSE, Palette,
-    RADIUS_SMALL, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, TEXT_BODY,
-    TEXT_MONO, TEXT_SMALL, TEXT_UI,
+    RADIUS_SMALL, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8,
+    TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI,
 };
 
 const INSPECTOR_ID: &str = "pod-inspector";
@@ -50,6 +51,12 @@ const MISSING: &str = "—";
 const TRUE: &str = "True";
 const FALSE: &str = "False";
 const NO_EVENTS: &str = "No recent events.";
+const LOGS_FOR: &str = "Logs for";
+const LOGS_FOR_SELECTED: &str = "Logs for selected pods";
+const SELECTED_PODS: &str = "selected pods";
+const CLEAR_SELECTION: &str = "Clear selection";
+const MARK_HINT: &str = "⇧-click rows to add or remove pods";
+const SELECTOR_HINT: &str = "Follows every pod that matches the label filter, including new ones";
 const NO_SELECTION: &str = "Select a pod to see its containers, conditions and events.";
 pub struct PodsScreen {
     pods: Vec<Pod>,
@@ -89,7 +96,8 @@ impl PodsScreen {
         let table = cx.new(|cx| {
             Table::new("pods", columns(), cx)
                 .row_actions(move |pod: &Pod| menu_items(pod, &screen))
-                .row_key(|pod: &Pod| pod.name.clone().into())
+                .row_key(|pod: &Pod| format!("{}/{}", pod.namespace, pod.name).into())
+                .multi_select()
                 .column_gap(SPACE_7)
         });
         let search =
@@ -113,6 +121,10 @@ impl PodsScreen {
                 let ix = match *event {
                     TableEvent::Selected(ix) => ix,
                     TableEvent::Opened(ix) => ix,
+                    TableEvent::Marked => {
+                        cx.notify();
+                        return;
+                    }
                 };
                 let pod = table.read(cx).row(ix).map(Pod::resource);
                 if let Some(pod) = pod {
@@ -244,6 +256,67 @@ impl PodsScreen {
             .and_then(|cluster| nav_counts(&self.pods, cluster).total)
             .unwrap_or_default();
         (Counts::default(), total.to_string())
+    }
+
+    fn logs_target(&self, cx: &gpui::App) -> Option<(LogTarget, String)> {
+        let marked: Vec<ResourceRef> = self
+            .table
+            .read(cx)
+            .marked_rows()
+            .into_iter()
+            .map(Pod::resource)
+            .collect();
+        if marked.len() > 1 {
+            let label = format!("{} {SELECTED_PODS}", marked.len());
+            return LogTarget::pods(&marked).map(|target| (target, label));
+        }
+        let cluster = self.cluster.clone()?;
+        let selector = LabelSelector::from_matches(&self.query.text.labels)?;
+        let label = selector.to_string();
+        let target = LogTarget::Selector {
+            cluster,
+            namespace: self.query.namespace.clone(),
+            selector,
+        };
+        Some((target, label))
+    }
+
+    fn logs_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (target, label) = self.logs_target(cx)?;
+        let palette = *cx.palette();
+        let marked = matches!(target, LogTarget::Pods { .. });
+        let open = Button::new("pods-logs-selected", format!("{LOGS_FOR} {label}"))
+            .small()
+            .on_click(cx.listener(move |_, _, _, cx| open_logs(target.clone(), cx)));
+        let clear = marked.then(|| {
+            Button::new("pods-clear-selection", CLEAR_SELECTION)
+                .small()
+                .ghost()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.table.update(cx, Table::clear_marks);
+                }))
+        });
+        let hint = if marked { MARK_HINT } else { SELECTOR_HINT };
+        Some(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(SPACE_4)
+                .px(SPACE_8)
+                .py(SPACE_3)
+                .border_b(RULE)
+                .border_color(palette.line)
+                .child(open)
+                .children(clear)
+                .child(
+                    div()
+                        .text_size(TEXT_SMALL)
+                        .text_color(palette.mute)
+                        .child(hint),
+                )
+                .into_any_element(),
+        )
     }
 
     fn cluster_pods(&self) -> Vec<&Pod> {
@@ -715,10 +788,16 @@ fn events(pod: &Pod, palette: &Palette) -> impl IntoElement {
         })
 }
 
+fn open_logs(target: LogTarget, cx: &mut Context<PodsScreen>) {
+    cx.emit(Command::NewTab(Box::new(Command::FollowLogs(target))));
+}
+
 fn menu_items(pod: &Pod, screen: &gpui::WeakEntity<PodsScreen>) -> Vec<MenuItem> {
     let screen = screen.clone();
     let logs_screen = screen.clone();
     let logs_pod = pod.resource();
+    let selected_screen = screen.clone();
+    let selected_pod = pod.resource();
     let open_screen = screen.clone();
     let open = new_tab_item(Command::OpenResource(pod.resource()), move |command, cx| {
         let _ = open_screen.update(cx, |_, cx| cx.emit(command));
@@ -734,6 +813,26 @@ fn menu_items(pod: &Pod, screen: &gpui::WeakEntity<PodsScreen>) -> Vec<MenuItem>
             });
         })
         .description("Follow this pod's output in the dock."),
+        MenuItem::new(LOGS_FOR_SELECTED, move |_, cx| {
+            let _ = selected_screen.update(cx, |this, cx| {
+                let marked: Vec<ResourceRef> = this
+                    .table
+                    .read(cx)
+                    .marked_rows()
+                    .into_iter()
+                    .map(Pod::resource)
+                    .collect();
+                let pods = if marked.contains(&selected_pod) {
+                    marked
+                } else {
+                    vec![selected_pod.clone()]
+                };
+                if let Some(target) = LogTarget::pods(&pods) {
+                    open_logs(target, cx);
+                }
+            });
+        })
+        .description("Merge the output of every ⇧-clicked pod in one tab."),
     ];
     for (container, port) in pod.ports() {
         let target = pod.resource();
@@ -881,6 +980,7 @@ impl Render for PodsScreen {
             .flex()
             .flex_col()
             .child(self.filter.clone())
+            .children(self.logs_bar(cx))
             .child(
                 div()
                     .flex_1()

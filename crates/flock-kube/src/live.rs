@@ -742,7 +742,7 @@ impl Live {
             Command::ToggleSidebar => {}
             Command::OpenResource(resource) => self.open(resource),
             Command::InspectResource(resource) => self.open(resource),
-            Command::FollowLogs(resource) => self.open(resource),
+            Command::FollowLogs(_) => {}
             Command::OpenLogs { pod, .. } => self.open(pod),
             Command::NewTab(command) => return self.apply_current(command),
             Command::Compare(target) => self.compare(target, None),
@@ -767,6 +767,7 @@ impl Live {
             }
             Command::WatchWorkload { target, sink } => self.watch_workload(target, sink),
             Command::StreamLogs(_) => self.act(command),
+            Command::StreamPodLogs(_) => self.act(command),
             Command::Exec(_) => self.act(command),
             Command::RestartRollout(_) => self.act(command),
             Command::Scale { .. } => self.act(command),

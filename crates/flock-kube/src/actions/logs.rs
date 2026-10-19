@@ -11,7 +11,7 @@ use crate::error::{Error, Result};
 use crate::manager::ClusterHandle;
 use crate::ops;
 
-const TAIL_LINES: i64 = 500;
+pub(super) const TAIL_LINES: i64 = 500;
 const CLOSE_POLL: Duration = Duration::from_millis(500);
 const TIME_FORMAT: &str = "%H:%M:%S%.3f";
 const LEVEL_KEYS: [&str; 6] = [
@@ -83,22 +83,25 @@ pub fn detect_level(message: &str) -> Option<LogLevel> {
     level_word(&word)
 }
 
-pub fn parse_line(raw: &str, zone: &TimeZone) -> LogLine {
-    let (time, message) = match raw.split_once(' ') {
-        Some((stamp, rest)) => match stamp.parse::<Timestamp>() {
-            Ok(stamp) => {
-                let local = stamp.to_zoned(zone.clone()).strftime(TIME_FORMAT);
-                (Some(local.to_string()), rest)
-            }
-            Err(_) => (None, raw),
-        },
+pub fn parse_stamped(raw: &str, zone: &TimeZone) -> (Option<Timestamp>, LogLine) {
+    let stamped = raw
+        .split_once(' ')
+        .and_then(|(stamp, rest)| stamp.parse::<Timestamp>().ok().map(|at| (at, rest)));
+    let (at, message) = match stamped {
+        Some((at, rest)) => (Some(at), rest),
         None => (None, raw),
     };
-    LogLine {
+    let time = at.map(|at| at.to_zoned(zone.clone()).strftime(TIME_FORMAT).to_string());
+    let line = LogLine {
         time,
         level: detect_level(message),
         message: message.to_owned(),
-    }
+    };
+    (at, line)
+}
+
+pub fn parse_line(raw: &str, zone: &TimeZone) -> LogLine {
+    parse_stamped(raw, zone).1
 }
 
 pub fn marker(text: &str) -> LogLine {

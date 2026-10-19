@@ -339,6 +339,10 @@ tab") first in their menu.
 into a new tab). Rows that open something put `screens::new_tab_item(command, emit)` ("Open in new
 tab") first in their menu.
 
+`.multi_select()` lets ⇧-click add or remove rows from a marked set (drawn like the selection;
+a plain click clears it). `marked_rows()` reads it, `clear_marks(cx)` empties it, and
+`TableEvent::Marked` reports changes. It needs `row_key`.
+
 Row actions: `.row_actions(|row| Vec<MenuItem>)` / `set_row_actions(..)` adds a ⋯ button on the hovered
 row (`{table}-row-{ix}-more`) and a right-click menu (`{table}-row-menu-item-{ix}`), both with that
 row's items. `hovered_row()` reads the hovered row. Table options:
@@ -439,6 +443,29 @@ l.clear(cx)
 ```
 
 `strip_ansi(&str)` is public for other text that comes from a terminal.
+
+Lines can carry a source tag, drawn as a `LOG_SOURCE`-wide column in that source's colour
+(`highlight::source_colors(palette)`: eight hues whose lightness starts at `acc` and steps until
+the text is ≥ 4.5:1 on `editor`, ERROR rows and `sel`, so every theme and highlight stays legible):
+
+```rust
+LogLine::new(Some("21:14:00.211"), Some(Level::Info), "GET /healthz").with_source("x2lqp", slot)
+l.set_lines(lines, cx)       // replace the buffer (a re-filtered or re-merged view)
+l.set_highlight(text, cx)    // highlight matches without jumping or leaving follow
+```
+
+### Merged pod logs
+
+`screens::multilog::MultiLogs` follows every pod and container of a `flock_core::LogTarget`
+(a workload or Job and its pods, a label selector in a namespace, or a fixed set of pods) through
+`Command::StreamPodLogs`. Lines merge in timestamp order into a `flock_core::multilog::MergedLog`
+(bounded by `MERGED_LINES`); each pod keeps a colour slot from `ColorSlots` while it is present.
+The legend chips (`{id}-source-{n}`) toggle a source; the filter field hides lines that do not
+match and highlights the rest; `pause` holds new lines (counting them) until resumed; `follow`,
+`timestamps` and `wrap` drive the `LogView`. Pods that start join and deleted pods leave
+(`left`); a container whose stream ends shows `ended`. `MultiLogs::tools(cx)` returns the toolbar
+for a dock bar or page row. `MultiLogsScreen` is the `Logs <target>` tab (`Location::logs`); the
+workload dock's `all pods` toggle shows the same view for the workload.
 
 ## Terminal
 

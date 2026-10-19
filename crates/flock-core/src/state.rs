@@ -6,8 +6,8 @@ use crate::resource::page_for_kind;
 use crate::tabs::{Panes, SavedWindow, TabId};
 use crate::{
     AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, FluxAction, FluxKey, FluxKind,
-    KubeconfigFile, LogRequest, NewCluster, Notice, Page, Preferences, ResourceRef, Seen, Sink,
-    Snapshot, Uid, Verdict, Workload,
+    KubeconfigFile, LogRequest, LogTarget, MultiLogRequest, NewCluster, Notice, Page, Preferences,
+    ResourceRef, Seen, Sink, Snapshot, Uid, Verdict, Workload,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub enum Command {
     ToggleSidebar,
     OpenResource(ResourceRef),
     InspectResource(ResourceRef),
-    FollowLogs(ResourceRef),
+    FollowLogs(LogTarget),
     OpenLogs {
         pod: ResourceRef,
         container: String,
@@ -57,6 +57,7 @@ pub enum Command {
         sink: Sink<Workload>,
     },
     StreamLogs(LogRequest),
+    StreamPodLogs(MultiLogRequest),
     Exec(ExecRequest),
     RestartRollout(Seen),
     Scale {
@@ -233,7 +234,7 @@ impl AppState {
         match command {
             Command::SelectCluster(Some(id)) => has_cluster(id),
             Command::OpenResource(resource) => has_cluster(&resource.cluster),
-            Command::FollowLogs(resource) => has_cluster(&resource.cluster),
+            Command::FollowLogs(target) => has_cluster(target.cluster()),
             Command::OpenLogs { pod, .. } => has_cluster(&pod.cluster),
             Command::Compare(resource) => has_cluster(&resource.cluster),
             Command::CompareWith { base, .. } => has_cluster(&base.cluster),
@@ -296,7 +297,14 @@ fn navigate(location: &mut Location, command: &Command, snapshot: &Snapshot) {
         Command::SelectPage(page) => select_page(location, *page),
         Command::OpenCommit(_) => select_page(location, Page::Changes),
         Command::OpenResource(resource) => open_resource(location, resource, snapshot),
-        Command::FollowLogs(resource) => open_resource(location, resource, snapshot),
+        Command::FollowLogs(target) => {
+            if has_cluster(target.cluster()) {
+                *location = Location {
+                    logs: Some(target.clone()),
+                    ..Location::page_on(target.cluster().clone(), Page::Logs)
+                };
+            }
+        }
         Command::OpenLogs { pod, container } => {
             if has_cluster(&pod.cluster) {
                 *location = Location {
@@ -387,6 +395,21 @@ fn retargeted(location: &Location, cluster: Option<&ClusterId>, snapshot: &Snaps
         return Location {
             flux_object: Some(moved),
             ..Location::page_on(id.clone(), location.page)
+        };
+    }
+    if let Some(target) = &location.logs {
+        let moved = target.on(id);
+        let present = match &moved {
+            LogTarget::Workload(workload) => exists(workload, snapshot),
+            LogTarget::Selector { .. } => true,
+            LogTarget::Pods { .. } => false,
+        };
+        if !present {
+            return overview;
+        }
+        return Location {
+            logs: Some(moved),
+            ..Location::page_on(id.clone(), Page::Logs)
         };
     }
     if let Some(resource) = &location.resource {
@@ -603,8 +626,49 @@ mod tests {
             namespace: None,
             name: "x".into(),
         };
-        state.apply(&Command::FollowLogs(ghost));
+        state.apply(&Command::FollowLogs(LogTarget::Workload(ghost)));
         assert_eq!(state, loaded());
+    }
+
+    #[test]
+    fn following_a_workloads_logs_opens_a_merged_logs_tab_and_retargets_it() {
+        let mut state = loaded();
+        let deploy = ResourceRef {
+            cluster: ClusterId::new("a"),
+            kind: "Deployment".into(),
+            namespace: Some("shop".into()),
+            name: "cart".into(),
+        };
+        let target = LogTarget::Workload(deploy);
+        state.apply(&Command::NewTab(Box::new(Command::FollowLogs(
+            target.clone(),
+        ))));
+        let location = state.location().clone();
+        assert_eq!(location.page, Page::Logs);
+        assert_eq!(location.logs, Some(target));
+        assert_eq!(location.workload(), None);
+        let title = crate::tabs::title(&location, &state.snapshot);
+        assert_eq!(
+            (title.kind.as_str(), title.label.as_str()),
+            (crate::tabs::LOGS_KIND, "cart")
+        );
+        state.retarget(Some(&ClusterId::new("b")));
+        assert_eq!(state.location().page, Page::ClusterOverview);
+        assert_eq!(state.location().logs, None);
+        let Ok(selector) = crate::multilog::LabelSelector::parse("app=cart") else {
+            panic!("selector parses");
+        };
+        let selected = LogTarget::Selector {
+            cluster: ClusterId::new("a"),
+            namespace: None,
+            selector,
+        };
+        state.apply(&Command::FollowLogs(selected.clone()));
+        state.retarget(Some(&ClusterId::new("b")));
+        assert_eq!(
+            state.location().logs,
+            Some(selected.on(&ClusterId::new("b")))
+        );
     }
 
     #[test]

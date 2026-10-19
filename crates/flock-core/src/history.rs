@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{ClusterId, Command, FluxKey, Page, ResourceRef, Snapshot, WorkloadKind};
+use crate::{ClusterId, Command, FluxKey, LogTarget, Page, ResourceRef, Snapshot, WorkloadKind};
 
 pub const HISTORY_LIMIT: usize = 50;
 
@@ -14,6 +14,8 @@ pub struct Location {
     pub flux_object: Option<FluxKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logs: Option<LogTarget>,
 }
 
 impl Default for Location {
@@ -30,6 +32,7 @@ impl Location {
             resource: None,
             flux_object: None,
             container: None,
+            logs: None,
         }
     }
 
@@ -49,7 +52,9 @@ impl Location {
             (None, Some(key)) => format!("{}/{}", key.namespace, key.name),
             (None, None) => self.page.label().to_owned(),
         };
-        let subject = if self.page == Page::Logs {
+        let subject = if let Some(target) = &self.logs {
+            format!("Logs · {}", target.label())
+        } else if self.page == Page::Logs {
             let container = self.container.as_deref().unwrap_or_default();
             format!("Logs · {subject} · {container}")
         } else if self.page == Page::Compare {
@@ -76,6 +81,9 @@ impl Location {
     pub fn commands(&self) -> Vec<Command> {
         if let Some(key) = &self.flux_object {
             return vec![Command::OpenFluxObject(key.clone())];
+        }
+        if let Some(target) = &self.logs {
+            return vec![Command::FollowLogs(target.clone())];
         }
         match (&self.resource, self.page, &self.container) {
             (Some(pod), Page::Logs, Some(container)) => {
@@ -373,6 +381,24 @@ mod tests {
             ..page(Page::Compare)
         };
         assert_eq!(compare.commands(), [Command::Compare(pod)]);
+        let workload = ResourceRef {
+            cluster: ClusterId::new("a"),
+            kind: "Deployment".into(),
+            namespace: Some("shop".into()),
+            name: "cart".into(),
+        };
+        let merged = Location {
+            logs: Some(LogTarget::Workload(workload.clone())),
+            ..page(Page::Logs)
+        };
+        assert_eq!(
+            merged.commands(),
+            [Command::FollowLogs(LogTarget::Workload(workload))]
+        );
+        assert_eq!(
+            merged.history_label(&Snapshot::default()),
+            "Logs · cart · a"
+        );
         let mut state = crate::AppState::default();
         state.update(crate::Update::Snapshot(Box::new(
             crate::flock::tests::sample(),

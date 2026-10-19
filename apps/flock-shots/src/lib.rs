@@ -607,6 +607,10 @@ impl Ui {
         )
     }
 
+    pub fn shift_click(&mut self, selector: &'static str) -> anyhow::Result<()> {
+        self.click_with(selector, MouseButton::Left, SINGLE, Modifiers::shift())
+    }
+
     pub fn cmd_click(&mut self, selector: &'static str) -> anyhow::Result<()> {
         self.click_with(selector, MouseButton::Left, SINGLE, Modifiers::command())
     }
