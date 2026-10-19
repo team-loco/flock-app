@@ -61,6 +61,10 @@ fn presence(screen: &mut NodesScreen) -> &mut Presence<Node> {
 impl EventEmitter<ScreenEvent> for NodesScreen {}
 
 impl NodesScreen {
+    pub fn inspecting(&self) -> bool {
+        self.selected.is_some()
+    }
+
     pub fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
         if self.selected.is_none() {
             return false;
@@ -333,11 +337,12 @@ impl Render for NodesScreen {
             None => self.table.clone().into_any_element(),
         };
         let current = self.selected_node().cloned();
-        self.presence.track(current.as_ref(), presence, cx);
+        let shown = current.as_ref().map(|node| (node, node.name.as_str()));
+        let motion = self.presence.track(shown, presence, cx);
         let inspector = match current {
             Some(node) => {
                 let panel = self.inspector(&node, &palette, cx);
-                Some(slide_in(panel, INSPECTOR_ID, &node.name, INSPECTOR))
+                Some(slide_in(panel, INSPECTOR_ID, motion, INSPECTOR))
             }
             None => self.presence.leaving().cloned().map(|node| {
                 let panel = self.inspector(&node, &palette, cx);

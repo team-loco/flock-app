@@ -259,13 +259,17 @@ impl Shell {
     }
 
     pub(super) fn panes_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.sync_panes(window, cx);
-        self.show_all(cx);
+        let created = self.sync_panes(window, cx);
+        self.show_panes(&created, cx);
     }
 
     pub(super) fn split_right(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let page = self.state.location().page;
+        let inspecting = self.focused_screens().pages.inspecting(page, cx);
         self.state.panes_mut().split();
-        self.panes_changed(window, cx);
+        let created = self.sync_panes(window, cx);
+        let revealed = if inspecting { created } else { Vec::new() };
+        self.show_panes(&revealed, cx);
     }
 
     pub(super) fn resize_panes(&mut self, share: f32, cx: &mut Context<Self>) {

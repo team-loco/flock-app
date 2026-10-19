@@ -3,14 +3,15 @@ use flock_core::overview::plural;
 use flock_core::watch::WatchState;
 use flock_core::{Command, Counts, Page};
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
+    AnyElement, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
     MouseButton, ParentElement, StatefulInteractiveElement, Styled, Window, div,
 };
 
 use flock_core::AddClusterStep;
 
 use super::Shell;
-use crate::kit::{Button, EmptyState, Skeleton, status_symbols};
+use crate::assets::GEAR;
+use crate::kit::{Button, EmptyState, IconButton, Skeleton, status_symbols};
 use crate::screens::add_cluster::empty_flock;
 use crate::screens::logs::LogsScreen;
 use crate::screens::multilog::MultiLogsScreen;
@@ -25,6 +26,9 @@ const SEPARATOR: &str = "· ";
 const UNAVAILABLE_REASON: &str =
     "It was removed from Flock or its kubeconfig context is gone, so this tab has nothing to show.";
 const SHOW_ALL_CLUSTERS: &str = "Show all clusters";
+const OVERVIEW_SETTINGS: &str = "overview-settings";
+const PAGE_HEADER_SELECTOR: &str = "page-header";
+const CLUSTER_SETTINGS: &str = "Cluster settings";
 
 impl Shell {
     pub(super) fn page(
@@ -276,8 +280,20 @@ impl Shell {
         ix: usize,
         location: &Location,
         palette: &Palette,
-        cx: &App,
+        cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let settings = self
+            .cluster_of(location)
+            .filter(|_| location.page == Page::ClusterOverview)
+            .map(|cluster| {
+                let id = cluster.id.clone();
+                IconButton::svg(OVERVIEW_SETTINGS, GEAR, CLUSTER_SETTINGS).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.focus_pane(ix, cx);
+                        this.dispatch(Command::ShowClusterSettings(id.clone()), cx);
+                    },
+                ))
+            });
         let screens = self.screens(ix);
         let has_detail = self.has_detail(location);
         let loading = matches!(self.page_state(ix, location), Some(WatchState::Pending(_)));
@@ -321,6 +337,7 @@ impl Shell {
         });
         let controls = cluster.and_then(|_| screens.pages.header_controls(location.page, cx));
         div()
+            .debug_selector(|| PAGE_HEADER_SELECTOR.to_owned())
             .flex()
             .items_center()
             .flex_none()
@@ -338,6 +355,7 @@ impl Shell {
                     .child(location.page.title()),
             )
             .children(status)
+            .children(settings)
             .child(div().flex_1())
             .children(controls)
     }

@@ -13,8 +13,8 @@ use super::keys::SIDEBAR_CONTEXT;
 use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
 use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
-    ActiveTheme, COLLAPSE, FONT_MONO, ICON, ICON_BUTTON, Palette, RADIUS, ROW_NAV, RULE, SIDEBAR,
-    SIDEBAR_HEADER, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_UI,
+    ActiveTheme, COLLAPSE, FONT_MONO, ICON, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, ROW_NAV,
+    RULE, SIDEBAR, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_UI,
     TITLE_ROW, TRAFFIC_LIGHTS_INSET,
 };
 
@@ -156,7 +156,7 @@ impl Shell {
             .flex()
             .flex_none()
             .items_center()
-            .h(SIDEBAR_HEADER)
+            .h(PAGE_HEADER)
             .pl(SPACE_8)
             .pr(SPACE_3)
             .child(

@@ -135,37 +135,12 @@ impl Auth {
 impl MetricsSource {
     pub const ALL: [Self; 3] = [Self::Auto, Self::MetricsServer, Self::Prometheus];
 
-    pub fn label(self, detected: Option<&str>) -> String {
-        let name = match self {
+    pub fn label(self) -> &'static str {
+        match self {
             Self::Auto => AUTO,
             Self::MetricsServer => METRICS_SERVER,
             Self::Prometheus => PROMETHEUS,
-        };
-        match (self, detected) {
-            (Self::Auto, Some(endpoint)) => format!("{name}{SEPARATOR}{endpoint}"),
-            (Self::Prometheus, Some(endpoint)) => format!("{name}{SEPARATOR}{endpoint}"),
-            _ => name.into(),
         }
-    }
-
-    pub fn hint() -> String {
-        let names: Vec<String> = Self::ALL.into_iter().map(|s| s.label(None)).collect();
-        format!("One of: {}. Press Return to save.", names.join(", "))
-    }
-
-    pub fn parse(text: &str) -> Option<Self> {
-        let name = text
-            .split(SEPARATOR.trim())
-            .next()
-            .unwrap_or_default()
-            .trim();
-        if name.is_empty() {
-            return Some(Self::Auto);
-        }
-        Self::ALL.into_iter().find(|source| {
-            let label = source.label(None);
-            label.eq_ignore_ascii_case(name)
-        })
     }
 }
 
@@ -383,39 +358,12 @@ mod tests {
     }
 
     #[test]
-    fn metrics_hint_lists_every_accepted_value() {
-        assert_eq!(
-            MetricsSource::hint(),
-            "One of: auto, metrics-server, prometheus. Press Return to save."
-        );
-    }
-
-    #[test]
-    fn metrics_source_parses_its_own_labels() {
-        let endpoint = Some("monitoring/prometheus-k8s:9090");
-        for source in MetricsSource::ALL {
-            assert_eq!(MetricsSource::parse(&source.label(endpoint)), Some(source));
-        }
-        assert_eq!(
-            MetricsSource::parse(" Metrics-Server "),
-            Some(MetricsSource::MetricsServer)
-        );
-        assert_eq!(MetricsSource::parse(""), Some(MetricsSource::Auto));
-        assert_eq!(MetricsSource::parse("graphite"), None);
-    }
-
-    #[test]
-    fn metrics_labels_show_the_detected_endpoint() {
-        let endpoint = Some("monitoring/prometheus-k8s:9090");
-        assert_eq!(
-            MetricsSource::Auto.label(endpoint),
-            "auto · monitoring/prometheus-k8s:9090"
-        );
-        assert_eq!(MetricsSource::Auto.label(None), "auto");
-        assert_eq!(
-            MetricsSource::MetricsServer.label(endpoint),
-            "metrics-server"
-        );
+    fn metrics_sources_are_labelled_by_their_kubectl_names() {
+        let labels: Vec<&str> = MetricsSource::ALL
+            .into_iter()
+            .map(MetricsSource::label)
+            .collect();
+        assert_eq!(labels, ["auto", "metrics-server", "prometheus"]);
     }
 
     #[test]

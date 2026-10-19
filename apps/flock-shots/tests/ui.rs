@@ -4,7 +4,8 @@ use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
 use flock_ui::theme::{
-    ICON_BUTTON, SIDEBAR, SPACE_3, TAB_ENTER, TAB_LEAVE, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
+    ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SPACE_3, TAB_ENTER, TAB_LEAVE, TITLE_ROW,
+    TRAFFIC_LIGHTS_INSET,
 };
 use gpui::Pixels;
 
@@ -1125,9 +1126,9 @@ fn keyboard_opens_switches_and_closes_tabs() -> anyhow::Result<()> {
     assert_eq!(active_tab(&ui), 2);
     ui.press("cmd-w cmd-w")?;
     assert_eq!(tab_pages(&ui), [Page::ClusterOverview]);
-    ui.press("cmd-w")?;
-    assert_eq!(tab_pages(&ui), [Page::Overview]);
     assert_eq!(ui.read_app(|cx| cx.windows().len()), 1);
+    ui.press("cmd-w")?;
+    assert_eq!(ui.read_app(|cx| cx.windows().len()), 0);
     Ok(())
 }
 
@@ -1994,11 +1995,61 @@ fn a_new_tab_grows_in_and_ends_beside_its_neighbour() -> anyhow::Result<()> {
     ui.press_unsettled("cmd-t")?;
     assert!(ui.bounds("tab-slot-1").is_some());
     ui.advance_clock(TAB_ENTER)?;
-    let slot = ui.bounds("tab-slot-1").map(|bounds| bounds.size.width);
-    let natural = ui.bounds("tab-1").map(|bounds| bounds.size.width);
-    assert!(slot.is_some());
-    assert_eq!(slot, natural);
+    assert!(ui.bounds("tab-slot-1").is_none());
     assert_eq!(tab_gap(&mut ui), Some(gpui::px(0.)));
+    Ok(())
+}
+
+fn nodes_with_an_inspector_and_a_second_tab() -> anyhow::Result<Ui> {
+    let mut ui = Ui::open(Screen::Nodes)?;
+    motion_on(&mut ui);
+    ui.press("cmd-t")?;
+    ui.click("tab-0")?;
+    ui.press("cmd-e down")?;
+    ui.advance_clock(TAB_ENTER.max(INSPECTOR_IN))?;
+    assert_eq!(tab_gap(&mut ui), Some(gpui::px(0.)));
+    Ok(ui)
+}
+
+#[test]
+fn splitting_keeps_the_existing_tabs_at_rest() -> anyhow::Result<()> {
+    let mut ui = nodes_with_an_inspector_and_a_second_tab()?;
+    ui.press_unsettled("cmd-\\")?;
+    assert_eq!(pane_count(&ui), 2);
+    assert_eq!(tab_gap(&mut ui), Some(gpui::px(0.)));
+    assert!(ui.bounds("tab-slot-0").is_none());
+    assert!(ui.bounds("tab-slot-1").is_none());
+    ui.advance_clock(TAB_ENTER)?;
+    ui.press_unsettled("cmd-w")?;
+    assert_eq!(pane_count(&ui), 1);
+    assert!(ui.bounds("tab-slot-0").is_none());
+    assert!(ui.bounds("tab-slot-1").is_none());
+    Ok(())
+}
+
+#[test]
+fn splitting_keeps_a_closed_inspector_closed_in_both_panes() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::ResourceInspector)?;
+    assert!(ui.state().location().resource.is_some());
+    assert!(ui.bounds("resource-inspector-pane").is_some());
+    ui.click("close-resource")?;
+    assert!(ui.bounds("resource-inspector-pane").is_none());
+    ui.press("cmd-\\")?;
+    assert_eq!(pane_count(&ui), 2);
+    assert!(ui.bounds("resource-inspector-pane").is_none());
+    Ok(())
+}
+
+#[test]
+fn moving_a_tab_to_a_split_keeps_the_open_inspector_at_rest() -> anyhow::Result<()> {
+    let mut ui = nodes_with_an_inspector_and_a_second_tab()?;
+    ui.right_click("tab-1")?;
+    ui.press_unsettled("down enter")?;
+    assert_eq!(pane_count(&ui), 2);
+    let moving = bounds_of(&mut ui, "node-inspector-pane")?;
+    ui.advance_clock(INSPECTOR_IN)?;
+    let rest = bounds_of(&mut ui, "node-inspector-pane")?;
+    assert_eq!(moving, rest);
     Ok(())
 }
 
@@ -2587,5 +2638,68 @@ fn a_label_filter_on_pods_offers_logs_for_the_selector() -> anyhow::Result<()> {
         target.as_ref().map(flock_core::LogTarget::label),
         Some("app=checkout-api".to_owned())
     );
+    Ok(())
+}
+
+#[test]
+fn the_cluster_overview_opens_settings_for_its_own_cluster() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("cluster-switcher")?;
+    let staging = switcher_row(&ui, "staging")?;
+    ui.click(staging)?;
+    let staging = Some(ClusterId::new("staging"));
+    assert_eq!(ui.state().location().cluster, staging);
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    ui.click("overview-settings")?;
+    assert_eq!(ui.state().location().page, Page::ClusterSettings);
+    assert_eq!(settings_selection(&ui), staging);
+    ui.press("cmd-[")?;
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    ui.click("overview-actions")?;
+    ui.click("overview-actions-item-0")?;
+    assert_eq!(ui.state().location().page, Page::ClusterSettings);
+    assert_eq!(settings_selection(&ui), staging);
+    Ok(())
+}
+
+#[test]
+fn the_metrics_source_is_picked_from_a_list_that_stays_inside_the_form() -> anyhow::Result<()> {
+    use flock_core::settings::MetricsSource;
+    use flock_ui::theme::{SETTINGS_FIELD, SETTINGS_INSET};
+    let mut ui = Ui::open(Screen::ClusterSettings)?;
+    let cluster = settings_selection(&ui).ok_or_else(|| anyhow::anyhow!("no cluster"))?;
+    let window = bounds_of(&mut ui, "tab-strip")?;
+    for selector in ["metrics-source", "default-namespace"] {
+        let field = bounds_of(&mut ui, selector)?;
+        assert!(field.size.width <= SETTINGS_FIELD, "{selector}");
+        assert!(
+            field.right() <= window.right() - SETTINGS_INSET,
+            "{selector}"
+        );
+    }
+    ui.click("metrics-source")?;
+    ui.click("metrics-source-option-2")?;
+    let metrics = ui
+        .state()
+        .snapshot
+        .catalog
+        .get(&cluster)
+        .map(|s| s.preferences.metrics);
+    assert_eq!(metrics, Some(MetricsSource::Prometheus));
+    Ok(())
+}
+
+#[test]
+fn the_sidebar_header_and_page_header_read_as_one_row_over_one_content_edge() -> anyhow::Result<()>
+{
+    use flock_ui::theme::{ICON_BUTTON_INSET, SPACE_8};
+    let mut ui = Ui::open(Screen::Nodes)?;
+    let scope = bounds_of(&mut ui, "sidebar-scope")?;
+    let header = bounds_of(&mut ui, "page-header")?;
+    assert_eq!(scope.size.height, header.size.height);
+    assert_eq!(scope.center().y, header.center().y);
+    let back = bounds_of(&mut ui, "pane-0-back")?;
+    let meta = bounds_of(&mut ui, "meta-line")?;
+    assert_eq!(back.left() + ICON_BUTTON_INSET, meta.left() + SPACE_8);
     Ok(())
 }

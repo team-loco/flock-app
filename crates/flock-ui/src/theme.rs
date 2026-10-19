@@ -78,7 +78,6 @@ pub const ROW_CATALOG: Pixels = px(44.);
 
 pub const TITLE_ROW: Pixels = px(TITLE_ROW_HEIGHT);
 pub const SIDEBAR: Pixels = px(200.);
-pub const SIDEBAR_HEADER: Pixels = px(32.);
 pub const SWITCHER_WIDTH: Pixels = px(290.);
 pub const SWITCHER_GEAR: Pixels = px(26.);
 pub const SWITCHER_LIST: Pixels = px(420.);
@@ -89,9 +88,14 @@ pub const ICON_SPLIT: Pixels = px(14.);
 pub const STATUS_BAR: Pixels = px(26.);
 pub const ASIDE_WIDTH: Pixels = px(300.);
 pub const SETTINGS_COLUMN: Pixels = px(720.);
+pub const SETTINGS_INSET: Pixels = SPACE_8;
+pub const SETTINGS_FIELD: Pixels = px(300.);
 
-pub const ICON: Pixels = px(11.);
-pub const ICON_BUTTON: Pixels = px(22.);
+const ICON_SIZE: f32 = 11.;
+const ICON_BUTTON_SIZE: f32 = 22.;
+pub const ICON: Pixels = px(ICON_SIZE);
+pub const ICON_BUTTON: Pixels = px(ICON_BUTTON_SIZE);
+pub const ICON_BUTTON_INSET: Pixels = px((ICON_BUTTON_SIZE - ICON_SIZE) / 2.);
 pub const GLYPH_SLOT: Pixels = px(10.);
 pub const CONTAINER_SQUARE: Pixels = px(8.);
 pub const CONTAINER_SQUARE_GAP: Pixels = px(3.);

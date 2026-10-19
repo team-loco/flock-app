@@ -17,9 +17,9 @@ use crate::kit::{
     StatusText, Table, TableEvent, TextField, TextFieldState, Toggle,
 };
 use crate::theme::{
-    ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, Palette, ROW_CATALOG, RULE, SPACE_1, SPACE_2,
-    SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_SMALL, TEXT_SUBHEADING,
-    TEXT_TITLE, TEXT_UI,
+    ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, Palette, ROW_CATALOG, RULE, SETTINGS_FIELD,
+    SETTINGS_INSET, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8,
+    TEXT_BODY, TEXT_SMALL, TEXT_SUBHEADING, TEXT_TITLE, TEXT_UI,
 };
 
 const NAME_MIN: Pixels = px(200.);
@@ -37,6 +37,7 @@ const PREFERENCES: &str = "Preferences";
 const LABELS: &str = "Labels";
 const DEFAULT_NAMESPACE: &str = "Default namespace";
 const METRICS_SOURCE: &str = "Metrics source";
+const METRICS_SELECT: &str = "metrics-source";
 const CONFIRM_DESTRUCTIVE: &str = "Confirm destructive actions";
 const NOTIFY: &str = "Notify about new problems";
 const NAMESPACE_PLACEHOLDER: &str = "default";
@@ -65,7 +66,7 @@ pub struct SettingsScreen {
     table: Entity<Table<CatalogRow>>,
     namespace: Entity<Select>,
     labels: Entity<TextFieldState>,
-    metrics: Entity<TextFieldState>,
+    metrics: Entity<Select>,
     menu: Entity<ActionMenu>,
     page_menu: Entity<ActionMenu>,
     _subscriptions: [Subscription; 4],
@@ -89,12 +90,20 @@ impl SettingsScreen {
         let namespace = cx.new(|cx| {
             Select::new("default-namespace", Vec::new(), cx)
                 .mono()
+                .width(SETTINGS_FIELD)
                 .placeholder(NAMESPACE_PLACEHOLDER)
                 .editable(window, cx)
         });
         let labels = cx.new(|cx| TextFieldState::new(window, cx).placeholder(LABELS_PLACEHOLDER));
-        let metrics = cx
-            .new(|cx| TextFieldState::new(window, cx).placeholder(MetricsSource::Auto.label(None)));
+        let sources = MetricsSource::ALL
+            .into_iter()
+            .map(|source| source.label().into())
+            .collect();
+        let metrics = cx.new(|cx| {
+            Select::new(METRICS_SELECT, sources, cx)
+                .mono()
+                .width(SETTINGS_FIELD)
+        });
         let menu = cx.new(|cx| ActionMenu::new("cluster-actions", cx));
         let page_menu = cx.new(|cx| {
             let sync = MenuItem::new(SYNC_FOLDER, |_, _| {})
@@ -118,11 +127,7 @@ impl SettingsScreen {
                     this.commit(cx);
                 }
             }),
-            cx.subscribe(&metrics, |this, _, event: &InputEvent, cx| {
-                if commits(event) {
-                    this.commit(cx);
-                }
-            }),
+            cx.subscribe(&metrics, |this, _, _: &SelectEvent, cx| this.commit(cx)),
         ];
         Self {
             navigation: None,
@@ -264,9 +269,21 @@ impl SettingsScreen {
             .update(cx, |select, cx| select.set_value(namespace.into(), cx));
         self.labels
             .update(cx, |field, cx| field.set_value(labels, window, cx));
-        let metrics = preferences.metrics.label(settings.prometheus.as_deref());
-        self.metrics
-            .update(cx, |field, cx| field.set_value(metrics, window, cx));
+        let source = MetricsSource::ALL
+            .iter()
+            .position(|source| *source == preferences.metrics)
+            .unwrap_or_default();
+        let details = MetricsSource::ALL
+            .into_iter()
+            .map(|source| match (source, settings.prometheus.as_deref()) {
+                (MetricsSource::Auto, Some(target)) => target.to_owned().into(),
+                _ => SharedString::default(),
+            })
+            .collect();
+        self.metrics.update(cx, |select, cx| {
+            select.set_selected(source, cx);
+            select.set_details(details, cx);
+        });
     }
 
     fn edited(&self, cx: &Context<Self>) -> Option<(ClusterId, Preferences)> {
@@ -278,7 +295,10 @@ impl SettingsScreen {
             .cloned()
             .unwrap_or_default();
         let labels = self.labels.read(cx).value();
-        let metrics = MetricsSource::parse(&self.metrics.read(cx).value())?;
+        let metrics = MetricsSource::ALL
+            .get(self.metrics.read(cx).selected_index())
+            .copied()
+            .unwrap_or_default();
         let preferences = Preferences {
             namespaces: settings.preferences.namespaces.clone(),
             default_namespace: parse_namespace(&namespace),
@@ -406,7 +426,11 @@ impl SettingsScreen {
             .text("Kubeconfig", connection.kubeconfig.clone());
         let preferences = self.preferences(&settings, palette, cx);
         let labels = section(LABELS, palette)
-            .child(TextField::new(&self.labels))
+            .child(
+                div()
+                    .max_w(SETTINGS_FIELD)
+                    .child(TextField::new(&self.labels)),
+            )
             .child(
                 div()
                     .text_size(TEXT_SMALL)
@@ -461,20 +485,7 @@ impl SettingsScreen {
         section(PREFERENCES, palette)
             .gap(SPACE_6)
             .child(labelled(DEFAULT_NAMESPACE, self.namespace.clone()))
-            .child(labelled(
-                METRICS_SOURCE,
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(SPACE_3)
-                    .child(TextField::new(&self.metrics))
-                    .child(
-                        div()
-                            .text_size(TEXT_SMALL)
-                            .text_color(palette.mute)
-                            .child(MetricsSource::hint()),
-                    ),
-            ))
+            .child(labelled(METRICS_SOURCE, self.metrics.clone()))
             .child(confirm)
             .child(notify)
     }
@@ -568,7 +579,7 @@ fn section(label: &str, palette: &Palette) -> gpui::Div {
         .flex()
         .flex_col()
         .gap(SPACE_4)
-        .px(SPACE_8)
+        .px(SETTINGS_INSET)
         .py(SPACE_7)
         .border_t(RULE)
         .border_color(palette.line)
@@ -581,7 +592,7 @@ fn labelled(label: &'static str, control: impl IntoElement) -> impl IntoElement 
         .flex_col()
         .gap(SPACE_3)
         .child(label)
-        .child(div().flex().child(control))
+        .child(div().flex().min_w_0().max_w(SETTINGS_FIELD).child(control))
 }
 
 fn columns() -> Vec<Column<CatalogRow>> {

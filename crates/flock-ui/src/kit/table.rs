@@ -12,8 +12,8 @@ use gpui::{
     Div, ElementId, Entity, EventEmitter, FocusHandle, Focusable, HighlightStyle, Hsla,
     InteractiveElement, IntoElement, KeyDownEvent, ListSizingBehavior, MouseButton, MouseDownEvent,
     MouseMoveEvent, ParentElement, Pixels, Point, Render, ScrollStrategy, SharedString,
-    StatefulInteractiveElement, Styled, TextRun, UniformListScrollHandle, Window, div, ease_in_out,
-    prelude::FluentBuilder, uniform_list,
+    StatefulInteractiveElement, Styled, Task, TextRun, UniformListScrollHandle, Window, div,
+    ease_in_out, prelude::FluentBuilder, uniform_list,
 };
 
 use super::button::IconButton;
@@ -456,6 +456,7 @@ pub struct Table<R: 'static> {
     name: Option<RowKey<R>>,
     flashes: HashMap<SharedString, u64>,
     flash_generation: u64,
+    flash_timer: Option<Task<()>>,
     empty: SharedString,
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
@@ -503,6 +504,7 @@ impl<R: 'static> Table<R> {
             name: None,
             flashes: HashMap::new(),
             flash_generation: 0,
+            flash_timer: None,
             empty: SharedString::default(),
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle().tab_stop(true),
@@ -895,7 +897,17 @@ impl<R: 'static> Table<R> {
 
     pub fn set_rows(&mut self, rows: Vec<R>, cx: &mut Context<Self>) {
         let selected_key = self.selected_key();
-        self.record_flashes(&rows);
+        if self.record_flashes(&rows) {
+            let latest = self.flash_generation;
+            self.flash_timer = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(FLASH).await;
+                this.update(cx, |table, cx| {
+                    table.flashes.retain(|_, generation| *generation > latest);
+                    cx.notify();
+                })
+                .ok();
+            }));
+        }
         self.rows = Rc::new(rows);
         self.auto = None;
         self.hovered = self.hovered.filter(|&ix| ix < self.rows.len());
@@ -916,9 +928,9 @@ impl<R: 'static> Table<R> {
         self.selected_row().map(|row| key(row))
     }
 
-    fn record_flashes(&mut self, next: &[R]) {
+    fn record_flashes(&mut self, next: &[R]) -> bool {
         let (Some(key), Some(status)) = (&self.key, &self.status) else {
-            return;
+            return false;
         };
         let before: HashMap<SharedString, Status> = self
             .rows
@@ -929,10 +941,13 @@ impl<R: 'static> Table<R> {
             .iter()
             .filter_map(|row| status(row).map(|s| (key(row), s)))
             .collect();
+        let mut flashed = false;
         for changed in changed_statuses(&before, &after) {
             self.flash_generation += 1;
             self.flashes.insert(changed, self.flash_generation);
+            flashed = true;
         }
+        flashed
     }
 
     fn resort(&mut self) {
@@ -1436,5 +1451,20 @@ mod tests {
             (SharedString::from("c"), Status::Err),
         ];
         assert_eq!(changed_statuses(&before, &after), [SharedString::from("a")]);
+    }
+
+    #[gpui::test]
+    fn a_status_flash_ends_after_it_has_played(cx: &mut gpui::TestAppContext) {
+        let table = cx.new(|cx| {
+            Table::new("flash", Vec::new(), cx)
+                .row_key(|row: &(&str, Status)| row.0.into())
+                .row_status(|row| Some(row.1))
+                .rows(vec![("a", Status::Ok)])
+        });
+        table.update(cx, |table, cx| table.set_rows(vec![("a", Status::Err)], cx));
+        assert!(table.read_with(cx, |table, _| table.flashes.contains_key("a")));
+        cx.executor().advance_clock(FLASH);
+        cx.run_until_parked();
+        assert!(table.read_with(cx, |table, _| table.flashes.is_empty()));
     }
 }

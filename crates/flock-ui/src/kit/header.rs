@@ -11,6 +11,8 @@ use crate::theme::{
     TEXT_BODY, TEXT_HEADING, TEXT_MONO, TEXT_SMALL, TEXT_TITLE, TEXT_UI,
 };
 
+const META_LINE: &str = "meta-line";
+
 #[derive(IntoElement)]
 pub struct PageHeader {
     title: SharedString,
@@ -149,6 +151,7 @@ impl RenderOnce for MetaLine {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = cx.palette();
         div()
+            .debug_selector(|| META_LINE.to_owned())
             .flex_none()
             .px(SPACE_8)
             .py(SPACE_5)

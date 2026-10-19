@@ -84,6 +84,12 @@ impl StripMotion {
         changed
     }
 
+    pub(super) fn finish(&mut self) {
+        self.ghosts.clear();
+        self.entered.clear();
+        self.settling.clear();
+    }
+
     pub(super) fn child_index(&self, ix: usize) -> usize {
         let ghosts = self
             .ghosts

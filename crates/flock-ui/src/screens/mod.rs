@@ -224,6 +224,17 @@ impl ClusterPages {
         Some(bar.clone())
     }
 
+    pub fn inspecting(&self, page: Page, cx: &App) -> bool {
+        match page {
+            Page::Nodes => self.nodes.read(cx).inspecting(),
+            Page::Events => self.events.read(cx).inspecting(),
+            other if ResourceKind::for_page(other).is_some() => {
+                self.resources.read(cx).inspecting()
+            }
+            _ => false,
+        }
+    }
+
     pub fn close_inspector(&self, page: Page, cx: &mut App) -> bool {
         match page {
             Page::Nodes => self.nodes.update(cx, NodesScreen::close_inspector),

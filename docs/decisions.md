@@ -109,12 +109,12 @@ Settled; change only with a new entry that says why.
     tab's cluster. VS Code semantics: a sidebar click or row open navigates the active tab;
     ⌘-click, middle-click, ⌘↵ in the palette and the row menus' "Open in new tab" open a tab
     beside it (`Command::NewTab`), focusing an existing tab with the same location instead of
-    duplicating it. ⌘T opens Flock home in a new tab; ⌘W closes the active tab and closing the last
-    one leaves Flock home, so the window closes only with ⌘⇧W or its close button. ⌃Tab / ⌃⇧Tab and
+    duplicating it. ⌘T opens Flock home in a new tab; ⌘W closes the active tab and closing the window's
+    last tab closes the window (product owner, 2026-10-19; it used to leave Flock home). ⌃Tab / ⌃⇧Tab and
     ⌥⌘→ / ⌥⌘← cycle tabs in strip order (the recent-page cycle is gone), ⌘1…⌘9 select tab N;
     middle-click closes a tab and dragging reorders it. The old focus bindings move from ⌘1 / ⌘2
     to ⌘⇧E (sidebar) and ⌘E (page list), and the workload terminal from ⌘T to ⌃`. A tab is
-    labelled with the object's status glyph, a kind (`flock` for Flock home pages, the kubectl
+    labelled with the object's status glyph, a kind (none for Flock home pages, so they read "Overview", the kubectl
     short kind for objects, `logs` with the pod's hash suffix, `loco` / `workloads` / `flux` /
     `network` / `config` / `storage` from the nav section, `cluster` for the rest), the name, and
     the cluster's short name (`tabs::short_name`: a leading segment shared with another cluster is
@@ -203,7 +203,9 @@ Settled; change only with a new entry that says why.
     first; background commands from a screen (watch and stream requests) reach its pane's scope
     without moving focus. The sidebar, status-bar switcher, palette and ⌘W follow the focused pane;
     only the focused pane's active tab has the `acc` top line. Closing a pane's last tab closes the
-    pane; the window's last tab still falls back to Flock home. Tabs move to the other pane from the
+    pane; the window's last tab closes the window. A split keeps each pane's
+    inspector as it was: the existing pane is not re-revealed, and the new pane opens the inspector
+    only if the source pane had it open. Tabs move to the other pane from the
     tab's right-click menu (Move to the other pane, or Move to a split on the right when unsplit)
     or by dropping them on the other pane's strip. ⌘⇧↵ in the palette opens the result in a split
     (⌘↵ stays new tab, ⌥↵ new window). The 1px `line2` divider drags; its share

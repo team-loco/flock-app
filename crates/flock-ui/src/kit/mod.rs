@@ -54,7 +54,7 @@ pub use overlay::{
     toast_titles,
 };
 pub(crate) use popover::{Dismissal, Step, above_right, appear, shadow, step, surface};
-pub use presence::{Presence, slide_in, slide_out, swap_in};
+pub use presence::{Entrance, Motion, Presence, slide_in, slide_out, swap_in};
 pub use prose::Prose;
 pub use section::ClickableSection;
 pub use select::{Select, SelectEvent};

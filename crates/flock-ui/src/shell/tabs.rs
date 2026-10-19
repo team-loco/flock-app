@@ -140,7 +140,7 @@ impl Shell {
             cx.background_executor().timer(TAB_ENTER).await;
             this.update(cx, |shell, cx| {
                 if let Some(screens) = shell.panes.iter_mut().find(|screens| screens.pane == pane) {
-                    screens.motion.ghosts.clear();
+                    screens.motion.finish();
                     screens.shown = None;
                 }
                 cx.notify();
@@ -431,13 +431,13 @@ fn tab_content(title: &TabTitle, active: bool, palette: &Palette) -> impl IntoEl
         .whitespace_nowrap()
         .text_size(TEXT_BODY)
         .children(glyph)
-        .child(
+        .children((!title.kind.is_empty()).then(|| {
             div()
                 .font_family(FONT_MONO)
                 .text_size(TEXT_LABEL)
                 .text_color(palette.mute)
-                .child(SharedString::from(title.kind.clone())),
-        )
+                .child(SharedString::from(title.kind.clone()))
+        }))
         .child(
             div()
                 .text_color(label_color)

@@ -1,7 +1,7 @@
 use gpui::{
     Animation, AnimationExt, AnyElement, App, Context, ElementId, Entity, InteractiveElement,
     IntoElement, ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement,
-    Styled, Window, div, ease_out_quint, prelude::FluentBuilder,
+    Styled, Task, Window, div, ease_out_quint, prelude::FluentBuilder,
 };
 
 use super::button::IconButton;
@@ -18,6 +18,8 @@ pub struct DockState {
     active: usize,
     open: bool,
     generation: u64,
+    moving: bool,
+    settle: Option<Task<()>>,
 }
 
 impl Default for DockState {
@@ -32,6 +34,8 @@ impl DockState {
             active: 0,
             open: true,
             generation: 0,
+            moving: false,
+            settle: None,
         }
     }
 
@@ -54,6 +58,15 @@ impl DockState {
     pub fn toggle(&mut self, cx: &mut Context<Self>) {
         self.open = !self.open;
         self.generation += 1;
+        self.moving = true;
+        self.settle = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(COLLAPSE).await;
+            this.update(cx, |state, cx| {
+                state.moving = false;
+                cx.notify();
+            })
+            .ok();
+        }));
         cx.notify();
     }
 
@@ -172,7 +185,11 @@ impl RenderOnce for Dock {
         let palette = *cx.palette();
         let (active, open, generation) = {
             let state = self.state.read(cx);
-            (state.active, state.open, state.generation)
+            (
+                state.active,
+                state.open,
+                state.moving.then_some(state.generation),
+            )
         };
         let mut active_tools = None;
         let mut active_content = None;
@@ -241,9 +258,9 @@ impl RenderOnce for Dock {
                     .min_h_0()
                     .when(open, |body| body.children(active_content)),
             );
-        if generation == 0 {
+        let Some(generation) = generation else {
             return dock.into_any_element();
-        }
+        };
         let (from, to) = if open {
             (DOCK_BAR + RULE, height)
         } else {
@@ -256,5 +273,23 @@ impl RenderOnce for Dock {
             move |dock, delta| dock.h(from + (to - from) * delta),
         )
         .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{AppContext as _, TestAppContext};
+
+    use super::*;
+
+    #[gpui::test]
+    fn the_dock_moves_only_while_its_toggle_plays(cx: &mut TestAppContext) {
+        let dock = cx.new(|_| DockState::new());
+        assert!(!dock.read_with(cx, |dock, _| dock.moving));
+        dock.update(cx, DockState::toggle);
+        assert!(dock.read_with(cx, |dock, _| dock.moving));
+        cx.executor().advance_clock(COLLAPSE);
+        cx.run_until_parked();
+        assert!(!dock.read_with(cx, |dock, _| dock.moving));
     }
 }
