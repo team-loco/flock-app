@@ -110,6 +110,12 @@ gpui_platform::application()
   that shrink the same way and are dropped by a timer, never delaying the model; a reordered tab slides
   in from its old side under a per-move animation id. `with_animation` clocks use wall time, so Ui tests
   call `Ui::advance_clock`, which also sleeps and redraws. Reduce Motion skips ghosts and wrappers.
+- An animation's progress is element state keyed by the whole element path, not just its id. Splitting
+  a pane wraps it in `Split`, so every element inside gets a new path and any `with_animation` still
+  in the tree starts again from frame 0. The view that owns a motion therefore clears it with a timer
+  once it has played (`StripMotion::finish`, `kit::Entrance`, `DockState`, table flashes), and elements
+  at rest render without `with_animation`. Inspectors take a `kit::Motion` from `Presence::track` or
+  `Entrance::track` (keyed by the shown object) instead of an id string.
 
 ## Headless rendering and UI tests
 

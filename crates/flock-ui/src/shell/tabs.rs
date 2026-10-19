@@ -140,7 +140,7 @@ impl Shell {
             cx.background_executor().timer(TAB_ENTER).await;
             this.update(cx, |shell, cx| {
                 if let Some(screens) = shell.panes.iter_mut().find(|screens| screens.pane == pane) {
-                    screens.motion.ghosts.clear();
+                    screens.motion.finish();
                     screens.shown = None;
                 }
                 cx.notify();

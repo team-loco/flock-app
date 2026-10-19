@@ -489,12 +489,15 @@ impl Render for ResourcesScreen {
             None => table.into_any_element(),
         };
         let current = self.selected_row().cloned();
-        self.presence.track(current.as_ref(), presence, cx);
+        let selection = current
+            .as_ref()
+            .map(|row| format!("{}/{}", row.namespace, row.name));
+        let shown = current.as_ref().zip(selection.as_deref());
+        let motion = self.presence.track(shown, presence, cx);
         let inspector = match current {
             Some(row) => {
                 let panel = self.inspector(&row, cx);
-                let selection = format!("{}/{}", row.namespace, row.name);
-                Some(slide_in(panel, INSPECTOR_ID, &selection, YAML_INSPECTOR))
+                Some(slide_in(panel, INSPECTOR_ID, motion, YAML_INSPECTOR))
             }
             None => self.presence.leaving().cloned().map(|row| {
                 let panel = self.inspector(&row, cx);

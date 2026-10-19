@@ -4,7 +4,8 @@ use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
 use flock_ui::theme::{
-    ICON_BUTTON, SIDEBAR, SPACE_3, TAB_ENTER, TAB_LEAVE, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
+    ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SPACE_3, TAB_ENTER, TAB_LEAVE, TITLE_ROW,
+    TRAFFIC_LIGHTS_INSET,
 };
 use gpui::Pixels;
 
@@ -1994,11 +1995,43 @@ fn a_new_tab_grows_in_and_ends_beside_its_neighbour() -> anyhow::Result<()> {
     ui.press_unsettled("cmd-t")?;
     assert!(ui.bounds("tab-slot-1").is_some());
     ui.advance_clock(TAB_ENTER)?;
-    let slot = ui.bounds("tab-slot-1").map(|bounds| bounds.size.width);
-    let natural = ui.bounds("tab-1").map(|bounds| bounds.size.width);
-    assert!(slot.is_some());
-    assert_eq!(slot, natural);
+    assert!(ui.bounds("tab-slot-1").is_none());
     assert_eq!(tab_gap(&mut ui), Some(gpui::px(0.)));
+    Ok(())
+}
+
+fn nodes_with_an_inspector_and_a_second_tab() -> anyhow::Result<Ui> {
+    let mut ui = Ui::open(Screen::Nodes)?;
+    motion_on(&mut ui);
+    ui.press("cmd-t")?;
+    ui.click("tab-0")?;
+    ui.press("cmd-e down")?;
+    ui.advance_clock(TAB_ENTER.max(INSPECTOR_IN))?;
+    assert_eq!(tab_gap(&mut ui), Some(gpui::px(0.)));
+    Ok(ui)
+}
+
+#[test]
+fn splitting_keeps_the_existing_tabs_at_rest() -> anyhow::Result<()> {
+    let mut ui = nodes_with_an_inspector_and_a_second_tab()?;
+    ui.press_unsettled("cmd-\\")?;
+    assert_eq!(pane_count(&ui), 2);
+    assert_eq!(tab_gap(&mut ui), Some(gpui::px(0.)));
+    assert!(ui.bounds("tab-slot-0").is_none());
+    assert!(ui.bounds("tab-slot-1").is_none());
+    Ok(())
+}
+
+#[test]
+fn moving_a_tab_to_a_split_keeps_the_open_inspector_at_rest() -> anyhow::Result<()> {
+    let mut ui = nodes_with_an_inspector_and_a_second_tab()?;
+    ui.right_click("tab-1")?;
+    ui.press_unsettled("down enter")?;
+    assert_eq!(pane_count(&ui), 2);
+    let moving = bounds_of(&mut ui, "node-inspector-pane")?;
+    ui.advance_clock(INSPECTOR_IN)?;
+    let rest = bounds_of(&mut ui, "node-inspector-pane")?;
+    assert_eq!(moving, rest);
     Ok(())
 }
 

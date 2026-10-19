@@ -100,14 +100,11 @@ pub fn slot<V: 'static>(
     build: impl Fn(&Event, &mut Context<V>) -> AnyElement,
     cx: &mut Context<V>,
 ) -> Option<AnyElement> {
-    presence.track(current.as_ref(), field, cx);
+    let selection = current.as_ref().map(Event::key);
+    let shown = current.as_ref().zip(selection.as_deref());
+    let motion = presence.track(shown, field, cx);
     if let Some(event) = current {
-        return Some(slide_in(
-            build(&event, cx),
-            INSPECTOR_ID,
-            &event.key(),
-            INSPECTOR,
-        ));
+        return Some(slide_in(build(&event, cx), INSPECTOR_ID, motion, INSPECTOR));
     }
     let leaving = presence.leaving().cloned()?;
     Some(slide_out(build(&leaving, cx), INSPECTOR_ID, INSPECTOR))

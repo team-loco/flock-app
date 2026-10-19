@@ -16,10 +16,10 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    ActionMenu, Button, CodeView, Column, ConfirmDialog, DockState, EmptyState, ErrorState,
-    InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView, MenuItem, PageHeader, Rule,
-    SectionHeader, SectionLabel, Segmented, Skeleton, StatusText, Table, TableEvent, Terminal,
-    TextFieldState, Toast, Width, confirm, min_row_width, slide_in, toast,
+    ActionMenu, Button, CodeView, Column, ConfirmDialog, DockState, EmptyState, Entrance,
+    ErrorState, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView, MenuItem,
+    PageHeader, Rule, SectionHeader, SectionLabel, Segmented, Skeleton, StatusText, Table,
+    TableEvent, Terminal, TextFieldState, Toast, Width, confirm, min_row_width, slide_in, toast,
 };
 use crate::screens::{FullView, full_view_link};
 use crate::theme::{
@@ -112,6 +112,7 @@ pub struct WorkloadScreen {
     exec: Option<dock::ExecSession>,
     yaml: Option<String>,
     showing_yaml: bool,
+    entrance: Entrance,
     focus: FocusHandle,
     watch_task: Option<Task<()>>,
     deadline: Option<Task<()>>,
@@ -121,6 +122,10 @@ pub struct WorkloadScreen {
 }
 
 impl EventEmitter<Command> for WorkloadScreen {}
+
+fn entrance(screen: &mut WorkloadScreen) -> &mut Entrance {
+    &mut screen.entrance
+}
 
 impl WorkloadScreen {
     pub fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
@@ -190,6 +195,7 @@ impl WorkloadScreen {
             exec: None,
             yaml: None,
             showing_yaml: false,
+            entrance: Entrance::default(),
             focus,
             watch_task: None,
             deadline: None,
@@ -1049,12 +1055,18 @@ impl Render for WorkloadScreen {
             .child(self.header(&workload, cx))
             .child(self.pods_section(&workload))
             .child(Self::history(&workload, cx));
+        let shown = if self.showing_yaml {
+            YAML_LABEL
+        } else {
+            CONTAINER
+        };
+        let motion = self.entrance.track(Some(shown), entrance, cx);
         let inspector = if self.showing_yaml {
             let panel = self.yaml_inspector(&palette);
-            slide_in(panel, INSPECTOR_ID, YAML_LABEL, YAML_INSPECTOR_WIDTH)
+            slide_in(panel, INSPECTOR_ID, motion, YAML_INSPECTOR_WIDTH)
         } else {
             let panel = self.inspector(&workload, cx);
-            slide_in(panel, INSPECTOR_ID, CONTAINER, INSPECTOR_WIDTH)
+            slide_in(panel, INSPECTOR_ID, motion, INSPECTOR_WIDTH)
         };
         let dock = self.render_dock(&workload, cx);
         root.child(div().flex().flex_1().min_h_0().child(main).child(inspector))

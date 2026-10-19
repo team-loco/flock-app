@@ -21,10 +21,10 @@ mod streams;
 use streams::{LogSession, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
-    Button, Column, ConfirmDialog, DockState, FilterBar, FilterEvent, InputEvent, InspectorPane,
-    KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView, MenuItem, SectionLabel, Select, SelectEvent,
-    ShowAll, StatusGlyph, StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label,
-    confirm, swap_in,
+    Button, Column, ConfirmDialog, DockState, Entrance, FilterBar, FilterEvent, InputEvent,
+    InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView, MenuItem, SectionLabel, Select,
+    SelectEvent, ShowAll, StatusGlyph, StatusText, Table, TableEvent, Terminal, TextFieldState,
+    chip_label, confirm, swap_in,
 };
 use crate::screens::{ListShape, empty_list, new_tab_item};
 use crate::theme::{
@@ -77,10 +77,15 @@ pub struct PodsScreen {
     logs: Entity<LogView>,
     terminal: Entity<Terminal>,
     dock: Entity<DockState>,
+    entrance: Entrance,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<Command> for PodsScreen {}
+
+fn entrance(screen: &mut PodsScreen) -> &mut Entrance {
+    &mut screen.entrance
+}
 
 impl PodsScreen {
     pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
@@ -183,6 +188,7 @@ impl PodsScreen {
             logs,
             terminal,
             dock,
+            entrance: Entrance::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -475,12 +481,13 @@ impl PodsScreen {
         cx.notify();
     }
 
-    fn inspector(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn inspector(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let palette = *cx.palette();
         let selection = self
             .selected_pod()
             .map(|pod| format!("{}/{}", pod.namespace, pod.name))
             .unwrap_or_default();
+        let motion = self.entrance.track(Some(&selection), entrance, cx);
         let (header, body) = match self.selected_pod() {
             Some(pod) => (
                 Some(Self::pod_header(pod, &palette, cx)),
@@ -513,7 +520,7 @@ impl PodsScreen {
         div()
             .size_full()
             .bg(palette.panel)
-            .child(swap_in(panel, INSPECTOR_ID, &selection))
+            .child(swap_in(panel, INSPECTOR_ID, motion))
             .into_any_element()
     }
 

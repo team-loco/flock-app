@@ -333,11 +333,12 @@ impl Render for NodesScreen {
             None => self.table.clone().into_any_element(),
         };
         let current = self.selected_node().cloned();
-        self.presence.track(current.as_ref(), presence, cx);
+        let shown = current.as_ref().map(|node| (node, node.name.as_str()));
+        let motion = self.presence.track(shown, presence, cx);
         let inspector = match current {
             Some(node) => {
                 let panel = self.inspector(&node, &palette, cx);
-                Some(slide_in(panel, INSPECTOR_ID, &node.name, INSPECTOR))
+                Some(slide_in(panel, INSPECTOR_ID, motion, INSPECTOR))
             }
             None => self.presence.leaving().cloned().map(|node| {
                 let panel = self.inspector(&node, &palette, cx);
