@@ -247,6 +247,8 @@ mod tests {
                 age: std::time::Duration::ZERO,
                 yaml: String::new(),
                 labels: std::collections::BTreeMap::new(),
+                conditions: Vec::new(),
+                diagnosis: None,
             }],
         );
         snapshot

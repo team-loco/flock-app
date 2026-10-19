@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use crate::diagnosis::{self, Condition, Diagnosis};
+use crate::events::Event;
 use crate::filter::{StatusFilter, TextFilter};
 use crate::{Page, Status, Uid};
 
@@ -130,9 +132,15 @@ pub struct Resource {
     pub age: Duration,
     pub yaml: String,
     pub labels: BTreeMap<String, String>,
+    pub conditions: Vec<Condition>,
+    pub diagnosis: Option<Diagnosis>,
 }
 
 impl Resource {
+    pub fn events<'a>(&self, kind: ResourceKind, events: &'a [Event]) -> Vec<&'a Event> {
+        diagnosis::about(events, kind.name(), Some(&self.namespace), &self.name)
+    }
+
     pub fn matches(&self, namespace: Option<&str>, query: &TextFilter) -> bool {
         let in_namespace = namespace.is_none_or(|ns| ns == self.namespace);
         let fields = [self.name.as_str(), self.namespace.as_str()];
@@ -149,6 +157,19 @@ pub fn filter_resources(
         .filter(|row| row.matches(namespace, query))
         .cloned()
         .collect()
+}
+
+pub fn explain(resources: &mut BTreeMap<ResourceKind, Vec<Resource>>, events: &[Event]) {
+    for (kind, rows) in resources.iter_mut() {
+        for row in rows.iter_mut() {
+            if !diagnosis::needs_diagnosis(row.status) {
+                row.diagnosis = None;
+                continue;
+            }
+            let about = row.events(*kind, events);
+            row.diagnosis = diagnosis::with_events(row.diagnosis.take(), &about);
+        }
+    }
 }
 
 pub fn filter_counts(rows: &[Resource]) -> Vec<(StatusFilter, usize)> {
@@ -176,7 +197,44 @@ pub(crate) mod tests {
             age: Duration::ZERO,
             yaml: String::new(),
             labels: BTreeMap::new(),
+            conditions: Vec::new(),
+            diagnosis: None,
         }
+    }
+
+    #[test]
+    fn explain_drops_healthy_reasons_and_fills_messages_from_events() {
+        use crate::events::EventDetails;
+        let mut pending = resource("db", "data-0", Status::Warn);
+        pending.diagnosis = Some(Diagnosis::new("Pending", ""));
+        let mut calm = resource("db", "data-1", Status::Ok);
+        calm.diagnosis = Some(Diagnosis::new("Stale", ""));
+        let event = Event {
+            labels: BTreeMap::new(),
+            details: EventDetails {
+                kind: "PersistentVolumeClaim".into(),
+                ..EventDetails::default()
+            },
+            status: Status::Warn,
+            reason: "ProvisioningFailed".into(),
+            object: "persistentvolumeclaim/data-0".into(),
+            namespace: Some("db".into()),
+            message: "storageclass \"fast\" not found".into(),
+            age: Duration::ZERO,
+            count: 1,
+        };
+        let mut lists =
+            BTreeMap::from([(ResourceKind::PersistentVolumeClaim, vec![pending, calm])]);
+        explain(&mut lists, &[event]);
+        let rows = &lists[&ResourceKind::PersistentVolumeClaim];
+        assert_eq!(
+            rows[0].diagnosis,
+            Some(Diagnosis::new(
+                "Pending",
+                "ProvisioningFailed: storageclass \"fast\" not found"
+            ))
+        );
+        assert_eq!(rows[1].diagnosis, None);
     }
 
     #[test]

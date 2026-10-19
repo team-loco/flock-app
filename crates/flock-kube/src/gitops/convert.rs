@@ -1,13 +1,16 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use flock_core::diagnosis::needs_diagnosis;
 use flock_core::flux::{
     FluxDetail, HelmDetail, HelmRevision, HistoryEntry, ManagedObject, Phase, Revision, Sentence,
     SourceDetail, SpecRow,
 };
-use flock_core::{ClusterId, FluxKey, FluxKind, FluxObject, Status, Uid};
+use flock_core::{ClusterId, Condition, Diagnosis, FluxKey, FluxKind, FluxObject, Status, Uid};
 use flock_flux::revision::{self, short};
-use flock_flux::{GitOpsObject, InventoryEntry, ObjectKind, Summary, redact, summarize};
+use flock_flux::{
+    GitOpsObject, InventoryEntry, ObjectKind, Summary, failing_condition, redact, summarize,
+};
 use jiff::Timestamp;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ManagedFieldsEntry;
 use kube::api::DynamicObject;
@@ -69,14 +72,34 @@ impl Parsed {
         self.object.spec.pointer(pointer).and_then(Value::as_str)
     }
 
-    fn ready_since(&self) -> Option<Timestamp> {
+    fn changed(&self, kind: &str) -> Option<Timestamp> {
         self.raw
             .pointer("/status/conditions")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .find(|condition| condition.get("type").and_then(Value::as_str) == Some(READY))
+            .find(|condition| condition.get("type").and_then(Value::as_str) == Some(kind))
             .and_then(|condition| timestamp(condition.get("lastTransitionTime")))
+    }
+
+    fn ready_since(&self) -> Option<Timestamp> {
+        self.changed(READY)
+    }
+
+    fn conditions(&self, now: Timestamp) -> Vec<Condition> {
+        self.object
+            .conditions
+            .iter()
+            .map(|condition| {
+                let age = self
+                    .changed(&condition.type_)
+                    .map(|then| elapsed(then, now));
+                Condition::new(condition.type_.clone(), condition.status.clone())
+                    .reason(condition.reason.clone())
+                    .message(condition.message.clone())
+                    .age(age)
+            })
+            .collect()
     }
 
     fn suspended_at(&self) -> Option<Timestamp> {
@@ -193,6 +216,29 @@ pub struct Inputs<'a> {
     pub releases: Option<Vec<HelmRevision>>,
 }
 
+fn diagnosis(parsed: &Parsed, summary: &Summary, phase: &Phase) -> Option<Diagnosis> {
+    if !needs_diagnosis(phase.status()) {
+        return None;
+    }
+    let failing = failing_condition(&parsed.object).map(|condition| {
+        let core = Condition::new(condition.type_.clone(), condition.status.clone())
+            .reason(condition.reason.clone());
+        Diagnosis::new(core.label(), condition.message.clone())
+    });
+    failing.or_else(|| {
+        let reason = parsed
+            .object
+            .condition(READY)
+            .map(|condition| condition.reason.clone())
+            .unwrap_or_default();
+        let message = summary
+            .detail
+            .clone()
+            .unwrap_or_else(|| summary.sentence.clone());
+        Some(Diagnosis::new(reason, message))
+    })
+}
+
 pub fn flux_object(parsed: &Parsed, inputs: Inputs<'_>) -> Option<FluxObject> {
     let key = key(inputs.cluster, parsed)?;
     let summary = summary(parsed, inputs.objects);
@@ -228,6 +274,8 @@ pub fn flux_object(parsed: &Parsed, inputs: Inputs<'_>) -> Option<FluxObject> {
     let detail = detail(parsed, now, inputs.releases);
     let uid = parsed.uid().map(Uid::new).unwrap_or_default();
     let labels = parsed.labels();
+    let diagnosis = diagnosis(parsed, &summary, &phase);
+    let conditions = parsed.conditions(now);
     Some(FluxObject {
         labels,
         key,
@@ -243,6 +291,8 @@ pub fn flux_object(parsed: &Parsed, inputs: Inputs<'_>) -> Option<FluxObject> {
         spec: spec_rows(parsed, inputs.objects),
         yaml: yaml(&parsed.raw),
         detail,
+        conditions,
+        diagnosis,
     })
 }
 
@@ -933,6 +983,26 @@ pub(super) mod tests {
         assert_eq!(known, Some(Phase::Suspended { since: two_days }));
         let health = health(&parsed(&value), &[], now());
         assert_eq!(Some(health.since), two_days);
+    }
+
+    #[test]
+    fn failing_flux_objects_carry_their_reason_and_condition_ages() {
+        let objects = [parsed(&git_repository())];
+        let failing = convert(&kustomization("apps", "False", "abc"), &objects);
+        let Some(failing) = failing else {
+            panic!("converted");
+        };
+        assert_eq!(
+            failing.diagnosis,
+            Some(Diagnosis::new(
+                "HealthCheckFailed",
+                "timeout waiting for Deployment/web/podinfo\nmore"
+            ))
+        );
+        assert_eq!(failing.conditions.len(), 1);
+        assert_eq!(failing.conditions[0].age, Some(Duration::from_hours(1)));
+        let ready = convert(&kustomization("apps", "True", "abc"), &objects);
+        assert_eq!(ready.and_then(|object| object.diagnosis), None);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 mod button;
 mod chart;
 mod code;
+mod diagnosis;
 mod diff;
 mod dock;
 mod editor;
@@ -32,6 +33,10 @@ mod tooltip;
 pub use button::{Button, ButtonSize, ButtonVariant, Checkbox, IconButton, Segmented, Toggle};
 pub use chart::{CapacityMeter, LineChart, Meter, MiniMeter, Series, StackedBar};
 pub use code::CodeView;
+pub use diagnosis::{
+    CONDITIONS, ConditionTable, EVENTS, EventList, WHATS_WRONG, WhatsWrong, reason_cell,
+    reason_tooltip,
+};
 pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};
 pub use editor::{CodeEditor, CodeEditorState, highlight_yaml, mark_error, yaml_editor};

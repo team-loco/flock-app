@@ -441,6 +441,7 @@ fn container(group: &Group) -> Container {
             reason: WAITING.into(),
             ready: false,
             note: Some(note.into()),
+            message: note.into(),
             ..base
         },
         Health::Crashing(note) => Container {
@@ -450,6 +451,7 @@ fn container(group: &Group) -> Container {
             ready: false,
             restarts: CRASH_RESTARTS,
             note: Some(note.into()),
+            message: format!("last {note}"),
             ..base
         },
     }

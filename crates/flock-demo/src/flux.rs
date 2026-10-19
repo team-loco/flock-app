@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 
+use flock_core::diagnosis::from_conditions;
 use flock_core::flux::{
     FluxDetail, HelmDetail, HelmRevision, HistoryEntry, ManagedObject, Phase, Revision, Sentence,
     SourceDetail, Span, SpecRow,
 };
-use flock_core::{FluxAction, FluxKey, FluxKind, FluxObject, Snapshot, Status, Uid};
+use flock_core::{Condition, FluxAction, FluxKey, FluxKind, FluxObject, Snapshot, Status, Uid};
 
 const MINUTE: u64 = 60;
 const HOUR: u64 = 60 * MINUTE;
@@ -38,6 +39,18 @@ const PREVIOUS_FULL: &str = "7c2d9e0b51e4";
 const PROMETHEUS_OLD: &str = "61.9.0";
 const PROMETHEUS_NEW: &str = "62.7.0";
 const HEALTH_TIMEOUT: &str = "5m";
+const READY: &str = "Ready";
+const RELEASED: &str = "Released";
+const RECONCILING: &str = "Reconciling";
+const TRUE: &str = "True";
+const FALSE: &str = "False";
+const UNKNOWN: &str = "Unknown";
+const SUCCEEDED: &str = "ReconciliationSucceeded";
+const PROGRESSING: &str = "Progressing";
+const HEALTH_CHECK_FAILED: &str = "HealthCheckFailed";
+const UPGRADE_FAILED: &str = "UpgradeFailed";
+const PAYMENTS_HEALTH_MESSAGE: &str = "health check failed after 5m0s: timeout waiting for: [Deployment/payments/checkout-api status: 'InProgress']";
+const PROMETHEUS_UPGRADE_MESSAGE: &str = "Helm upgrade failed for release monitoring/kube-prometheus-stack with chart kube-prometheus-stack@62.7.0: context deadline exceeded";
 
 const fn ago(secs: u64) -> Duration {
     Duration::from_secs(secs)
@@ -223,6 +236,32 @@ fn kustomization_spec(cluster: &str, path: &str) -> (Vec<SpecRow>, String) {
     (rows, yaml)
 }
 
+fn settled_conditions(phase: Phase, sentence: &Sentence) -> Vec<Condition> {
+    let ready = Condition::new(READY, TRUE)
+        .reason(SUCCEEDED)
+        .message(sentence.plain())
+        .age(Some(ago(3 * HOUR)));
+    let waiting = Condition::new(READY, UNKNOWN)
+        .reason(PROGRESSING)
+        .message("Reconciliation in progress")
+        .age(Some(ago(MINUTE)));
+    let reconciling = Condition::new(RECONCILING, TRUE)
+        .reason(PROGRESSING)
+        .age(Some(ago(MINUTE)));
+    match phase {
+        Phase::Ready => vec![ready],
+        Phase::Suspended { .. } => vec![ready],
+        Phase::Reconciling => vec![reconciling, waiting],
+        Phase::Retrying => vec![reconciling, waiting],
+        Phase::Failing => vec![waiting],
+    }
+}
+
+fn explain(object: &mut FluxObject, conditions: Vec<Condition>) {
+    object.diagnosis = from_conditions(&conditions);
+    object.conditions = conditions;
+}
+
 fn payments_path(cluster: &str) -> String {
     format!("./apps/payments/overlays/{cluster}")
 }
@@ -243,7 +282,10 @@ fn kustomization(
         phase,
         &sentence,
     );
+    let conditions = settled_conditions(phase, &sentence);
     FluxObject {
+        conditions,
+        diagnosis: None,
         labels: BTreeMap::new(),
         uid: Uid::default(),
         source: Some(fleet_infra(cluster)),
@@ -281,6 +323,11 @@ fn apps_payments_east() -> FluxObject {
         Phase::Failing,
         sentence,
     );
+    let failed = Condition::new(READY, FALSE)
+        .reason(HEALTH_CHECK_FAILED)
+        .message(PAYMENTS_HEALTH_MESSAGE)
+        .age(Some(ago(4 * MINUTE)));
+    explain(&mut object, vec![failed]);
     object.last_healthy = Some(Revision::new(PREVIOUS, ago(DAY)));
     object.depends_on = payments_dependencies(PROD_US_EAST);
     object.inventory = payments_inventory();
@@ -426,7 +473,10 @@ fn git_source(cluster: &str) -> FluxObject {
         phase,
         &sentence,
     );
+    let conditions = settled_conditions(phase, &sentence);
     FluxObject {
+        conditions,
+        diagnosis: None,
         labels: BTreeMap::new(),
         uid: Uid::default(),
         key,
@@ -488,7 +538,10 @@ fn helm_source(cluster: &str) -> FluxObject {
         phase,
         &sentence,
     );
+    let conditions = settled_conditions(phase, &sentence);
     FluxObject {
+        conditions,
+        diagnosis: None,
         labels: BTreeMap::new(),
         uid: Uid::default(),
         key,
@@ -659,7 +712,10 @@ fn helm_release(cluster: &str, version: &str, phase: Phase, sentence: Sentence) 
         phase,
         &sentence,
     );
+    let conditions = settled_conditions(phase, &sentence);
     FluxObject {
+        conditions,
+        diagnosis: None,
         labels: BTreeMap::new(),
         uid: Uid::default(),
         key,
@@ -719,6 +775,21 @@ fn prometheus_staging() -> FluxObject {
         )),
     ]);
     let mut object = helm_release(STAGING, PROMETHEUS_NEW, Phase::Retrying, sentence);
+    let changed = Some(ago(9 * MINUTE));
+    let failed = |kind: &str| {
+        Condition::new(kind, FALSE)
+            .reason(UPGRADE_FAILED)
+            .message(PROMETHEUS_UPGRADE_MESSAGE)
+            .age(changed)
+    };
+    let reconciling = Condition::new(RECONCILING, TRUE)
+        .reason("ProgressingWithRetry")
+        .message("Running 'upgrade' action with timeout of 5m0s")
+        .age(changed);
+    explain(
+        &mut object,
+        vec![failed(READY), failed(RELEASED), reconciling],
+    );
     object.applied = Some(Revision::new(PROMETHEUS_NEW, ago(9 * MINUTE)));
     object.inventory = prometheus_inventory((Status::Warn, "1/2 ready"), true);
     if let FluxDetail::HelmRelease(detail) = &mut object.detail {

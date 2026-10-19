@@ -2,10 +2,9 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use flock_core::pods::{
-    Condition, Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Qos, Usage,
-    Volume,
+    Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Qos, Usage, Volume,
 };
-use flock_core::{ClusterId, ResourceRef, Status, Uid};
+use flock_core::{ClusterId, Condition, ResourceRef, Status, Uid};
 
 mod fill;
 
@@ -20,6 +19,10 @@ const WAITING: &str = "Waiting";
 const CRASH_LOOP: &str = "CrashLoopBackOff";
 const NOT_READY: &str = "Running · not ready";
 const CONTAINERS_NOT_READY: &str = "ContainersNotReady";
+const UNSCHEDULABLE: &str = "Unschedulable";
+const TRUE: &str = "True";
+const FALSE: &str = "False";
+const SCHEDULING_MESSAGE: &str = "0/14 nodes are available: 14 Insufficient nvidia.com/gpu.";
 const API_ACCESS: (&str, &str) = ("kube-api-access", "projected · token, ca.crt, namespace");
 
 const NODE_12_87: &str = "ip-10-4-12-87.ec2.internal";
@@ -53,6 +56,7 @@ fn running(name: &str, image: &str, restarts: u32, ports: Vec<ContainerPort>) ->
         restarts,
         ports,
         note: None,
+        message: String::new(),
     }
 }
 
@@ -67,6 +71,7 @@ fn waiting(name: &str, image: &str, note: &str) -> Container {
         restarts: 0,
         ports: Vec::new(),
         note: Some(note.into()),
+        message: note.into(),
     }
 }
 
@@ -109,21 +114,39 @@ fn volumes(extra: &[(&str, &str)]) -> Vec<Volume> {
 }
 
 pub fn conditions(pod: &Pod) -> Vec<Condition> {
-    let condition = |kind: &str, ok: bool, reason: Option<&str>| Condition {
-        kind: kind.into(),
-        ok,
-        reason: reason.map(Into::into),
-    };
+    let since = Some(pod.age);
     if pod.node.is_none() {
-        return vec![condition("PodScheduled", false, Some("Unschedulable"))];
+        let scheduled = Condition::new("PodScheduled", FALSE)
+            .reason(UNSCHEDULABLE)
+            .message(SCHEDULING_MESSAGE)
+            .age(since);
+        return vec![scheduled];
     }
     let ready = pod.containers.iter().all(|c| c.ready);
-    let reason = (!ready).then_some(CONTAINERS_NOT_READY);
+    let value = if ready { TRUE } else { FALSE };
+    let unready: Vec<&str> = pod
+        .containers
+        .iter()
+        .filter(|c| !c.ready)
+        .map(|c| c.name.as_str())
+        .collect();
+    let (reason, message) = if ready {
+        (String::new(), String::new())
+    } else {
+        let message = format!("containers with unready status: [{}]", unready.join(" "));
+        (CONTAINERS_NOT_READY.to_owned(), message)
+    };
+    let readiness = |kind: &str| {
+        Condition::new(kind, value)
+            .reason(reason.clone())
+            .message(message.clone())
+            .age(since)
+    };
     vec![
-        condition("PodScheduled", true, None),
-        condition("Initialized", true, None),
-        condition("ContainersReady", ready, reason),
-        condition("Ready", ready, reason),
+        Condition::new("PodScheduled", TRUE).age(since),
+        Condition::new("Initialized", TRUE).age(since),
+        readiness("ContainersReady"),
+        readiness("Ready"),
     ]
 }
 
@@ -217,6 +240,7 @@ fn crashing_checkout() -> Seed {
         ready: false,
         restarts: 14,
         note: Some("exit 1".into()),
+        message: "last exit Error (1)".into(),
         ..checkout_api()
     };
     Seed {
@@ -422,6 +446,7 @@ fn problem_seeds() -> Vec<Seed> {
         ready: false,
         restarts: 2,
         note: Some("readiness 503".into()),
+        message: "Readiness probe failed: HTTP probe failed with statuscode: 503".into(),
         ..running(
             "indexer",
             "ghcr.io/acme/search-indexer:0.18.0",
@@ -738,9 +763,12 @@ mod tests {
     fn conditions_follow_scheduling_and_readiness() {
         let pods = pods();
         let ready = |name: &str| {
-            pods.iter()
-                .find(|p| p.name == name)
-                .map(|p| p.conditions.iter().map(|c| c.ok).collect::<Vec<_>>())
+            pods.iter().find(|p| p.name == name).map(|p| {
+                p.conditions
+                    .iter()
+                    .map(Condition::is_healthy)
+                    .collect::<Vec<_>>()
+            })
         };
         assert_eq!(ready("payments-db-0"), Some(vec![true; 4]));
         assert_eq!(

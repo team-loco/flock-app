@@ -6,6 +6,7 @@ pub mod checks;
 pub mod client;
 pub mod clock;
 pub mod compare;
+pub mod conditions;
 pub mod detail;
 pub mod discovery;
 pub mod error;

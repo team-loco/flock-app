@@ -8,12 +8,12 @@ use flock_core::pods::{
 use flock_core::resources::{POD_LIST, namespace_choices};
 use flock_core::settings::NamespaceSelection;
 use flock_core::{
-    ClusterId, Command, Counts, LogTarget, Page, Preferences, ResourceRef, Seen, Snapshot, Status,
+    ClusterId, Command, Counts, LogTarget, Page, Preferences, ResourceRef, Seen, Snapshot,
 };
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Window, div, prelude::FluentBuilder, px,
+    Subscription, Window, div, px,
 };
 
 mod streams;
@@ -21,16 +21,17 @@ mod streams;
 use streams::{LogSession, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
-    Button, Column, ConfirmDialog, DockState, Entrance, FilterBar, FilterEvent, InputEvent,
-    InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView, MenuItem, SectionLabel, Select,
-    SelectEvent, ShowAll, StatusGlyph, StatusText, Table, TableEvent, Terminal, TextFieldState,
-    chip_label, confirm, swap_in,
+    Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, EVENTS, Entrance,
+    EventList, FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER,
+    Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, ShowAll, StatusGlyph, StatusText,
+    Table, TableEvent, Terminal, TextFieldState, WHATS_WRONG, WhatsWrong, chip_label, confirm,
+    reason_tooltip, swap_in,
 };
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{
-    ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, LINE_PROSE, Palette,
-    RADIUS_SMALL, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8,
-    TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI,
+    ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, INSPECTOR_POD, LINE_PROSE,
+    MESSAGE_MIN, Palette, RADIUS_SMALL, REASON_WEIGHT, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
+    SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_SMALL, TEXT_UI,
 };
 
 const INSPECTOR_ID: &str = "pod-inspector";
@@ -48,9 +49,7 @@ const INSPECTOR_LABEL: Pixels = px(96.);
 
 const ALL_NAMESPACES: &str = "All namespaces";
 const MISSING: &str = "—";
-const TRUE: &str = "True";
-const FALSE: &str = "False";
-const NO_EVENTS: &str = "No recent events.";
+const MESSAGE: &str = "Message";
 const LOGS_FOR: &str = "Logs for";
 const LOGS_FOR_SELECTED: &str = "Logs for selected pods";
 const SELECTED_PODS: &str = "selected pods";
@@ -557,15 +556,21 @@ impl PodsScreen {
     }
 
     fn pod_details(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let whats_wrong = pod.diagnosis().map(|diagnosis| {
+            section(palette)
+                .child(SectionLabel::new(WHATS_WRONG))
+                .child(WhatsWrong::new(pod.status, diagnosis))
+        });
         div()
             .flex()
             .flex_col()
+            .children(whats_wrong)
+            .child(conditions(pod, palette))
+            .child(events(pod, palette))
             .child(Self::facts(pod, palette, cx))
             .child(labels(pod, palette))
             .child(Self::containers_section(pod, palette, cx))
-            .child(conditions(pod, palette))
             .child(volumes(pod, palette))
-            .child(events(pod, palette))
     }
 
     fn facts(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
@@ -692,6 +697,7 @@ fn section(palette: &Palette) -> gpui::Div {
 
 fn mono_line(text: impl Into<SharedString>, color: gpui::Hsla) -> impl IntoElement {
     div()
+        .min_w_0()
         .font_family(FONT_MONO)
         .text_size(TEXT_SMALL)
         .text_color(color)
@@ -712,10 +718,12 @@ fn or_missing(value: Option<String>) -> SharedString {
 fn labels(pod: &Pod, palette: &Palette) -> impl IntoElement {
     let items = pod.labels.iter().map(|(key, value)| {
         div()
+            .min_w_0()
+            .max_w_full()
             .font_family(FONT_MONO)
             .text_size(TEXT_SMALL)
             .text_color(palette.fg2)
-            .child(format!("{key}={value}"))
+            .child(SelectableText::new(format!("{key}={value}")))
     });
     section(palette).child(SectionLabel::new("Labels")).child(
         div()
@@ -728,24 +736,9 @@ fn labels(pod: &Pod, palette: &Palette) -> impl IntoElement {
 }
 
 fn conditions(pod: &Pod, palette: &Palette) -> impl IntoElement {
-    let rows = pod.conditions.iter().fold(
-        KeyValue::new().label_width(INSPECTOR_LABEL),
-        |grid, condition| {
-            let (status, word) = if condition.ok {
-                (Status::Ok, TRUE)
-            } else {
-                (Status::Err, FALSE)
-            };
-            let text = match &condition.reason {
-                Some(reason) => format!("{word} · {reason}"),
-                None => word.to_owned(),
-            };
-            grid.row(condition.kind.clone(), StatusText::new(status, text))
-        },
-    );
     section(palette)
-        .child(SectionLabel::new("Conditions"))
-        .child(rows)
+        .child(SectionLabel::new(CONDITIONS))
+        .child(ConditionTable::new(&pod.conditions))
 }
 
 fn volumes(pod: &Pod, palette: &Palette) -> impl IntoElement {
@@ -759,40 +752,9 @@ fn volumes(pod: &Pod, palette: &Palette) -> impl IntoElement {
 }
 
 fn events(pod: &Pod, palette: &Palette) -> impl IntoElement {
-    let rows: Vec<AnyElement> = pod
-        .events
-        .iter()
-        .map(|event| {
-            div()
-                .flex()
-                .flex_col()
-                .gap(SPACE_1)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(SPACE_3)
-                        .font_family(FONT_MONO)
-                        .text_size(TEXT_MONO)
-                        .child(StatusGlyph::new(event.status))
-                        .child(div().flex_1().child(event.reason.clone()))
-                        .child(div().text_color(palette.mute).child(format!(
-                            "{} · {}",
-                            flock_core::units::times(event.count),
-                            flock_core::time::age(event.age)
-                        ))),
-                )
-                .child(div().text_color(palette.fg2).child(event.message.clone()))
-                .into_any_element()
-        })
-        .collect();
-    let empty = rows.is_empty();
     section(palette)
-        .child(SectionLabel::new("Events"))
-        .children(rows)
-        .when(empty, |s| {
-            s.child(div().text_color(palette.mute).child(NO_EVENTS))
-        })
+        .child(SectionLabel::new(EVENTS))
+        .child(EventList::new(pod.events.clone()))
 }
 
 fn open_logs(target: LogTarget, cx: &mut Context<PodsScreen>) {
@@ -958,6 +920,13 @@ fn columns() -> Vec<Column<Pod>> {
         .fit_status_by(|p: &Pod| p.reason.clone().into())
         .auto(STATUS_MIN, STATUS_MAX)
         .sort_by_key(|p: &Pod| std::cmp::Reverse(p.status)),
+        Column::colored_text(
+            MESSAGE,
+            |p: &Pod| p.diagnosis().map(|d| d.message).unwrap_or_default().into(),
+            |_, palette| palette.mute,
+        )
+        .tooltip(|p: &Pod| reason_tooltip(p.diagnosis().as_ref()))
+        .flex(REASON_WEIGHT, MESSAGE_MIN),
     ]
 }
 
@@ -999,7 +968,7 @@ impl Render for PodsScreen {
                     .min_h_0()
                     .flex()
                     .child(table)
-                    .child(InspectorPane::new(INSPECTOR_ID, inspector)),
+                    .child(InspectorPane::new(INSPECTOR_ID, inspector).width(INSPECTOR_POD)),
             )
             .child(dock)
     }

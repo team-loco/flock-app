@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use crate::diagnosis::{self, Condition, Diagnosis};
 use crate::filter::TextFilter;
 use crate::overview::{Commitment, plural};
 use crate::{Status, Uid};
@@ -19,14 +20,6 @@ impl Usage {
             0.
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NodeCondition {
-    pub kind: String,
-    pub value: String,
-    pub healthy: bool,
-    pub message: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -49,7 +42,7 @@ pub struct Node {
     pub pods: u32,
     pub pod_capacity: u32,
     pub age: Duration,
-    pub conditions: Vec<NodeCondition>,
+    pub conditions: Vec<Condition>,
     pub taints: Vec<String>,
     pub labels: Vec<String>,
 }
@@ -77,6 +70,15 @@ impl Node {
             .collect()
     }
 
+    pub fn diagnosis(&self) -> Option<Diagnosis> {
+        if !diagnosis::needs_diagnosis(self.status) {
+            return None;
+        }
+        diagnosis::node(&self.conditions).or_else(|| {
+            (!self.schedulable).then(|| Diagnosis::new(SCHEDULING_DISABLED, CORDONED_MESSAGE))
+        })
+    }
+
     pub fn is_ready(&self) -> bool {
         self.conditions
             .iter()
@@ -86,6 +88,8 @@ impl Node {
 
 pub const READY_CONDITION: &str = "Ready";
 pub const CONDITION_TRUE: &str = "True";
+const SCHEDULING_DISABLED: &str = "SchedulingDisabled";
+const CORDONED_MESSAGE: &str = "Cordoned: no new pods are scheduled here.";
 const INSTANCE_SIZE_SEPARATOR: char = '.';
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -189,12 +193,7 @@ pub(crate) mod tests {
             pods: 0,
             pod_capacity: 110,
             age: Duration::ZERO,
-            conditions: vec![NodeCondition {
-                kind: READY_CONDITION.into(),
-                value: value.into(),
-                healthy: ready,
-                message: String::new(),
-            }],
+            conditions: vec![Condition::new(READY_CONDITION, value)],
             taints: Vec::new(),
             labels: Vec::new(),
         }
@@ -213,6 +212,27 @@ pub(crate) mod tests {
         assert!(node.matches(&TextFilter::parse("l:topology.kubernetes.io/zone")));
         assert!(!node.matches(&TextFilter::parse("l:topology.kubernetes.io/zone=us-east")));
         assert_eq!(node.label_map().len(), 1);
+    }
+
+    #[test]
+    fn unhealthy_nodes_explain_themselves() {
+        let mut down = node("a", "m6i", true, false);
+        down.status = Status::Err;
+        down.conditions[0].message = "Kubelet stopped posting node status.".into();
+        assert_eq!(
+            down.diagnosis(),
+            Some(Diagnosis::new(
+                "NotReady",
+                "Kubelet stopped posting node status."
+            ))
+        );
+        let mut cordoned = node("b", "m6i", false, true);
+        cordoned.status = Status::Warn;
+        assert_eq!(
+            cordoned.diagnosis().map(|d| d.reason),
+            Some("SchedulingDisabled".into())
+        );
+        assert_eq!(node("c", "m6i", true, true).diagnosis(), None);
     }
 
     #[test]

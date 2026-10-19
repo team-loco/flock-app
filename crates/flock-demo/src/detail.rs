@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use flock_core::Condition;
 use flock_core::cluster::Namespace;
 use flock_core::events::Event;
-use flock_core::nodes::{CONDITION_TRUE, Node, NodeCondition, READY_CONDITION, Usage};
+use flock_core::nodes::{CONDITION_TRUE, Node, READY_CONDITION, Usage};
 use flock_core::overview::{Commitment, Overview, PodPhases, TimeRange, Utilization};
 use flock_core::{ClusterDetail, Counts, Status, Uid};
 
@@ -323,20 +324,12 @@ fn node(seed: &NodeSeed) -> Node {
     }
 }
 
-fn conditions() -> Vec<NodeCondition> {
-    let calm = |kind: &str, message: &str| NodeCondition {
-        kind: kind.into(),
-        value: "False".into(),
-        healthy: true,
-        message: message.into(),
-    };
+fn conditions() -> Vec<Condition> {
+    let calm = |kind: &str, message: &str| Condition::new(kind, "False").message(message);
     vec![
-        NodeCondition {
-            kind: READY_CONDITION.into(),
-            value: CONDITION_TRUE.into(),
-            healthy: true,
-            message: "kubelet is posting ready status".into(),
-        },
+        Condition::new(READY_CONDITION, CONDITION_TRUE)
+            .reason("KubeletReady")
+            .message("kubelet is posting ready status"),
         calm("MemoryPressure", "kubelet has sufficient memory available"),
         calm("DiskPressure", "kubelet has no disk pressure"),
         calm("PIDPressure", "kubelet has sufficient PID available"),
@@ -637,6 +630,15 @@ fn events() -> Vec<Event> {
             namespace: Some("payments"),
             message: "ReplicaSet \"checkout-api-7f9c6d\" has timed out progressing",
             age: hours(3),
+            count: 1,
+        },
+        EventSeed {
+            status: Status::Ok,
+            reason: "SuccessfulCreate",
+            object: "job/backfill-orders-28770412",
+            namespace: Some("data-pipeline"),
+            message: "Created pod: backfill-orders-28770412-q7x2m",
+            age: hours(2),
             count: 1,
         },
         EventSeed {

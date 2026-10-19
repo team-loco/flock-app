@@ -273,3 +273,24 @@ Settled; change only with a new entry that says why.
     sides changed a field the edit wins and is named). Redacted values the user left alone are
     restored from the live object before sending; a mask that is typed or partly kept is refused,
     so a placeholder is never written back.
+37. **Unhealthy rows say why; inspectors lead with what's wrong** (#239, product owner): every
+    resource list, Pods, Nodes and the Flux lists carry a Reason column (Pods: Message, since their
+    Status column already shows the reason) filled only for Err and Warn rows and truncated with
+    the full text in a tooltip and the inspector. The reason is derived outside the view:
+    `flock_core::diagnosis` holds one `Condition` type for every kind (it replaced the pod and node
+    condition types) with its polarity (`Failed`, `Stalled`, pressure and similar types are bad when
+    True, `Reconciling` is progress, `Suspended` is neutral), picks the first of the worst
+    conditions, names nodes `NotReady` or the pressure type, and keeps PVCs `Pending` with the
+    newest warning event as the message. Workload rows prefer their pods' worst issue
+    (CrashLoopBackOff, ImagePullBackOff, last exit OOMKilled) over their own conditions; Jobs
+    prefer their Failed condition (DeadlineExceeded, BackoffLimitExceeded) and pick up pod issues
+    while running. Flux rows use `flock_flux::failing_condition` (Stalled, then Helm Released,
+    then Ready, including a remembered failure through retries); a reconciling object hides its
+    last failure. Inspectors (resources, pods, nodes) and the Flux object page show What's wrong,
+    then Conditions (type, status, age, with reason and message beneath so long reasons never
+    break mid-word), then the object's events, then the rest; YAML stays last. Default inspector
+    widths are theme constants per kind (`INSPECTOR_WORKLOAD` 560px for the five workload kinds
+    including Jobs and CronJobs, `INSPECTOR_RESOURCE` 480px, `INSPECTOR_NODE` 420px,
+    `INSPECTOR_POD` 360px so the pod list keeps its row actions in view); a dragged width is still
+    remembered per inspector and wins. A reveal into another namespace keeps the inspector open
+    until the namespace preference round-trips. Loco lists and the workload page are unchanged.

@@ -252,17 +252,15 @@ impl<R: 'static> Column<R> {
             }
             Cell::Text(cell) => cell.render(row, palette, &[], self.selectable, selected),
         };
-        match &self.tooltip {
-            Some(text) => {
-                let tooltip = text(row);
-                div()
-                    .id(self.title.clone())
-                    .w_full()
-                    .min_w_0()
-                    .tooltip(Tooltip::text(tooltip))
-                    .child(content)
-                    .into_any_element()
-            }
+        let tooltip = self.tooltip.as_ref().map(|text| text(row));
+        match tooltip.filter(|tooltip| !tooltip.is_empty()) {
+            Some(tooltip) => div()
+                .id(self.title.clone())
+                .w_full()
+                .min_w_0()
+                .tooltip(Tooltip::text(tooltip))
+                .child(content)
+                .into_any_element(),
             None => content,
         }
     }

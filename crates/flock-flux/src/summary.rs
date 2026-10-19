@@ -114,6 +114,21 @@ fn failure(object: &GitOpsObject, condition: &Condition) -> Summary {
     }
 }
 
+const RELEASED: &str = "Released";
+const STALLED: &str = "Stalled";
+const FALSE: &str = "False";
+
+pub fn failing_condition(object: &GitOpsObject) -> Option<&Condition> {
+    if object.suspended {
+        return None;
+    }
+    let ready = object.ready().filter(|condition| condition.status == FALSE);
+    let released = object
+        .condition(RELEASED)
+        .filter(|condition| condition.status == FALSE);
+    active(object, STALLED).or(released).or(ready)
+}
+
 pub fn summarize(object: &GitOpsObject, source: Option<&GitOpsObject>) -> Summary {
     if object.suspended {
         return result(Status::Suspended, "Reconciliation is suspended.", None);

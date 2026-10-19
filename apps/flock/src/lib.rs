@@ -2,7 +2,8 @@ use clap::ValueEnum;
 use flock_core::history::Location;
 use flock_core::tabs::{SavedPane, SavedWindow};
 use flock_core::{
-    AddClusterStep, ClusterId, Command, FluxKey, FluxKind, LogTarget, Page, ResourceRef,
+    AddClusterStep, ClusterId, Command, FluxKey, FluxKind, LogTarget, Page, ResourceKind,
+    ResourceRef,
 };
 use flock_ui::actions::{CheckForUpdates, NewWindow, OpenSettings, Quit};
 use flock_ui::theme::Appearance;
@@ -22,6 +23,8 @@ const SAMPLE_OTHER_CLUSTER: &str = "prod-eu-west";
 const SAMPLE_POD: &str = "checkout-api-7f9c6d-x2lqp";
 const SAMPLE_CONTAINER: &str = "api";
 const SAMPLE_KUSTOMIZATION: &str = "apps-payments";
+const SAMPLE_JOB_NAMESPACE: &str = "data-pipeline";
+const SAMPLE_JOB: &str = "backfill-orders-28770412";
 const FLUX_NAMESPACE: &str = "flux-system";
 
 pub const APP_ID: &str = "dev.flock.app";
@@ -125,6 +128,9 @@ pub enum Screen {
     Events,
     Resources,
     ResourceInspector,
+    Jobs,
+    JobInspector,
+    Kustomizations,
     Gitops,
     Compare,
     EditYaml,
@@ -179,6 +185,18 @@ impl Screen {
                 };
                 vec![Command::OpenResource(target)]
             }
+            Self::Jobs => vec![sample, Command::SelectPage(Page::Jobs)],
+            Self::JobInspector => {
+                let object = preset.object_or(SAMPLE_JOB_NAMESPACE, SAMPLE_JOB);
+                let target = ResourceRef {
+                    cluster,
+                    kind: ResourceKind::Job.name().into(),
+                    namespace: Some(object.namespace),
+                    name: object.name,
+                };
+                vec![Command::OpenResource(target)]
+            }
+            Self::Kustomizations => vec![sample, Command::SelectPage(Page::Kustomizations)],
             Self::Gitops => vec![Command::SelectPage(Page::GitOps)],
             Self::Compare => vec![Command::Compare(preset.deployment())],
             Self::EditYaml => {
@@ -366,6 +384,9 @@ pub fn root_view(
         Screen::Events => shell_view(store, screen, preset, window, cx),
         Screen::Resources => shell_view(store, screen, preset, window, cx),
         Screen::ResourceInspector => shell_view(store, screen, preset, window, cx),
+        Screen::Jobs => shell_view(store, screen, preset, window, cx),
+        Screen::JobInspector => shell_view(store, screen, preset, window, cx),
+        Screen::Kustomizations => shell_view(store, screen, preset, window, cx),
         Screen::AddCluster => shell_view(store, screen, preset, window, cx),
         Screen::AddClusterCheck => shell_view(store, screen, preset, window, cx),
         Screen::Gitops => shell_view(store, screen, preset, window, cx),
