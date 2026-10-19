@@ -22,6 +22,16 @@ const DEBUG_SUFFIX_LEN: usize = 5;
 const SUFFIX_ALPHABET: &[u8] = b"bcdfghjklmnpqrstvwxz2456789";
 const PROMPT_NUDGE: &[u8] = b"\r";
 const CRLF: &str = "\r\n";
+const EXEC_FAILURE: &str = "exec";
+const MISSING_EXECUTABLE: [&str; 2] = ["executable file not found", "no such file or directory"];
+
+pub fn missing_shell(message: &str) -> bool {
+    let message = message.to_lowercase();
+    message.contains(EXEC_FAILURE)
+        && MISSING_EXECUTABLE
+            .iter()
+            .any(|missing| message.contains(missing))
+}
 
 pub fn shell_command() -> Vec<String> {
     vec![SHELL.into(), SHELL_FLAG.into(), SHELL_FALLBACK.into()]
@@ -198,6 +208,11 @@ async fn pump(session: &ExecSession, request: &ExecRequest) -> Option<ExecExit> 
     }
 }
 
+fn no_shell(output: &Sink<ExecEvent>) {
+    output.send_blocking(ExecEvent::NoShell);
+    output.send_blocking(ExecEvent::Exited { code: None });
+}
+
 pub fn fail(output: &Sink<ExecEvent>, reason: &str) {
     let text = format!("{reason}{CRLF}");
     output.send_blocking(ExecEvent::Output(text.into_bytes()));
@@ -220,10 +235,16 @@ async fn session(handle: &ClusterHandle, request: &ExecRequest) {
         result = start(handle, request) => result,
         () = output.closed() => return,
     };
+    let shell = !request.target.is_debug();
     let (session, note) = match started {
         Ok(started) => started,
         Err(error) => {
-            fail(&output, &action_failure(&error).line());
+            let line = action_failure(&error).line();
+            if shell && missing_shell(&format!("{error} {line}")) {
+                no_shell(&output);
+            } else {
+                fail(&output, &line);
+            }
             return;
         }
     };
@@ -233,6 +254,13 @@ async fn session(handle: &ClusterHandle, request: &ExecRequest) {
     let Some(exit) = pump(&session, request).await else {
         return;
     };
+    if let ExecExit::Failed(message) = &exit
+        && shell
+        && missing_shell(message)
+    {
+        no_shell(&output);
+        return;
+    }
     if let ExecExit::Failed(message) = &exit {
         let text = format!("{message}{CRLF}");
         output.send_blocking(ExecEvent::Output(text.into_bytes()));
@@ -275,6 +303,19 @@ mod tests {
                 "export TERM=xterm-256color; [ -x /bin/bash ] && exec /bin/bash -i || exec /bin/sh -i"
             ]
         );
+    }
+
+    #[test]
+    fn missing_shells_are_told_apart_from_other_exec_failures() {
+        let containerd = "error executing command in container: failed to exec in container: failed to start exec \"390235f8\": OCI runtime exec failed: exec failed: unable to start container process: exec: \"/bin/sh\": stat /bin/sh: no such file or directory: unknown";
+        let docker = "OCI runtime exec failed: exec failed: container_linux.go:380: starting container process caused: exec: \"/bin/sh\": executable file not found in $PATH: unknown";
+        assert!(missing_shell(containerd));
+        assert!(missing_shell(docker));
+        assert!(!missing_shell(
+            "command terminated with non-zero exit code: 127"
+        ));
+        assert!(!missing_shell("pods \"api\" not found"));
+        assert!(!missing_shell("open /data/x: no such file or directory"));
     }
 
     #[test]

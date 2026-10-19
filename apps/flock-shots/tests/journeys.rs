@@ -137,7 +137,11 @@ fn connected(state: &AppState) -> bool {
 }
 
 fn open(screen: Screen, make: &BackendFactory) -> anyhow::Result<Ui> {
-    let mut ui = Ui::live(screen, Preset::default(), make.clone())?;
+    open_in(screen, Appearance::Dark, make)
+}
+
+fn open_in(screen: Screen, appearance: Appearance, make: &BackendFactory) -> anyhow::Result<Ui> {
+    let mut ui = Ui::live_in(screen, Preset::default(), appearance, make.clone())?;
     ui.wait_until(CONNECT, connected)?;
     Ok(ui)
 }
@@ -1636,6 +1640,73 @@ fn live_flux_graph_draws_sources_and_dependencies_and_opens_nodes() -> anyhow::R
                 flock_shots::save(&image, &path)
             },
         )?;
+    }
+    Ok(())
+}
+
+const NO_SHELL_POD: &str = "no-shell";
+const DEBUG_ECHO: &str = "flock-debug-shell";
+
+fn until_shown(ui: &mut Ui, selector: &'static str) -> anyhow::Result<()> {
+    let start = std::time::Instant::now();
+    while ui.bounds(selector).is_none() {
+        anyhow::ensure!(start.elapsed() < PAGE_TIMEOUT, "{selector} never appeared");
+        ui.pause(Duration::from_millis(500))?;
+    }
+    Ok(())
+}
+
+fn terminal_text(ui: &mut Ui) -> anyhow::Result<String> {
+    ui.click("pod-copy-terminal")?;
+    Ok(ui.clipboard().unwrap_or_default())
+}
+
+#[test]
+fn live_a_container_without_a_shell_offers_a_debug_container() -> anyhow::Result<()> {
+    let Some(make) = kind()? else {
+        return Ok(());
+    };
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(SHOTS_DIR);
+    for (appearance, label) in [(Appearance::Dark, "dark"), (Appearance::Light, "light")] {
+        let mut ui = open_in(Screen::Flock, appearance, &make)?;
+        ui.wait_until(CONNECT, |state| flux_loaded(state) && all_counted(state))?;
+        switch_to(&mut ui, CLUSTERS[0].0)?;
+        visit(&mut ui, Page::Pods)?;
+        all_namespaces(&mut ui, "pod-namespace")?;
+        filter(&mut ui, NO_SHELL_POD)?;
+        ui.click("pods-row-0")?;
+        ui.click("pod-shell")?;
+        ui.click("pod-open-shell")?;
+        until_shown(&mut ui, "pod-no-shell")?;
+        ui.save_png(&dir.join(format!("fleet-a-pod-no-shell-{label}.png")))?;
+        if appearance == Appearance::Light {
+            continue;
+        }
+        ui.click("pod-start-debug")?;
+        ui.click("dialog-confirm")?;
+        until_shown(&mut ui, "pod-close-shell")?;
+        let start = std::time::Instant::now();
+        while !terminal_text(&mut ui)?.contains("Debug container: debugger-") {
+            anyhow::ensure!(
+                start.elapsed() < LIVE_WAIT,
+                "the debug container never attached"
+            );
+            ui.pause(Duration::from_millis(500))?;
+        }
+        ui.type_text(&format!("echo {DEBUG_ECHO}-$((1+1))"))?;
+        ui.press("enter")?;
+        let start = std::time::Instant::now();
+        while !terminal_text(&mut ui)?.contains(&format!("{DEBUG_ECHO}-2")) {
+            anyhow::ensure!(
+                start.elapsed() < PAGE_TIMEOUT,
+                "the debug shell did not answer"
+            );
+            ui.pause(Duration::from_millis(500))?;
+        }
+        ui.save_png(&dir.join("fleet-a-pod-debug-shell-dark.png"))?;
+        ui.type_text("exit")?;
+        ui.press("enter")?;
+        until_shown(&mut ui, "pod-open-shell")?;
     }
     Ok(())
 }

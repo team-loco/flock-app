@@ -15,6 +15,7 @@ pub mod gitops;
 pub mod logs;
 pub mod multilog;
 mod namespaces;
+mod no_shell;
 mod nodes;
 mod overview;
 pub mod pods;

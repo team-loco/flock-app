@@ -58,6 +58,7 @@ for cluster in "${CLUSTERS[@]}"; do
   if [[ "${cluster}" == fleet-a ]]; then
     "${kubectl[@]}" -n payments wait helmrelease/checkout-api --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=False --timeout="${WAIT_TIMEOUT}"
     "${kubectl[@]}" -n payments wait pod -l app.kubernetes.io/name=checkout-api --for=jsonpath='{.status.containerStatuses[0].state.waiting.reason}'=CrashLoopBackOff --timeout="${WAIT_TIMEOUT}"
+    "${kubectl[@]}" -n apps wait pod/no-shell --for=condition=Ready --timeout="${WAIT_TIMEOUT}"
   else
     "${kubectl[@]}" -n payments wait helmrelease/checkout-api --for=condition=Ready --timeout="${WAIT_TIMEOUT}"
     "${kubectl[@]}" -n payments rollout status deployment/checkout-api --timeout="${WAIT_TIMEOUT}"

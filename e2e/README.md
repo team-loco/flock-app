@@ -35,6 +35,7 @@ Helm installation timeouts, and crash backoff on the first run.
 | `Kustomization/flux-system/apps` | Ready; podinfo deployed into `web` | Ready; podinfo deployed into `web` | Kustomization page and inventory, Changes, GitOps grid |
 | `Kustomization/flux-system/broken-kustomization` | ArtifactFailed; nonexistent path | ArtifactFailed; nonexistent path | Flock home, Kustomization page, GitOps grid |
 | `Pod/apps/unschedulable` | Pending; FailedScheduling | Pending; FailedScheduling | Flock home, Workload/pod events |
+| `Pod/apps/no-shell` | Running `pause` with no `/bin/sh` | — | Pods terminal: no-shell state and debug container |
 
 The checkout release's only cluster-specific change is the extra invalid
 argument in `scenarios/fleet-a/checkout-api.yaml`. The chart's `extraArgs` value
