@@ -13,6 +13,7 @@ mod loco;
 mod multi_logs;
 mod pod_streams;
 mod pods;
+mod related;
 mod resources;
 mod settings;
 mod sim;
@@ -100,6 +101,7 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
                     continue;
                 }
                 workloads.handle(&command);
+                let related = related::handle(&command, &mut state);
                 if let Command::Flux(key, _, action) = &command {
                     let outcome = flux.apply(&mut state, key, *action);
                     if let Some(pending) = outcome.settle {
@@ -110,7 +112,7 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
                     let forwards_changed = simulate::forward(&mut state, &command);
                     let immediate = sim::apply_now(&mut state, &command) || forwards_changed;
                     let pending = simulate::apply(&mut state, &command);
-                    let changed = immediate || pending.is_some();
+                    let changed = immediate || pending.is_some() || related;
                     if let Some(pending) = pending {
                         schedule(&input_tx, Input::Settle(pending));
                     }

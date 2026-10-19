@@ -19,6 +19,13 @@ const SAMPLE_NAMESPACE: &str = "payments";
 const SAMPLE_DEPLOYMENT: &str = "checkout-api";
 const DEPLOYMENT: &str = "Deployment";
 const POD: &str = "Pod";
+const NAMESPACE: &str = "Namespace";
+const SAMPLE_CONFIG: &str = "checkout-api-config";
+const JOB: &str = "Job";
+const NODE: &str = "Node";
+const SAMPLE_RUNNING_JOB_NAMESPACE: &str = "ml";
+const SAMPLE_RUNNING_JOB: &str = "ml-batch-5c7f";
+const SAMPLE_NODE: &str = "ip-10-4-12-87";
 const SAMPLE_OTHER_CLUSTER: &str = "prod-eu-west";
 const SAMPLE_POD: &str = "checkout-api-7f9c6d-x2lqp";
 const SAMPLE_CONTAINER: &str = "api";
@@ -103,6 +110,29 @@ impl Preset {
         )
     }
 
+    fn object_ref(&self, kind: &str, namespace: &str, name: &str) -> ResourceRef {
+        let object = self.object_or(namespace, name);
+        ResourceRef {
+            cluster: self.cluster_or(SAMPLE_CLUSTER),
+            kind: kind.into(),
+            namespace: Some(object.namespace),
+            name: object.name,
+        }
+    }
+
+    fn cluster_object(&self, kind: &str, name: &str) -> ResourceRef {
+        let name = self
+            .object
+            .as_ref()
+            .map_or_else(|| name.to_owned(), |object| object.name.clone());
+        ResourceRef {
+            cluster: self.cluster_or(SAMPLE_CLUSTER),
+            kind: kind.into(),
+            namespace: None,
+            name,
+        }
+    }
+
     fn deployment(&self) -> ResourceRef {
         let object = self.object_or(SAMPLE_NAMESPACE, SAMPLE_DEPLOYMENT);
         ResourceRef {
@@ -125,12 +155,15 @@ pub enum Screen {
     Overview,
     Nodes,
     Namespaces,
+    Namespace,
     Events,
     Resources,
     ResourceInspector,
     Jobs,
     JobInspector,
     Kustomizations,
+    Job,
+    Node,
     Gitops,
     Compare,
     EditYaml,
@@ -175,38 +208,36 @@ impl Screen {
             Self::Namespaces => vec![sample, Command::SelectPage(Page::Namespaces)],
             Self::Events => vec![sample, Command::SelectPage(Page::Events)],
             Self::Resources => vec![sample, Command::SelectPage(Page::Deployments)],
+            Self::Namespace => {
+                let target = preset.cluster_object(NAMESPACE, SAMPLE_NAMESPACE);
+                vec![Command::OpenResource(target)]
+            }
             Self::ResourceInspector => {
-                let object = preset.object_or(SAMPLE_NAMESPACE, "checkout-api-config");
-                let target = ResourceRef {
-                    cluster,
-                    kind: "ConfigMap".into(),
-                    namespace: Some(object.namespace),
-                    name: object.name,
-                };
+                let target = preset.object_ref("ConfigMap", SAMPLE_NAMESPACE, SAMPLE_CONFIG);
+                let page = Command::SelectPage(Page::ConfigMaps);
+                vec![sample, page, Command::InspectResource(target)]
+            }
+            Self::Job => {
+                let target =
+                    preset.object_ref(JOB, SAMPLE_RUNNING_JOB_NAMESPACE, SAMPLE_RUNNING_JOB);
                 vec![Command::OpenResource(target)]
             }
             Self::Jobs => vec![sample, Command::SelectPage(Page::Jobs)],
             Self::JobInspector => {
-                let object = preset.object_or(SAMPLE_JOB_NAMESPACE, SAMPLE_JOB);
-                let target = ResourceRef {
-                    cluster,
-                    kind: ResourceKind::Job.name().into(),
-                    namespace: Some(object.namespace),
-                    name: object.name,
-                };
-                vec![Command::OpenResource(target)]
+                let job = ResourceKind::Job.name();
+                let target = preset.object_ref(job, SAMPLE_JOB_NAMESPACE, SAMPLE_JOB);
+                let page = Command::SelectPage(Page::Jobs);
+                vec![sample, page, Command::InspectResource(target)]
             }
             Self::Kustomizations => vec![sample, Command::SelectPage(Page::Kustomizations)],
+            Self::Node => {
+                let target = preset.cluster_object(NODE, SAMPLE_NODE);
+                vec![sample, Command::OpenResource(target)]
+            }
             Self::Gitops => vec![Command::SelectPage(Page::GitOps)],
             Self::Compare => vec![Command::Compare(preset.deployment())],
             Self::EditYaml => {
-                let object = preset.object_or(SAMPLE_NAMESPACE, "checkout-api-config");
-                let target = ResourceRef {
-                    cluster,
-                    kind: "ConfigMap".into(),
-                    namespace: Some(object.namespace),
-                    name: object.name,
-                };
+                let target = preset.object_ref("ConfigMap", SAMPLE_NAMESPACE, SAMPLE_CONFIG);
                 vec![Command::EditYaml(target)]
             }
             Self::ClusterSettings => vec![Command::ShowClusterSettings(cluster)],
@@ -387,6 +418,9 @@ pub fn root_view(
         Screen::Jobs => shell_view(store, screen, preset, window, cx),
         Screen::JobInspector => shell_view(store, screen, preset, window, cx),
         Screen::Kustomizations => shell_view(store, screen, preset, window, cx),
+        Screen::Namespace => shell_view(store, screen, preset, window, cx),
+        Screen::Job => shell_view(store, screen, preset, window, cx),
+        Screen::Node => shell_view(store, screen, preset, window, cx),
         Screen::AddCluster => shell_view(store, screen, preset, window, cx),
         Screen::AddClusterCheck => shell_view(store, screen, preset, window, cx),
         Screen::Gitops => shell_view(store, screen, preset, window, cx),

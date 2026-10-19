@@ -353,6 +353,7 @@ async fn benchmark_stores(context: &KubeContext, settings: &KubeSettings, cluste
             pod_rows: page == Page::Pods,
             event_limit: EVENT_LIMIT,
             yaml: &[],
+            inspected: &[],
         };
         let name = format!("kind scale {page:?} selected rebuild");
         measure(&name, || {

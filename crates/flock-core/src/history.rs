@@ -80,6 +80,13 @@ impl Location {
             .filter(|target| WorkloadKind::from_kind(&target.kind).is_some())
     }
 
+    pub fn detail(&self) -> Option<&ResourceRef> {
+        self.resource
+            .as_ref()
+            .filter(|_| !matches!(self.page, Page::Compare | Page::Logs | Page::EditYaml))
+            .filter(|target| crate::related::DETAIL_KINDS.contains(&target.kind.as_str()))
+    }
+
     pub fn commands(&self) -> Vec<Command> {
         if let Some(key) = &self.flux_object {
             return vec![Command::OpenFluxObject(key.clone())];

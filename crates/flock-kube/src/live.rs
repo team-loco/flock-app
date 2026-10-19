@@ -129,6 +129,12 @@ impl Connected {
     }
 }
 
+fn has_rows(target: &ResourceRef) -> bool {
+    flock_core::ResourceKind::ALL
+        .into_iter()
+        .any(|kind| kind.name() == target.kind)
+}
+
 struct Inspecting {
     target: ResourceRef,
     shown: Option<String>,
@@ -624,7 +630,9 @@ impl Live {
             target: target.clone(),
             shown: None,
         });
-        self.fetch_yaml();
+        if has_rows(target) {
+            self.fetch_yaml();
+        }
     }
 
     fn refresh_yaml(&mut self, changed: &ContextRef) {
@@ -1043,6 +1051,21 @@ impl Live {
         pages
     }
 
+    fn shown_yaml(&self, cluster: &ClusterId) -> Vec<&(ResourceRef, String)> {
+        self.navigations()
+            .filter_map(|navigation| navigation.yaml.as_ref())
+            .filter(|(target, _)| &target.cluster == cluster)
+            .collect()
+    }
+
+    fn inspected(&self, cluster: &ClusterId) -> Vec<&ResourceRef> {
+        self.navigations()
+            .filter_map(|navigation| navigation.inspecting.as_ref())
+            .map(|inspecting| &inspecting.target)
+            .filter(|target| &target.cluster == cluster)
+            .collect()
+    }
+
     fn snapshot(&self) -> Snapshot {
         let now = Timestamp::now();
         let mut connected = Vec::new();
@@ -1052,15 +1075,13 @@ impl Live {
         let mut pods = Vec::new();
         for cluster in self.clusters.values() {
             let viewing = self.viewing(&cluster.id);
-            let yaml: Vec<_> = self
-                .navigations()
-                .filter_map(|navigation| navigation.yaml.as_ref())
-                .filter(|(target, _)| target.cluster == cluster.id)
-                .collect();
+            let yaml = self.shown_yaml(&cluster.id);
+            let inspected = self.inspected(&cluster.id);
             let selection = viewing.map(|pod_rows| Selection {
                 pod_rows,
                 event_limit: self.settings.event_limit,
                 yaml: &yaml,
+                inspected: &inspected,
             });
             let health = self.gitops.health(&cluster.id, now);
             let built = assemble::cluster(

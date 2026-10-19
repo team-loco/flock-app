@@ -392,7 +392,7 @@ impl Shell {
         }
         self.ui_effects(&command, cx);
         self.state.apply(&command);
-        if let Command::OpenResource(target) = &command {
+        if let Some(target) = revealed(&command) {
             self.focused_screens().pages.reveal(target, cx);
         }
         self.keys.refocus |= self.state.location() != &before;
@@ -641,12 +641,33 @@ impl Shell {
         if let Some((screen, _)) = &screens.workload {
             self.sync_workload_yaml(screen, cx);
         }
+        if let Some((screen, _)) = &screens.detail {
+            self.sync_detail(screen, location, cx);
+        }
+    }
+
+    pub(super) fn sync_detail(
+        &self,
+        screen: &Entity<crate::screens::detail::DetailScreen>,
+        location: &Location,
+        cx: &mut App,
+    ) {
+        let preferences = self.preferences_of(location);
+        let snapshot = &self.state.snapshot;
+        screen.update(cx, |screen, cx| screen.set(snapshot, &preferences, cx));
     }
 
     pub(super) fn sync_workload_yaml(&self, screen: &Entity<WorkloadScreen>, cx: &mut App) {
         let target = screen.read(cx).target().clone();
-        let yaml = self.state.snapshot.yaml(&target);
-        screen.update(cx, |screen, cx| screen.set_yaml(yaml, cx));
+        let snapshot = &self.state.snapshot;
+        let yaml = snapshot.yaml(&target);
+        let related = snapshot
+            .detail(&target.cluster)
+            .and_then(|detail| detail.related(&target));
+        screen.update(cx, |screen, cx| {
+            screen.set_yaml(yaml, cx);
+            screen.set_related(related, cx);
+        });
     }
 
     pub fn filter_bar(&self, cx: &App) -> Option<Entity<FilterBar>> {
@@ -668,7 +689,10 @@ impl Shell {
         location: &Location,
         cx: &App,
     ) -> Option<Entity<FilterBar>> {
-        if location.workload().is_some() || location.flux_object.is_some() {
+        if location.workload().is_some()
+            || location.detail().is_some()
+            || location.flux_object.is_some()
+        {
             return None;
         }
         #[cfg(feature = "loco")]
@@ -820,6 +844,14 @@ impl Render for Shell {
             .child(self.tab_menu.clone())
             .children(self.add_cluster.as_ref().map(|(dialog, _)| dialog.clone()))
             .child(crate::kit::overlay_layer(cx))
+    }
+}
+
+fn revealed(command: &Command) -> Option<&flock_core::ResourceRef> {
+    match command {
+        Command::OpenResource(target) => Some(target),
+        Command::InspectResource(target) => Some(target),
+        _ => None,
     }
 }
 

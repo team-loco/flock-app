@@ -1,8 +1,11 @@
 use flock_core::cluster::Namespace;
 use flock_core::emptiness::Noun;
 use flock_core::filter::{StatusFilter, label_values};
+use flock_core::related::NAMESPACE;
 use flock_core::time::age;
-use flock_core::{ClusterDetail, ClusterSummary, Counts, Page, Status};
+use flock_core::{
+    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Page, ResourceRef, Status,
+};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
     Render, Styled, Window, div, px,
@@ -10,7 +13,7 @@ use gpui::{
 
 use super::{ListShape, ScreenEvent, empty_list};
 use crate::kit::status_symbols;
-use crate::kit::{Column, FilterBar, FilterEvent, StatusGlyph, Table, chip_label};
+use crate::kit::{Column, FilterBar, FilterEvent, StatusGlyph, Table, TableEvent, chip_label};
 use crate::theme::{ActiveTheme, FONT_MONO, GLYPH_SLOT, Palette, SPACE_4};
 
 const NAME_WEIGHT: f32 = 1.4;
@@ -22,7 +25,17 @@ const CPU_WIDTH: Pixels = px(84.);
 const MEMORY_WIDTH: Pixels = px(84.);
 const AGE_WIDTH: Pixels = px(44.);
 
+fn namespace_ref((name, cluster): (String, ClusterId)) -> ResourceRef {
+    ResourceRef {
+        cluster,
+        kind: NAMESPACE.to_owned(),
+        namespace: None,
+        name,
+    }
+}
+
 pub struct NamespacesScreen {
+    cluster: Option<ClusterId>,
     cluster_name: String,
     shown: usize,
     namespaces: Vec<Namespace>,
@@ -41,12 +54,23 @@ impl NamespacesScreen {
         let table = cx.new(|cx| {
             Table::new("namespaces", columns(), cx).row_key(|n: &Namespace| n.name.clone().into())
         });
+        cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
+            let TableEvent::Opened(ix) = *event else {
+                return;
+            };
+            let name = table.read(cx).row(ix).map(|n| n.name.clone());
+            if let Some(target) = name.zip(this.cluster.clone()).map(namespace_ref) {
+                cx.emit(ScreenEvent::Command(Command::OpenResource(target)));
+            }
+        })
+        .detach();
         let filter = cx.new(|cx| FilterBar::new("namespace-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })
         .detach();
         Self {
+            cluster: None,
             cluster_name: String::new(),
             shown: 0,
             namespaces: Vec::new(),
@@ -102,6 +126,7 @@ impl NamespacesScreen {
         detail: &ClusterDetail,
         cx: &mut Context<Self>,
     ) {
+        self.cluster = Some(cluster.id.clone());
         self.cluster_name.clone_from(&cluster.name);
         let scope = cluster.id.as_str().to_owned();
         self.table

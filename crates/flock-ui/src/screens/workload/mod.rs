@@ -3,7 +3,10 @@ mod dock;
 
 pub(crate) use dock::kit_line;
 
+use std::rc::Rc;
+
 use flock_core::palette::COMPARE_KEY;
+use flock_core::related::Related;
 use flock_core::watch::WATCH_SYNC_TIMEOUT;
 use flock_core::workload::{ContainerSpec, EnvVar, Pod, Revision, short_image, short_pod_name};
 use flock_core::{Command, LogTarget, ResourceRef, Seen, Sink, Status, Workload};
@@ -22,6 +25,7 @@ use crate::kit::{
     TableEvent, Terminal, TextFieldState, Toast, Width, confirm, min_row_width, slide_in, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
+use crate::screens::related::{OnPick, Pick, page_sections};
 use crate::screens::{EDIT_YAML, FullView, edit_item, full_view_link};
 use crate::theme::{
     ActiveTheme, FIELD_LABEL, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE, RULE, SPACE_1,
@@ -111,6 +115,7 @@ pub struct WorkloadScreen {
     terminal: Entity<Terminal>,
     exec: Option<dock::ExecSession>,
     yaml: Option<String>,
+    related: Option<Related>,
     showing_yaml: bool,
     entrance: Entrance,
     focus: FocusHandle,
@@ -194,6 +199,7 @@ impl WorkloadScreen {
             terminal,
             exec: None,
             yaml: None,
+            related: None,
             showing_yaml: false,
             entrance: Entrance::default(),
             focus,
@@ -259,6 +265,35 @@ impl WorkloadScreen {
             self.yaml = yaml.map(str::to_owned);
             cx.notify();
         }
+    }
+
+    pub fn set_related(&mut self, related: Option<&Related>, cx: &mut Context<Self>) {
+        if related.is_some() && self.related.as_ref() != related {
+            self.related = related.cloned();
+            cx.notify();
+        }
+    }
+
+    fn related(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let Some(related) = &self.related else {
+            return Vec::new();
+        };
+        let shown = Related {
+            target: related.target.clone(),
+            groups: related
+                .groups
+                .iter()
+                .filter(|group| group.title != PODS)
+                .cloned()
+                .collect(),
+        };
+        let screen = cx.weak_entity();
+        let pick: OnPick = Rc::new(move |pick, _, cx| {
+            if let Pick::Object(target) = pick {
+                let _ = screen.update(cx, |_, cx| cx.emit(Command::OpenResource(target)));
+            }
+        });
+        page_sections(&shown, &pick, cx)
     }
 
     fn toggle_yaml(&mut self, cx: &mut Context<Self>) {
@@ -1070,7 +1105,8 @@ impl Render for WorkloadScreen {
             .overflow_y_scroll()
             .child(self.header(&workload, cx))
             .child(self.pods_section(&workload))
-            .child(Self::history(&workload, cx));
+            .child(Self::history(&workload, cx))
+            .children(self.related(cx));
         let shown = if self.showing_yaml {
             YAML_LABEL
         } else {

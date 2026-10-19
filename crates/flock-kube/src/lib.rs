@@ -30,6 +30,7 @@ pub mod pods;
 pub mod probe;
 pub mod problems;
 pub mod provider;
+pub mod related;
 pub mod resources;
 pub mod settings;
 pub mod shell_env;

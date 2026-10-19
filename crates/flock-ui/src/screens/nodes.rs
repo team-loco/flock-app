@@ -1,9 +1,12 @@
+use std::rc::Rc;
+
 use flock_core::emptiness::Noun;
 use flock_core::events::Event;
 use flock_core::filter::{StatusFilter, label_values};
 use flock_core::nodes::{Node, NodeSummary, Usage};
 use flock_core::overview::{Capacity, Commitment, percent};
 use flock_core::pods::PodEvent;
+use flock_core::related::Related;
 use flock_core::time::age;
 use flock_core::units::{CPU_UNIT, MEMORY_UNIT};
 use flock_core::{
@@ -21,6 +24,7 @@ use crate::kit::{
     Presence, SectionLabel, SelectableText, StatusText, Table, TableEvent, WHATS_WRONG, WhatsWrong,
     chip_label, confirm, reason_cell, reason_tooltip, slide_in, slide_out,
 };
+use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR_NODE, Palette, REASON_MIN, REASON_WEIGHT, SPACE_2, SPACE_3,
@@ -53,9 +57,19 @@ pub struct NodesScreen {
     events: Vec<Event>,
     confirm_destructive: bool,
     selected: Option<String>,
+    related: Vec<Related>,
     table: Entity<Table<Node>>,
     filter: Entity<FilterBar>,
     presence: Presence<Node>,
+}
+
+fn node_ref(cluster: &ClusterId, name: &str) -> ResourceRef {
+    ResourceRef {
+        cluster: cluster.clone(),
+        kind: NODE_KIND.to_owned(),
+        namespace: None,
+        name: name.to_owned(),
+    }
 }
 
 fn presence(screen: &mut NodesScreen) -> &mut Presence<Node> {
@@ -109,6 +123,7 @@ impl NodesScreen {
             events: Vec::new(),
             confirm_destructive: true,
             selected: None,
+            related: Vec::new(),
             table,
             filter,
             presence: Presence::default(),
@@ -131,6 +146,10 @@ impl NodesScreen {
         }
         if self.events != detail.events {
             self.events.clone_from(&detail.events);
+            cx.notify();
+        }
+        if self.related != detail.related {
+            self.related.clone_from(&detail.related);
             cx.notify();
         }
         if self.nodes == detail.nodes {
@@ -194,6 +213,9 @@ impl NodesScreen {
     }
 
     pub fn reveal(&mut self, cluster: ClusterId, name: String, cx: &mut Context<Self>) {
+        if self.cluster.as_ref() == Some(&cluster) && self.selected.as_ref() == Some(&name) {
+            return;
+        }
         self.cluster = Some(cluster);
         self.selected = Some(name);
         self.select_in_table(cx);
@@ -223,6 +245,11 @@ impl NodesScreen {
 
     fn select(&mut self, name: Option<String>, cx: &mut Context<Self>) {
         self.selected = name;
+        let target = self.selected.as_ref().zip(self.cluster.as_ref());
+        if let Some((name, cluster)) = target {
+            let command = Command::InspectResource(node_ref(cluster, name));
+            cx.emit(ScreenEvent::Command(command));
+        }
         cx.notify();
     }
 
@@ -285,6 +312,18 @@ impl NodesScreen {
                 .into_iter()
                 .map(PodEvent::from)
                 .collect();
+        let screen = cx.weak_entity();
+        let pick: OnPick = Rc::new(move |pick, _, cx| {
+            if let Pick::Object(target) = pick {
+                let command = ScreenEvent::Command(Command::OpenResource(target));
+                let _ = screen.update(cx, |_, cx| cx.emit(command));
+            }
+        });
+        let related = self.cluster.as_ref().and_then(|cluster| {
+            let target = node_ref(cluster, &node.name);
+            self.related.iter().find(|related| related.target == target)
+        });
+        let related = inspector_section(related, &pick, cx);
         let mut inspector = Inspector::new(INSPECTOR_ID, node.name.clone())
             .mono()
             .width(INSPECTOR_NODE)
@@ -299,6 +338,7 @@ impl NodesScreen {
             .section(Some(EVENTS), EventList::new(events))
             .section(None, facts.into_any_element())
             .section(Some("Capacity"), capacity.into_any_element())
+            .section(Some(RELATED), related)
             .section(Some("Taints"), label_list(&node.taints, palette))
             .section(Some("Labels"), label_list(&node.labels, palette))
             .into_any_element()

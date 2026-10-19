@@ -13,6 +13,7 @@ use super::Shell;
 use crate::assets::GEAR;
 use crate::kit::{Button, EmptyState, IconButton, Skeleton, status_symbols};
 use crate::screens::add_cluster::empty_flock;
+use crate::screens::detail::DetailScreen;
 use crate::screens::edit::EditScreen;
 use crate::screens::logs::LogsScreen;
 use crate::screens::multilog::MultiLogsScreen;
@@ -64,6 +65,9 @@ impl Shell {
             return fill(screen);
         }
         if let Some(screen) = self.workload_screen(ix, &location, window, cx) {
+            return fill(screen);
+        }
+        if let Some(screen) = self.detail_screen(ix, &location, cx) {
             return fill(screen);
         }
         let palette = *cx.palette();
@@ -167,6 +171,37 @@ impl Shell {
         });
         self.sync_workload_yaml(&screen, cx);
         self.screens_mut(ix).workload = Some((screen.clone(), subscription));
+        Some(screen)
+    }
+
+    fn detail_screen(
+        &mut self,
+        ix: usize,
+        location: &Location,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<DetailScreen>> {
+        let pane = self.screens(ix).pane;
+        let Some(target) = location.detail().cloned() else {
+            self.screens_mut(ix).detail = None;
+            return None;
+        };
+        let current = self
+            .screens(ix)
+            .detail
+            .as_ref()
+            .filter(|(screen, _)| screen.read(cx).target() == &target)
+            .map(|(screen, _)| screen.clone());
+        if let Some(screen) = current {
+            return Some(screen);
+        }
+        let screen = cx.new(|_| DetailScreen::new(target));
+        let navigation = self.screens(ix).navigation.clone();
+        let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
+            shell.pane_command(pane, command.clone(), cx);
+        });
+        screen.update(cx, |screen, _| screen.navigation = Some(navigation));
+        self.sync_detail(&screen, location, cx);
+        self.screens_mut(ix).detail = Some((screen.clone(), subscription));
         Some(screen)
     }
 

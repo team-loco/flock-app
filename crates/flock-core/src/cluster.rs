@@ -5,9 +5,10 @@ use crate::events::{self, Event, recent_warnings};
 use crate::filter::TextFilter;
 use crate::nodes::{Node, NodeSummary};
 use crate::overview::{Capacity, Overview, WorkloadHealth};
+use crate::related::Related;
 use crate::resources::{Resource, ResourceKind};
 use crate::units::{self, CPU_UNIT, MEMORY_UNIT, NOT_MEASURED, WAITING_FOR_METRICS};
-use crate::{Counts, Page, Status};
+use crate::{Counts, Page, ResourceRef, Status};
 
 const CPU_NOTE: &str = "CPU in use by the pods in this namespace";
 const MEMORY_NOTE: &str = "Memory in use by the pods in this namespace";
@@ -65,6 +66,7 @@ pub struct ClusterDetail {
     pub namespaces: Vec<Namespace>,
     pub events: Vec<Event>,
     pub resources: BTreeMap<ResourceKind, Vec<Resource>>,
+    pub related: Vec<Related>,
 }
 
 impl ClusterDetail {
@@ -90,6 +92,12 @@ impl ClusterDetail {
             requests: self.overview.memory.requests,
             limits: self.overview.memory.limits,
         }
+    }
+
+    pub fn related(&self, target: &ResourceRef) -> Option<&Related> {
+        self.related
+            .iter()
+            .find(|related| &related.target == target)
     }
 
     pub fn resources(&self, kind: ResourceKind) -> &[Resource] {
