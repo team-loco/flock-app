@@ -8,6 +8,7 @@ pub mod edit;
 mod event_inspector;
 mod events;
 pub mod flock;
+mod flux_events;
 mod flux_graph;
 mod flux_list;
 pub(crate) mod flux_object;
@@ -35,6 +36,7 @@ use gpui::{
 use crate::kit::{EmptyState, FilterBar, Link, MenuItem, Select, ShowAll};
 
 pub use events::EventsScreen;
+pub use flux_events::FluxEventsScreen;
 pub use flux_graph::FluxGraphScreen;
 pub use flux_list::FluxListScreen;
 pub use namespaces::NamespacesScreen;

@@ -39,6 +39,7 @@ pub struct Snapshot {
     pub pages: BTreeMap<ClusterId, BTreeMap<Page, WatchState>>,
     pub gitops: GitOps,
     pub flux: Vec<FluxObject>,
+    pub flux_events: Vec<crate::events::ClusterEvent>,
     #[cfg(feature = "loco")]
     pub loco: BTreeMap<ClusterId, crate::loco::LocoCluster>,
     pub comparisons: Vec<Comparison>,
@@ -213,6 +214,7 @@ pub(crate) mod tests {
             pages: BTreeMap::new(),
             gitops: GitOps::default(),
             flux: Vec::new(),
+            flux_events: Vec::new(),
             #[cfg(feature = "loco")]
             loco: BTreeMap::new(),
             comparisons: Vec::new(),

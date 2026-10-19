@@ -2,7 +2,16 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::filter::TextFilter;
-use crate::{ClusterId, Counts, ResourceRef, Status};
+use crate::{ClusterId, Command, Counts, FluxKey, FluxKind, ResourceRef, Status};
+
+pub const FLUX_EVENT_KINDS: [&str; 6] = [
+    "Kustomization",
+    "HelmRelease",
+    "GitRepository",
+    "HelmRepository",
+    "OCIRepository",
+    "HelmChart",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
@@ -197,6 +206,89 @@ pub fn filter_events(events: &[Event], filter: EventFilter, query: &TextFilter) 
     warnings_first(&kept)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClusterEvent {
+    pub cluster: ClusterId,
+    pub cluster_name: String,
+    pub event: Event,
+}
+
+impl ClusterEvent {
+    pub fn kind(&self) -> &str {
+        &self.event.details.kind
+    }
+
+    pub fn name(&self) -> &str {
+        self.event
+            .object
+            .split_once('/')
+            .map_or(self.event.object.as_str(), |(_, name)| name)
+    }
+
+    pub fn key(&self) -> String {
+        format!("{}/{}", self.cluster.as_str(), self.event.key())
+    }
+
+    pub fn open(&self) -> Option<Command> {
+        let target = self.event.target(&self.cluster)?;
+        let kind = FluxKind::from_label(&target.kind)?;
+        let namespace = target.namespace?;
+        let key = FluxKey::new(self.cluster.as_str(), kind, namespace, target.name);
+        Some(Command::OpenFluxObject(key))
+    }
+
+    fn matches(&self, filter: EventFilter, query: &TextFilter) -> bool {
+        let event = &self.event;
+        let fields = [
+            self.cluster_name.as_str(),
+            self.kind(),
+            event.reason.as_str(),
+            self.name(),
+            event.message.as_str(),
+            event.namespace.as_deref().unwrap_or_default(),
+        ];
+        filter.keeps(event)
+            && query.matches_labeled(event.namespace.as_deref(), &event.labels, &fields)
+    }
+}
+
+pub fn newest_first(events: &mut [ClusterEvent]) {
+    events.sort_by(|a, b| {
+        a.event
+            .age
+            .cmp(&b.event.age)
+            .then_with(|| a.cluster.cmp(&b.cluster))
+            .then_with(|| a.event.key().cmp(&b.event.key()))
+    });
+}
+
+pub fn filter_cluster_events(
+    events: &[ClusterEvent],
+    filter: EventFilter,
+    query: &TextFilter,
+) -> Vec<ClusterEvent> {
+    let mut kept: Vec<ClusterEvent> = events
+        .iter()
+        .filter(|event| event.matches(filter, query))
+        .cloned()
+        .collect();
+    newest_first(&mut kept);
+    kept
+}
+
+pub fn cluster_filter_counts(
+    events: &[ClusterEvent],
+    query: &TextFilter,
+) -> Vec<(EventFilter, usize)> {
+    EventFilter::ALL
+        .iter()
+        .map(|filter| {
+            let n = events.iter().filter(|e| e.matches(*filter, query)).count();
+            (*filter, n)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,5 +449,61 @@ mod tests {
             )),
             [""; 0]
         );
+    }
+
+    fn flux_event(cluster: &str, kind: &str, reason: &str, minutes: u64) -> ClusterEvent {
+        let mut row = event(Status::Ok, reason, minutes);
+        row.object = format!("{}/apps", kind.to_lowercase());
+        row.namespace = Some("flux-system".into());
+        row.details.kind = kind.into();
+        row.details.uid = format!("{cluster}-{reason}");
+        ClusterEvent {
+            cluster: ClusterId::new(cluster),
+            cluster_name: cluster.into(),
+            event: row,
+        }
+    }
+
+    #[test]
+    fn flux_events_read_newest_first_and_filter_by_cluster_kind_and_warning() {
+        let mut failing = flux_event("west", "HelmRelease", "UpgradeFailed", 2);
+        failing.event.status = Status::Err;
+        let rows = vec![
+            flux_event("east", "Kustomization", "ReconciliationSucceeded", 9),
+            failing,
+            flux_event("east", "GitRepository", "NewArtifact", 1),
+        ];
+        let all = filter_cluster_events(&rows, EventFilter::All, &TextFilter::default());
+        let reasons: Vec<&str> = all.iter().map(|e| e.event.reason.as_str()).collect();
+        assert_eq!(
+            reasons,
+            ["NewArtifact", "UpgradeFailed", "ReconciliationSucceeded"]
+        );
+        let west = filter_cluster_events(&rows, EventFilter::All, &TextFilter::parse("west"));
+        assert_eq!(west.len(), 1);
+        let kind = TextFilter::parse("kustomization");
+        assert_eq!(
+            filter_cluster_events(&rows, EventFilter::All, &kind).len(),
+            1
+        );
+        let warnings = filter_cluster_events(&rows, EventFilter::Warnings, &TextFilter::default());
+        assert_eq!(warnings.len(), 1);
+        let namespace = TextFilter::parse("ns:flux-system ");
+        assert_eq!(
+            filter_cluster_events(&rows, EventFilter::All, &namespace).len(),
+            3
+        );
+        let counts = cluster_filter_counts(&rows, &TextFilter::default());
+        assert_eq!(counts[1], (EventFilter::Warnings, 1));
+    }
+
+    #[test]
+    fn flux_event_rows_open_their_flux_object() {
+        let row = flux_event("east", "Kustomization", "ReconciliationSucceeded", 1);
+        let key = FluxKey::new("east", FluxKind::Kustomization, "flux-system", "apps");
+        assert_eq!(row.open(), Some(Command::OpenFluxObject(key)));
+        let chart = flux_event("east", "HelmChart", "ChartPullSucceeded", 1);
+        assert_eq!(chart.open(), None);
+        assert_eq!(chart.name(), "apps");
     }
 }

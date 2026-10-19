@@ -3099,3 +3099,21 @@ fn escape_clears_the_graph_selection() -> anyhow::Result<()> {
     assert!(ui.bounds("flux-graph-compare").is_none());
     Ok(())
 }
+
+#[test]
+fn flux_events_filter_by_cluster_and_open_their_object() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::FluxEvents)?;
+    assert_eq!(ui.state().location().page, Page::FluxEvents);
+    assert!(ui.bounds("flux-events-row-8").is_some());
+    ui.press("/")?;
+    ui.type_text("staging")?;
+    assert!(ui.bounds("flux-events-row-1").is_some());
+    assert!(ui.bounds("flux-events-row-2").is_none());
+    ui.press("escape")?;
+    ui.click("flux-events-row-0")?;
+    assert_eq!(
+        opened_flux(&ui),
+        Some((flock_core::FluxKind::Kustomization, "apps-payments".into()))
+    );
+    Ok(())
+}

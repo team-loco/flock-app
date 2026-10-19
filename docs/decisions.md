@@ -342,3 +342,11 @@ Settled; change only with a new entry that says why.
     (or right-click) select one, Enter opens it, Escape clears it. A selection shows the same
     object (kind, namespace, name) on every cluster that has it side by side, with values that
     differ from this cluster's in the warning colour; a cell opens that cluster's object.
+41. **Flux events across clusters** (#232): Flock home gains Flux events, every Kubernetes event
+    whose involvedObject is a Flux kind (Kustomization, HelmRelease, GitRepository, HelmRepository,
+    OCIRepository, HelmChart) in a `toolkit.fluxcd.io` API group, from every connected cluster,
+    newest first. It reads the always-on event stores (decision 31), so it updates live and costs
+    nothing while no pane shows it: the live backend fills `Snapshot::flux_events` only while some
+    pane is on the page, capped at `event_limit`. The usual filter bar filters it: words match
+    cluster, kind, object, reason and message, `ns:` the namespace, and the Warnings chip keeps
+    warnings only. A row opens its Flux object; HelmChart rows have no page and stay unlinked.
