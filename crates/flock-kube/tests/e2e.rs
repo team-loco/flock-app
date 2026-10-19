@@ -22,11 +22,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 mod common;
 
 use common::kubeconfig::kind_only_home;
+use common::scratch::ScratchNamespace;
 use common::{WAIT, eventually};
 
 const E2E_VAR: &str = "FLOCK_E2E";
 const CONTEXT: &str = "kind-fleet-a";
-const NAMESPACE: &str = "default";
 const POD: &str = "flock-kube-e2e";
 const CONFIGMAP: &str = "flock-kube-e2e";
 const IMAGE: &str = "busybox:1.37";
@@ -69,7 +69,7 @@ fn test_pod() -> Pod {
     let Ok(pod) = serde_json::from_value(json!({
         "apiVersion": "v1",
         "kind": "Pod",
-        "metadata": { "name": POD, "namespace": NAMESPACE },
+        "metadata": { "name": POD },
         "spec": {
             "terminationGracePeriodSeconds": 0,
             "containers": [{
@@ -124,11 +124,11 @@ async fn checks_report_ready_for_kind() {
     assert!(report.facts.version.is_some());
 }
 
-async fn recreate_pod(handle: &ClusterHandle) {
+async fn recreate_pod(handle: &ClusterHandle, namespace: &str) {
     let Ok(client) = handle.client() else {
         panic!("client after connect");
     };
-    let pod_api: Api<Pod> = Api::namespaced(client, NAMESPACE);
+    let pod_api: Api<Pod> = Api::namespaced(client, namespace);
     let _ = pod_api.delete(POD, &DeleteParams::default()).await;
     eventually(
         "old pod deleted",
@@ -141,9 +141,9 @@ async fn recreate_pod(handle: &ClusterHandle) {
     wait_running(handle).await;
 }
 
-async fn check_logs(handle: &ClusterHandle) {
+async fn check_logs(handle: &ClusterHandle, namespace: &str) {
     let request = LogRequest {
-        namespace: NAMESPACE.to_owned(),
+        namespace: namespace.to_owned(),
         pod: POD.to_owned(),
         tail_lines: Some(10),
         ..LogRequest::default()
@@ -158,9 +158,9 @@ async fn check_logs(handle: &ClusterHandle) {
     );
 }
 
-async fn check_exec(handle: &ClusterHandle) {
+async fn check_exec(handle: &ClusterHandle, namespace: &str) {
     let exec = ExecRequest {
-        namespace: NAMESPACE.to_owned(),
+        namespace: namespace.to_owned(),
         pod: POD.to_owned(),
         container: None,
         command: vec!["echo".to_owned(), "flock-exec".to_owned()],
@@ -178,8 +178,8 @@ async fn check_exec(handle: &ClusterHandle) {
     assert!(matches!(exit, Ok(Ok(ExecExit::Success))), "{exit:?}");
 }
 
-async fn check_port_forward(handle: &ClusterHandle) {
-    let Ok(forward) = handle.port_forward(NAMESPACE, POD, HTTP_PORT, 0).await else {
+async fn check_port_forward(handle: &ClusterHandle, namespace: &str) {
+    let Ok(forward) = handle.port_forward(namespace, POD, HTTP_PORT, 0).await else {
         panic!("port-forward");
     };
     assert_eq!(handle.port_forwards(), vec![forward.clone()]);
@@ -195,8 +195,8 @@ async fn check_port_forward(handle: &ClusterHandle) {
     assert_eq!(handle.port_forwards(), Vec::new());
 }
 
-async fn check_patch_yaml_apply(handle: &ClusterHandle) {
-    let target = object_ref::<Pod>(Some(NAMESPACE), POD);
+async fn check_patch_yaml_apply(handle: &ClusterHandle, namespace: &str) {
+    let target = object_ref::<Pod>(Some(namespace), POD);
     let patch = PatchBody::Merge(json!({ "metadata": { "labels": { "flock-e2e": "patched" } } }));
     let Ok(patched) = handle.patch(&target, patch).await else {
         panic!("patch");
@@ -212,11 +212,11 @@ async fn check_patch_yaml_apply(handle: &ClusterHandle) {
     assert!(!yaml.contains("managedFields"));
 
     let manifest = format!(
-        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {CONFIGMAP}\n  namespace: {NAMESPACE}\ndata:\n  key: value\n"
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {CONFIGMAP}\n  namespace: {namespace}\ndata:\n  key: value\n"
     );
     let applied = handle.apply_yaml(&manifest, false).await;
     assert!(applied.is_ok(), "{applied:?}");
-    let configmap = object_ref::<ConfigMap>(Some(NAMESPACE), CONFIGMAP);
+    let configmap = object_ref::<ConfigMap>(Some(namespace), CONFIGMAP);
     assert!(
         handle
             .delete(&configmap, PropagationPolicy::Background, None)
@@ -243,9 +243,14 @@ async fn watch_logs_exec_forward_patch() {
     let runtime = tokio::runtime::Handle::current();
     let (manager, events) = ClusterManager::new(runtime, KubeSettings::default(), env);
     let handle = connected(&manager, context).await;
+    let Ok(client) = handle.client() else {
+        panic!("client after connect");
+    };
+    let scratch = ScratchNamespace::create(&[(CONTEXT, &client)]).await;
+    let namespace = scratch.name();
     let pods = handle.subscribe(WatchKind::Pods);
     let configmaps = handle.subscribe(WatchKind::ConfigMaps);
-    recreate_pod(&handle).await;
+    recreate_pod(&handle, namespace).await;
 
     let mut saw_pods_changed = false;
     while let Ok(event) = events.try_recv() {
@@ -256,10 +261,10 @@ async fn watch_logs_exec_forward_patch() {
     assert!(saw_pods_changed);
     assert_ne!(handle.objects::<PartialObjectMeta<ConfigMap>>().len(), 0);
 
-    check_logs(&handle).await;
-    check_exec(&handle).await;
-    check_port_forward(&handle).await;
-    check_patch_yaml_apply(&handle).await;
+    check_logs(&handle, namespace).await;
+    check_exec(&handle, namespace).await;
+    check_port_forward(&handle, namespace).await;
+    check_patch_yaml_apply(&handle, namespace).await;
 
     drop(pods);
     drop(configmaps);
@@ -529,22 +534,23 @@ fn live_utilization_has_hour_samples_and_six_hour_local_history() {
 
 const EDIT_CONFIGMAP: &str = "flock-edit-e2e";
 
-fn edit_target() -> flock_core::ResourceRef {
+fn edit_target(namespace: &str) -> flock_core::ResourceRef {
     flock_core::ResourceRef {
         cluster: ClusterId::new(CONTEXT),
         kind: "ConfigMap".into(),
-        namespace: Some(NAMESPACE.into()),
+        namespace: Some(namespace.into()),
         name: EDIT_CONFIGMAP.into(),
     }
 }
 
 async fn edit(
     handle: &ClusterHandle,
+    namespace: &str,
     step: flock_core::edit::EditStep,
 ) -> flock_core::edit::EditEvent {
     let (sink, events) = flock_core::Sink::channel();
     let request = flock_core::edit::EditRequest {
-        target: edit_target(),
+        target: edit_target(namespace),
         step,
         sink,
     };
@@ -555,8 +561,13 @@ async fn edit(
     event
 }
 
-async fn loaded(handle: &ClusterHandle) -> flock_core::edit::Live {
-    let event = edit(handle, flock_core::edit::EditStep::Load { reveal: false }).await;
+async fn loaded(handle: &ClusterHandle, namespace: &str) -> flock_core::edit::Live {
+    let event = edit(
+        handle,
+        namespace,
+        flock_core::edit::EditStep::Load { reveal: false },
+    )
+    .await;
     let flock_core::edit::EditEvent::Loaded(live) = event else {
         panic!("{event:?}");
     };
@@ -569,11 +580,15 @@ async fn remove_edit_configmap(configmaps: &Api<ConfigMap>) {
         .await;
 }
 
-async fn server_refuses_a_stale_apply(configmaps: &Api<ConfigMap>, base: &flock_core::edit::Live) {
+async fn server_refuses_a_stale_apply(
+    configmaps: &Api<ConfigMap>,
+    namespace: &str,
+    base: &flock_core::edit::Live,
+) {
     let mut outdated = json!({
         "apiVersion": "v1",
         "kind": "ConfigMap",
-        "metadata": { "name": EDIT_CONFIGMAP, "namespace": NAMESPACE, "resourceVersion": base.resource_version },
+        "metadata": { "name": EDIT_CONFIGMAP, "namespace": namespace, "resourceVersion": base.resource_version },
         "data": { "level": "stale" }
     });
     outdated["metadata"]["uid"] = json!(base.uid.as_str());
@@ -604,10 +619,12 @@ async fn edit_yaml_reviews_applies_and_rebases_a_concurrent_edit() {
     let Ok(client) = handle.client() else {
         panic!("client");
     };
-    let configmaps: Api<ConfigMap> = Api::namespaced(client, NAMESPACE);
+    let scratch = ScratchNamespace::create(&[(CONTEXT, &client)]).await;
+    let namespace = scratch.name();
+    let configmaps: Api<ConfigMap> = Api::namespaced(client, namespace);
     remove_edit_configmap(&configmaps).await;
     let Ok(scratch) = serde_json::from_value::<ConfigMap>(json!({
-        "metadata": { "name": EDIT_CONFIGMAP, "namespace": NAMESPACE },
+        "metadata": { "name": EDIT_CONFIGMAP },
         "data": { "level": "info" }
     })) else {
         panic!("configmap fixture");
@@ -619,13 +636,13 @@ async fn edit_yaml_reviews_applies_and_rebases_a_concurrent_edit() {
             .is_ok()
     );
 
-    let base = loaded(&handle).await;
+    let base = loaded(&handle, namespace).await;
     assert!(!base.text.contains("managedFields"), "{}", base.text);
     let draft = Draft {
         text: base.text.replace("level: info", "level: debug"),
         base: base.clone(),
     };
-    let reviewed = edit(&handle, EditStep::Review(draft.clone())).await;
+    let reviewed = edit(&handle, namespace, EditStep::Review(draft.clone())).await;
     let EditEvent::Reviewed(lines) = reviewed else {
         panic!("{reviewed:?}");
     };
@@ -637,7 +654,7 @@ async fn edit_yaml_reviews_applies_and_rebases_a_concurrent_edit() {
         .and_then(|data| data.get("level").cloned());
     assert_eq!(level.as_deref(), Some("info"));
 
-    let applied = edit(&handle, EditStep::Apply(draft)).await;
+    let applied = edit(&handle, namespace, EditStep::Apply(draft)).await;
     let EditEvent::Applied(after) = applied else {
         panic!("{applied:?}");
     };
@@ -653,9 +670,9 @@ async fn edit_yaml_reviews_applies_and_rebases_a_concurrent_edit() {
         base: after.clone(),
     };
     let concurrent = PatchBody::Merge(json!({ "data": { "owner": "someone-else" } }));
-    let target = object_ref::<ConfigMap>(Some(NAMESPACE), EDIT_CONFIGMAP);
+    let target = object_ref::<ConfigMap>(Some(namespace), EDIT_CONFIGMAP);
     assert!(handle.patch(&target, concurrent).await.is_ok());
-    let conflicted = edit(&handle, EditStep::Apply(stale)).await;
+    let conflicted = edit(&handle, namespace, EditStep::Apply(stale)).await;
     let EditEvent::Conflict(conflict) = conflicted else {
         panic!("{conflicted:?}");
     };
@@ -672,7 +689,7 @@ async fn edit_yaml_reviews_applies_and_rebases_a_concurrent_edit() {
         text: conflict.rebased.text.clone(),
         base: conflict.live.clone(),
     };
-    let reapplied = edit(&handle, EditStep::Apply(rebased)).await;
+    let reapplied = edit(&handle, namespace, EditStep::Apply(rebased)).await;
     assert!(matches!(reapplied, EditEvent::Applied(_)), "{reapplied:?}");
     let Ok(stored) = configmaps.get(EDIT_CONFIGMAP).await else {
         panic!("configmap");
@@ -681,7 +698,7 @@ async fn edit_yaml_reviews_applies_and_rebases_a_concurrent_edit() {
     assert_eq!(data.get("level").map(String::as_str), Some("warn"));
     assert_eq!(data.get("owner").map(String::as_str), Some("someone-else"));
 
-    server_refuses_a_stale_apply(&configmaps, &base).await;
+    server_refuses_a_stale_apply(&configmaps, namespace, &base).await;
 
     remove_edit_configmap(&configmaps).await;
 }

@@ -1,4 +1,5 @@
 pub mod kubeconfig;
+pub mod scratch;
 
 use std::fmt::Debug;
 use std::time::Duration;
