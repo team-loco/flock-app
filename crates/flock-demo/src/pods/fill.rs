@@ -4,7 +4,10 @@ use std::time::Duration;
 use flock_core::pods::{Container, ContainerState, Pod, PodPhase, Qos, Usage};
 use flock_core::{ClusterId, Status, Uid};
 
-use super::{CLUSTER, CRASH_LOOP, DAY, HOUR, RUNNING, conditions, owner, running, suffix, volumes};
+use super::{
+    CLUSTER, CRASH_LOOP, DAY, HOUR, RUNNING, conditions, owner, running, suffix, template_hash,
+    volumes,
+};
 
 const NODE_DOMAIN: &str = ".ec2.internal";
 const STATEFUL_SET: &str = "StatefulSet";
@@ -457,6 +460,13 @@ fn container(group: &Group) -> Container {
     }
 }
 
+fn labels(group: &Group, app: &str) -> BTreeMap<String, String> {
+    let app = ("app".to_owned(), app.to_owned());
+    std::iter::once(app)
+        .chain(template_hash(group.kind, group.owner))
+        .collect()
+}
+
 fn filler(group: &Group, replica: u32, index: u32, node: Option<String>) -> Pod {
     let (phase, status, reason) = match group.health {
         Health::Running => (PodPhase::Running, Status::Ok, RUNNING),
@@ -493,7 +503,7 @@ fn filler(group: &Group, replica: u32, index: u32, node: Option<String>) -> Pod 
         owner: Some(owner(group.kind, group.namespace, group.owner)),
         qos: Qos::Burstable,
         age: Duration::from_secs(group.age),
-        labels: BTreeMap::from([("app".to_owned(), app.to_owned())]),
+        labels: labels(group, app),
         containers: vec![container(group)],
         usage,
         conditions: Vec::new(),

@@ -113,3 +113,4 @@ Spec column points at `design/`.
 | HIST1 | history entries and saved tabs carry the inspected object, so Back and Forward reopen a list's inspector (#281) | claude | history-keeps-inspector | done |
 | CRD301 | Custom resources: one sidebar row opening a definitions page; Flux and Loco kinds open their own pages (#301) | claude | crd-definitions-page | done |
 | CHART298 | Utilization chart: centred empty state without grid or axes, wording says why the window is empty, unclipped x labels (#298) | claude | utilization-empty-state | done |
+| WU1 | Pods v2: phase filter, Owner/Ready/Node/CPU/Memory columns, container card with requests, limits, probes and last termination | claude | pods-v2 | done |

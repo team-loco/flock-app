@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn pod_nav_counts_come_from_the_pod_rows() {
-        use flock_core::pods::{PodFilter, filter_counts};
+        use flock_core::pods::{PodFilter, failing, filter_counts};
         let snapshot = snapshot();
         let cluster = ClusterId::new(PROD_US_EAST);
         let nav = snapshot
@@ -386,12 +386,13 @@ mod tests {
         let counts = filter_counts(&rows);
         let phases = snapshot.details.get(&cluster).map(|d| d.overview.pods);
         let phases = phases.map(|p| (p.running, p.pending, p.failing));
-        let expected = [
-            (PodFilter::Running, 398),
-            (PodFilter::Pending, 9),
-            (PodFilter::Failing, 5),
-        ];
-        assert_eq!(counts[1..], expected);
+        let crashing = rows.iter().filter(|pod| failing(pod)).count();
+        let healthy_running = rows
+            .iter()
+            .filter(|pod| PodFilter::Running.keeps(pod) && !failing(pod))
+            .count();
+        assert_eq!(counts[2], (PodFilter::Pending, 9));
+        assert_eq!((healthy_running, crashing), (398, 5));
         assert_eq!(phases, Some((398, 9, 5)));
     }
 

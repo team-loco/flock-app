@@ -16,6 +16,20 @@ pub fn age(elapsed: Duration) -> String {
     }
 }
 
+pub fn span(elapsed: Duration) -> String {
+    let secs = elapsed.as_secs();
+    let (major, major_unit, minor, minor_unit) = match secs {
+        s if s < MINUTE => return format!("{s}s"),
+        s if s < HOUR => (s / MINUTE, "m", s % MINUTE, "s"),
+        s if s < DAY => (s / HOUR, "h", s % HOUR / MINUTE, "m"),
+        s => (s / DAY, "d", s % DAY / HOUR, "h"),
+    };
+    match minor {
+        0 => format!("{major}{major_unit}"),
+        _ => format!("{major}{major_unit} {minor}{minor_unit}"),
+    }
+}
+
 pub fn age_since(then: SystemTime, now: SystemTime) -> String {
     let elapsed = now.duration_since(then).unwrap_or_default();
     age(elapsed)
@@ -42,6 +56,20 @@ mod tests {
         ];
         for (secs, expected) in cases {
             assert_eq!(age(Duration::from_secs(secs)), expected, "{secs}s");
+        }
+    }
+
+    #[test]
+    fn spans_show_the_two_largest_units() {
+        let cases = [
+            (27, "27s"),
+            (3 * MINUTE + 12, "3m 12s"),
+            (6 * HOUR + 6 * MINUTE + 40, "6h 6m"),
+            (2 * HOUR, "2h"),
+            (2 * DAY + 4 * HOUR, "2d 4h"),
+        ];
+        for (secs, expected) in cases {
+            assert_eq!(span(Duration::from_secs(secs)), expected, "{secs}s");
         }
     }
 

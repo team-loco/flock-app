@@ -10,6 +10,7 @@ use flock_core::workload::{
 use flock_core::{ResourceRef, Uid, Workload, WorkloadKind};
 use futures::{StreamExt, stream};
 use jiff::Timestamp;
+use jiff::tz::TimeZone;
 use k8s_openapi::api::apps::v1::{
     ControllerRevision, DaemonSet, Deployment, ReplicaSet, StatefulSet,
 };
@@ -229,12 +230,14 @@ pub fn pods(
     usage: &[PodUsage],
     now: Timestamp,
 ) -> Vec<Pod> {
+    let zone = TimeZone::system();
+    let clock = crate::pods::Clock { now, zone: &zone };
     let used: HashMap<&str, &PodUsage> = usage.iter().map(|u| (u.name.as_str(), u)).collect();
     let mut rows: Vec<Pod> = raw
         .iter()
         .map(|pod| {
             let name = pod.metadata.name.clone().unwrap_or_default();
-            let view = crate::pods::pod(&target.cluster, pod, None, Vec::new(), now);
+            let view = crate::pods::pod(&target.cluster, pod, None, Vec::new(), &clock);
             let usage = used.get(name.as_str());
             let containers = pod
                 .status

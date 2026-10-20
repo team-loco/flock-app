@@ -1,14 +1,20 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use std::collections::BTreeMap;
+
 use flock_core::pods::{
-    Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Qos, Usage, Volume,
+    Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Probe, ProbeKind, Qos,
+    Resources, Termination, Usage, Volume,
 };
 use flock_core::{ClusterId, ResourceRef, Status, Uid};
 use jiff::Timestamp;
-use k8s_openapi::api::core::v1::{self as core, ContainerStatus};
+use jiff::tz::TimeZone;
+use k8s_openapi::api::core::v1::{self as core, ContainerStateTerminated, ContainerStatus};
+use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
+use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 
-use crate::clock::age;
+use crate::clock::{age, between, since};
 use crate::conditions::conditions;
 use crate::detail;
 use crate::metrics::PodUsage;
@@ -24,6 +30,15 @@ const SCHEDULED_CONDITION: &str = "PodScheduled";
 const CONDITION_FALSE: &str = "False";
 const DEFAULT_PROTOCOL: &str = "TCP";
 const BYTES_PER_MIB: f64 = 1_048_576.;
+const CPU: &str = "cpu";
+const MEMORY: &str = "memory";
+const STAMP_FORMAT: &str = "%Y-%m-%d %H:%M";
+const EXEC_PROBE: &str = "exec";
+
+pub struct Clock<'a> {
+    pub now: Timestamp,
+    pub zone: &'a TimeZone,
+}
 
 type PodLookup<'a, T> = HashMap<&'a str, HashMap<&'a str, T>>;
 
@@ -63,13 +78,69 @@ pub(crate) fn unschedulable(pod: &core::Pod) -> Option<String> {
         .map(|c| c.message.clone().unwrap_or_default())
 }
 
-pub(crate) fn container(
-    spec: &core::Container,
-    status: Option<&ContainerStatus>,
-    waiting_note: Option<&str>,
-) -> Container {
-    let ports = spec
-        .ports
+fn resources(quantities: Option<&BTreeMap<String, Quantity>>) -> Resources {
+    let get = |key: &str| quantities.and_then(|q| q.get(key)).map(|q| q.0.clone());
+    Resources {
+        cpu: get(CPU),
+        memory: get(MEMORY),
+    }
+}
+
+fn port_label(port: &IntOrString) -> String {
+    match port {
+        IntOrString::Int(number) => format!(":{number}"),
+        IntOrString::String(name) => format!(":{name}"),
+    }
+}
+
+fn probe(kind: ProbeKind, probe: Option<&core::Probe>) -> Option<Probe> {
+    let probe = probe?;
+    let target = if let Some(http) = &probe.http_get {
+        let path = http.path.as_deref().unwrap_or_default();
+        format!("{}{path}", port_label(&http.port))
+    } else if let Some(tcp) = &probe.tcp_socket {
+        format!("tcp {}", port_label(&tcp.port))
+    } else if let Some(grpc) = &probe.grpc {
+        format!("grpc :{}", grpc.port)
+    } else {
+        EXEC_PROBE.to_owned()
+    };
+    Some(Probe { kind, target })
+}
+
+fn probes(spec: &core::Container) -> Vec<Probe> {
+    [
+        probe(ProbeKind::Liveness, spec.liveness_probe.as_ref()),
+        probe(ProbeKind::Readiness, spec.readiness_probe.as_ref()),
+        probe(ProbeKind::Startup, spec.startup_probe.as_ref()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn stamp(at: Timestamp, zone: &TimeZone) -> String {
+    at.to_zoned(zone.clone()).strftime(STAMP_FORMAT).to_string()
+}
+
+fn termination(terminated: &ContainerStateTerminated, clock: &Clock<'_>) -> Termination {
+    let started = terminated.started_at.as_ref().map(|t| t.0);
+    let finished = terminated.finished_at.as_ref().map(|t| t.0);
+    let ran = started
+        .zip(finished)
+        .map(|(started, finished)| between(started, finished));
+    Termination {
+        reason: terminated.reason.clone().unwrap_or_default(),
+        exit_code: terminated.exit_code,
+        started: started.map(|at| stamp(at, clock.zone)),
+        finished: finished.map(|at| stamp(at, clock.zone)),
+        ago: finished.map(|at| between(at, clock.now)),
+        ran,
+    }
+}
+
+fn ports(spec: &core::Container) -> Vec<ContainerPort> {
+    spec.ports
         .iter()
         .flatten()
         .filter_map(|p| {
@@ -82,7 +153,15 @@ pub(crate) fn container(
                 name: p.name.clone(),
             })
         })
-        .collect();
+        .collect()
+}
+
+pub(crate) fn container(
+    spec: &core::Container,
+    status: Option<&ContainerStatus>,
+    waiting_note: Option<&str>,
+    clock: &Clock<'_>,
+) -> Container {
     let state = status.and_then(|s| s.state.as_ref());
     let ready = status.is_some_and(|s| s.ready);
     let restarts = status
@@ -93,7 +172,18 @@ pub(crate) fn container(
         .and_then(|l| l.terminated.as_ref())
         .map(|t| format!("exit {}", t.exit_code));
     let last = status.and_then(last_exit);
-    let running = state.is_some_and(|s| s.running.is_some());
+    let running_since = state
+        .and_then(|s| s.running.as_ref())
+        .map(|r| since(r.started_at.as_ref(), clock.now));
+    let terminated = state
+        .and_then(|s| s.terminated.as_ref())
+        .map(|t| termination(t, clock));
+    let last_termination = status
+        .and_then(|s| s.last_state.as_ref())
+        .and_then(|l| l.terminated.as_ref())
+        .map(|t| termination(t, clock));
+    let since_state = running_since.or_else(|| terminated.as_ref().and_then(|t| t.ago));
+    let running = running_since.is_some();
     let (kind, health, reason, note, message) = if running {
         let health = if ready { Status::Ok } else { Status::Warn };
         let message = last.map(|last| format!("last {last}")).unwrap_or_default();
@@ -148,9 +238,15 @@ pub(crate) fn container(
         reason,
         ready,
         restarts,
-        ports,
+        ports: ports(spec),
         note,
         message,
+        requests: resources(spec.resources.as_ref().and_then(|r| r.requests.as_ref())),
+        limits: resources(spec.resources.as_ref().and_then(|r| r.limits.as_ref())),
+        probes: probes(spec),
+        since: since_state,
+        terminated,
+        last_termination,
     }
 }
 
@@ -209,8 +305,9 @@ pub fn pod(
     pod: &core::Pod,
     usage: Option<&Usage>,
     events: Vec<PodEvent>,
-    now: Timestamp,
+    clock: &Clock<'_>,
 ) -> Pod {
+    let now = clock.now;
     let namespace = pod.metadata.namespace.clone().unwrap_or_default();
     let status = pod.status.as_ref();
     let statuses: HashMap<&str, &ContainerStatus> = status
@@ -229,6 +326,7 @@ pub fn pod(
                 c,
                 statuses.get(c.name.as_str()).copied(),
                 scheduling.as_deref(),
+                clock,
             )
         })
         .collect();
@@ -308,7 +406,7 @@ pub fn pods(
     pods: &[Arc<core::Pod>],
     events: &[Arc<core::Event>],
     usage: &[PodUsage],
-    now: Timestamp,
+    clock: &Clock<'_>,
 ) -> Vec<Pod> {
     let mut used: PodLookup<'_, Usage> = HashMap::new();
     for entry in usage {
@@ -320,7 +418,7 @@ pub fn pods(
             .or_default()
             .insert(&entry.name, usage);
     }
-    let mut events = pod_events(events, now);
+    let mut events = pod_events(events, clock.now);
     let mut rows: Vec<Pod> = pods
         .iter()
         .map(|p| {
@@ -331,7 +429,7 @@ pub fn pods(
                 .and_then(|rows| rows.remove(name))
                 .unwrap_or_default();
             let usage = used.get(namespace).and_then(|rows| rows.get(name));
-            pod(cluster, p, usage, own, now)
+            pod(cluster, p, usage, own, clock)
         })
         .collect();
     rows.sort_by(|a, b| (&a.namespace, &a.name).cmp(&(&b.namespace, &b.name)));
@@ -350,6 +448,15 @@ mod tests {
     use super::*;
     use crate::metrics;
     use crate::problems::tests::{at, crash_status, now, parse, ready_status, replica_pod};
+
+    static UTC: TimeZone = TimeZone::UTC;
+
+    fn clock() -> Clock<'static> {
+        Clock {
+            now: now(),
+            zone: &UTC,
+        }
+    }
 
     fn cluster() -> ClusterId {
         ClusterId::new("kind-fleet-a")
@@ -400,7 +507,7 @@ mod tests {
                 memory_bytes: 38. * BYTES_PER_MIB,
             },
         }];
-        let rows = pods(&cluster(), &[raw], &[event], &usage, now());
+        let rows = pods(&cluster(), &[raw], &[event], &usage, &clock());
         let pod = &rows[0];
         assert_eq!(pod.status, Status::Err);
         assert_eq!(pod.reason, "CrashLoopBackOff");
@@ -434,6 +541,54 @@ mod tests {
     }
 
     #[test]
+    fn containers_carry_resources_probes_and_terminations() {
+        let raw: Arc<core::Pod> = parse(json!({
+            "metadata": { "name": "podinfo-cbf5d9d89-9clpk", "namespace": "web" },
+            "spec": { "containers": [
+                { "name": "podinfod", "image": "ghcr.io/stefanprodan/podinfo:6.15.0",
+                  "resources": { "requests": { "cpu": "1m", "memory": "16Mi" }, "limits": { "cpu": "2" } },
+                  "livenessProbe": { "httpGet": { "path": "/healthz", "port": 9898 } },
+                  "readinessProbe": { "tcpSocket": { "port": "http" } },
+                  "startupProbe": { "exec": { "command": ["true"] } } },
+                { "name": "migrate", "image": "migrate:1" }
+            ] },
+            "status": { "phase": "Running", "containerStatuses": [
+                { "name": "podinfod", "image": "i", "imageID": "", "ready": true, "restartCount": 1,
+                  "state": { "running": { "startedAt": at(900) } },
+                  "lastState": { "terminated": { "exitCode": 1, "reason": "Error",
+                      "startedAt": at(1266), "finishedAt": at(900) } } },
+                { "name": "migrate", "image": "i", "imageID": "", "ready": false, "restartCount": 0,
+                  "state": { "terminated": { "exitCode": 0, "reason": "Completed",
+                      "startedAt": at(30), "finishedAt": at(29) } } }
+            ] }
+        }));
+        let row = pod(&cluster(), &raw, None, Vec::new(), &clock());
+        let web = &row.containers[0];
+        assert_eq!(web.state_label(), "Running · 15h");
+        assert_eq!(web.requests.label().as_deref(), Some("cpu 1m · mem 16Mi"));
+        assert_eq!(web.limits.label().as_deref(), Some("cpu 2"));
+        assert_eq!(
+            web.probes_label().as_deref(),
+            Some("live :9898/healthz · ready tcp :http · start exec")
+        );
+        let last = web.last_termination.clone().unwrap_or_default();
+        assert_eq!(
+            (last.reason.as_str(), last.detail()),
+            ("Error", "exit 1 · 15h ago".into())
+        );
+        assert_eq!(last.ran, Some(Duration::from_mins(366)));
+        assert_eq!(
+            last.span().map(|span| span.ends_with(" · 6h 6m")),
+            Some(true)
+        );
+        let migrate = &row.containers[1];
+        assert_eq!(migrate.state_label(), "Terminated · Completed · exit 0");
+        assert_eq!(migrate.since, Some(Duration::from_mins(29)));
+        assert_eq!(migrate.requests.label(), None);
+        assert_eq!(migrate.last_termination, None);
+    }
+
+    #[test]
     fn unscheduled_pod_explains_its_wait() {
         let raw: Arc<core::Pod> = parse(json!({
             "metadata": { "name": "unschedulable", "namespace": "apps" },
@@ -443,7 +598,7 @@ mod tests {
                 "message": "0/1 nodes are available"
             }] }
         }));
-        let row = pod(&cluster(), &raw, None, Vec::new(), now());
+        let row = pod(&cluster(), &raw, None, Vec::new(), &clock());
         assert_eq!((row.status, row.reason.as_str()), (Status::Warn, "Pending"));
         assert_eq!(
             row.containers[0].note.as_deref(),
@@ -466,12 +621,12 @@ mod tests {
             replica_pod("a-1-y", "a", "1", &ready_status()),
             replica_pod("a-1-z", "a", "1", &json!({ "phase": "Pending" })),
         ];
-        let rows = pods(&cluster(), &raw, &[], &[], now());
-        let failing = PodQuery {
-            filter: PodFilter::Failing,
+        let rows = pods(&cluster(), &raw, &[], &[], &clock());
+        let pending = PodQuery {
+            filter: PodFilter::Pending,
             ..PodQuery::default()
         };
         assert_eq!(nav_counts(&rows, &cluster()), Counts::total(3).with_err(1));
-        assert_eq!(failing.apply(&rows, &cluster()).len(), 1);
+        assert_eq!(pending.apply(&rows, &cluster()).len(), 1);
     }
 }

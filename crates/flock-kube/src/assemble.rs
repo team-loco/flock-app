@@ -129,7 +129,10 @@ pub fn cluster(
             &pods,
             &events,
             extras.pod_usage.as_deref().unwrap_or_default(),
-            now,
+            &crate::pods::Clock {
+                now,
+                zone: &TimeZone::system(),
+            },
         )
     } else {
         Vec::new()

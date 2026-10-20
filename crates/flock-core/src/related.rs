@@ -231,12 +231,18 @@ fn is_cluster_scoped(kind: &str) -> bool {
     CLUSTER_SCOPED.contains(&kind)
 }
 
-fn deployment_of(replica_set: &str, labels: &BTreeMap<String, String>) -> Option<Key> {
+pub fn deployment_name<'a>(
+    replica_set: &'a str,
+    labels: &BTreeMap<String, String>,
+) -> Option<&'a str> {
     let hash = labels.get(TEMPLATE_HASH)?;
-    let name = replica_set
+    replica_set
         .strip_suffix(hash.as_str())?
-        .strip_suffix(HASH_SEPARATOR)?;
-    Some(Key::new(DEPLOYMENT, name))
+        .strip_suffix(HASH_SEPARATOR)
+}
+
+fn deployment_of(replica_set: &str, labels: &BTreeMap<String, String>) -> Option<Key> {
+    deployment_name(replica_set, labels).map(|name| Key::new(DEPLOYMENT, name))
 }
 
 fn with_replica_sets(facts: &[Fact]) -> Vec<Fact> {

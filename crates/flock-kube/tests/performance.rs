@@ -10,6 +10,7 @@ use flock_kube::shell_env::ShellEnv;
 use flock_kube::store::ClusterStore;
 use flock_kube::{detail::PodIndex, lists, pods, snapshot};
 use jiff::Timestamp;
+use jiff::tz::TimeZone;
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{Patch, PatchParams};
 use serde_json::json;
@@ -48,12 +49,16 @@ fn synthetic_snapshot_builders() {
     let raw = synthetic::pods();
     let cluster = ClusterId::new("scale");
     let now = Timestamp::now();
-    let pods = measure("10k pod rows", || pods::pods(&cluster, &raw, &[], &[], now));
+    let zone = TimeZone::UTC;
+    let clock = pods::Clock { now, zone: &zone };
+    let pods = measure("10k pod rows", || {
+        pods::pods(&cluster, &raw, &[], &[], &clock)
+    });
     let overview = measure("10k pod overview", || {
         (PodIndex::build(&raw, now), snapshot::pod_counts(&raw))
     });
     let combined = measure("10k selected cluster pods + overview", || {
-        let rows = pods::pods(&cluster, &raw, &[], &[], now);
+        let rows = pods::pods(&cluster, &raw, &[], &[], &clock);
         let index = PodIndex::build(&raw, now);
         let counts = snapshot::pod_counts(&raw);
         (rows, index, counts)
