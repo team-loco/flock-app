@@ -42,6 +42,8 @@ const OTHER_CONTEXT: &str = "kind-fleet-b";
 const SCRATCH_DEPLOYMENT: &str = "flock-compare-e2e";
 const REVISION_ANNOTATION: &str = "deployment.kubernetes.io/revision";
 const SCRATCH_ROLLBACK: &str = "flock-restart-rollback-e2e";
+const SCRATCH_SCALE: &str = "flock-scale-e2e";
+const SCALED_UP: u32 = 2;
 const SCRATCH_STATEFUL_SET: &str = "flock-rollback-e2e";
 const NEWER_IMAGE: &str = "busybox:1.36";
 const CTRL_C: u8 = 0x03;
@@ -620,11 +622,6 @@ async fn seen_by(client: &Client, api_version: &str, target: ResourceRef) -> See
     Seen::new(target, Uid::new(uid))
 }
 
-async fn web_podinfo(client: &Client) -> Seen {
-    let target = resource("Deployment", Some(WEB_NAMESPACE), PODINFO);
-    seen_by(client, APPS_V1, target).await
-}
-
 fn stale(target: ResourceRef) -> Seen {
     Seen::new(target, Uid::new(STALE_UID))
 }
@@ -665,38 +662,9 @@ async fn restoring<T>(body: impl Future<Output = T>, restore: impl Future<Output
     }
 }
 
-async fn scale_up_and_down(harness: &Harness, deployments: &Api<Deployment>, before: i32) {
-    let target = web_podinfo(&harness.client).await;
-    let up = u32::try_from(before + 1).unwrap_or_default();
-    harness.send(Command::Scale {
-        target: target.clone(),
-        replicas: up,
-    });
-    eventually(
-        "scale up",
-        || replicas(deployments),
-        |observed| *observed == Some(before + 1),
-    )
-    .await;
-    harness.send(Command::Scale {
-        target,
-        replicas: u32::try_from(before).unwrap_or_default(),
-    });
-    eventually(
-        "scale down",
-        || replicas(deployments),
-        |observed| *observed == Some(before),
-    )
-    .await;
-    no_notices(harness);
-}
-
-async fn set_replicas(deployments: &Api<Deployment>, replicas: i32) {
-    let patch = json!({ "spec": { "replicas": replicas } });
-    let patched = deployments
-        .patch(PODINFO, &PatchParams::default(), &Patch::Merge(&patch))
-        .await;
-    assert!(patched.is_ok(), "restore web/podinfo replicas: {patched:?}");
+async fn scratch_replicas(deployments: &Api<Deployment>) -> Option<i32> {
+    let deployment = deployments.get(SCRATCH_SCALE).await.ok()?;
+    deployment.spec?.replicas
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -704,15 +672,34 @@ async fn scale_up_then_back_down() {
     let Some(harness) = Harness::start().await else {
         return;
     };
-    let deployments: Api<Deployment> = Api::namespaced(harness.client.clone(), WEB_NAMESPACE);
-    let Some(before) = replicas(&deployments).await else {
-        panic!("web/podinfo replicas");
-    };
-    restoring(
-        scale_up_and_down(&harness, &deployments, before),
-        set_replicas(&deployments, before),
+    let namespace = harness.namespace().to_owned();
+    let deployments: Api<Deployment> = Api::namespaced(harness.client.clone(), &namespace);
+    let scratch = scratch_deployment(SCRATCH_SCALE, DEBUG_IMAGE);
+    let created = deployments.create(&PostParams::default(), &scratch).await;
+    assert!(created.is_ok(), "scratch deployment: {created:?}");
+    let target = resource("Deployment", Some(&namespace), SCRATCH_SCALE);
+    let seen = seen_by(&harness.client, APPS_V1, target).await;
+    harness.send(Command::Scale {
+        target: seen.clone(),
+        replicas: SCALED_UP,
+    });
+    eventually(
+        "scale up",
+        || scratch_replicas(&deployments),
+        |observed| *observed == i32::try_from(SCALED_UP).ok(),
     )
     .await;
+    harness.send(Command::Scale {
+        target: seen,
+        replicas: 0,
+    });
+    eventually(
+        "scale down",
+        || scratch_replicas(&deployments),
+        |observed| *observed == Some(0),
+    )
+    .await;
+    no_notices(&harness);
 }
 
 async fn restart_and_rollback(harness: &Harness, deployments: &Api<Deployment>) {
