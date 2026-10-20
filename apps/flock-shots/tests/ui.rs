@@ -3259,6 +3259,18 @@ fn the_sidebar_lists_crds_by_group_filters_them_and_opens_their_objects() -> any
 }
 
 #[test]
+fn an_empty_custom_resource_list_names_its_kind() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.scroll("sidebar-nav", gpui::point(gpui::px(0.), gpui::px(-2000.)))?;
+    ui.click("nav-crd-issuers.cert-manager.io")?;
+    assert!(ui.bounds("empty-state-cluster").is_some());
+    let sentence = ui.read(Shell::custom_empty_sentence);
+    let sentence = sentence.unwrap_or_default();
+    assert!(sentence.starts_with("No Issuers in "), "{sentence}");
+    Ok(())
+}
+
+#[test]
 fn a_custom_object_opens_the_inspector_and_edits_its_yaml() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::CustomResources)?;
     assert!(ui.bounds("custom-namespace").is_some());

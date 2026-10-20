@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::emptiness::Noun;
 use crate::resources::Resource;
 use crate::{ClusterId, ResourceRef};
 
@@ -51,6 +52,14 @@ pub fn display_kind(kind: &str) -> &str {
     }
 }
 
+fn capitalized(word: &str) -> String {
+    let mut chars = word.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrinterColumn {
     pub name: String,
@@ -70,6 +79,19 @@ pub struct Crd {
 impl Crd {
     pub fn name(&self) -> String {
         format!("{}{GROUP_SEPARATOR}{}", self.plural, self.key.group)
+    }
+
+    pub fn noun(&self) -> Noun {
+        let kind = &self.key.kind;
+        let plural = match self
+            .plural
+            .to_lowercase()
+            .strip_prefix(&kind.to_lowercase())
+        {
+            Some(suffix) => format!("{kind}{suffix}"),
+            None => capitalized(&self.plural),
+        };
+        Noun::named(kind.clone(), plural)
     }
 
     fn matches(&self, words: &[String]) -> bool {
@@ -131,6 +153,22 @@ mod tests {
             namespaced: true,
             columns: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_crd_names_its_kind_in_singular_and_plural() {
+        let certificate = crd("cert-manager.io", "Certificate", "certificates").noun();
+        assert_eq!(certificate.plural, "Certificates");
+        assert_eq!(certificate.singular, "Certificate");
+        let request = crd(
+            "cert-manager.io",
+            "CertificateRequest",
+            "certificaterequests",
+        )
+        .noun();
+        assert_eq!(request.plural, "CertificateRequests");
+        let odd = crd("example.com", "Mouse", "mice").noun();
+        assert_eq!(odd.plural, "Mice");
     }
 
     #[test]

@@ -102,7 +102,7 @@ pub(crate) fn empty_list(
     let emptiness = Emptiness::classify(shape.total, shape.namespace, &text);
     Some(EmptyState::for_list(
         &emptiness,
-        shape.noun,
+        &shape.noun,
         shape.cluster,
         filter,
         show_all,
@@ -345,6 +345,10 @@ impl ClusterPages {
             }
         };
         Some(bar.clone())
+    }
+
+    pub fn custom_empty_sentence(&self, cx: &App) -> Option<String> {
+        self.custom.read(cx).empty_sentence(cx)
     }
 
     pub fn inspecting(&self, page: Page, cx: &App) -> bool {
