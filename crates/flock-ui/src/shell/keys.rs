@@ -4,7 +4,8 @@ use flock_core::palette::COMMAND_PREFIX;
 use flock_core::tabs::Cycle;
 use flock_core::{Command, Page};
 use gpui::{
-    App, Context, Div, Entity, FocusHandle, InteractiveElement, KeyDownEvent, Stateful, Window,
+    App, Context, Div, Entity, FocusHandle, Focusable, InteractiveElement, KeyDownEvent, Stateful,
+    Window,
 };
 
 use super::Shell;
@@ -108,8 +109,32 @@ impl Shell {
         if !std::mem::take(&mut self.keys.refocus) || self.keys.sidebar_focus.is_focused(window) {
             return;
         }
-        let focus = self.focus.clone();
-        window.defer(cx, move |window, cx| window.focus(&focus, cx));
+        let shell = cx.weak_entity();
+        window.defer(cx, move |window, cx| {
+            let focus = shell
+                .read_with(cx, |shell, cx| {
+                    shell.page_focus(cx).unwrap_or_else(|| shell.focus.clone())
+                })
+                .ok();
+            if let Some(focus) = focus {
+                window.focus(&focus, cx);
+            }
+        });
+    }
+
+    fn page_focus(&self, cx: &App) -> Option<FocusHandle> {
+        let screens = self.focused_screens();
+        if let Some((screen, _)) = &screens.workload {
+            return Some(screen.focus_handle(cx));
+        }
+        if let Some((screen, _)) = &screens.detail {
+            return Some(screen.focus_handle(cx));
+        }
+        self.state
+            .location()
+            .flux_object
+            .as_ref()
+            .map(|_| screens.flux_object.focus_handle(cx))
     }
 
     fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
@@ -141,11 +166,18 @@ impl Shell {
         if let Some((screen, _)) = &screens.workload {
             return Some(screen.read(cx).list_focus(cx));
         }
+        if let Some((screen, _)) = &screens.detail {
+            return Some(screen.focus_handle(cx));
+        }
+        if self.state.location().flux_object.is_some() {
+            return Some(screens.flux_object.focus_handle(cx));
+        }
         let page = self.state.location().page;
         match page {
             Page::Overview => Some(screens.flock.read(cx).list_focus(page, cx)),
             Page::Problems => Some(screens.flock.read(cx).list_focus(page, cx)),
             Page::Changes => Some(screens.changes.read(cx).list_focus(cx)),
+            Page::FluxEvents => Some(screens.flux_events.read(cx).list_focus(cx)),
             Page::ClusterSettings => Some(screens.settings.read(cx).list_focus(cx)),
             Page::Pods => Some(screens.pods.read(cx).list_focus(cx)),
             page => screens.pages.list_focus(page, cx),

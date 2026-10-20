@@ -194,7 +194,7 @@ impl Shell {
         if let Some(screen) = current {
             return Some(screen);
         }
-        let screen = cx.new(|_| DetailScreen::new(target));
+        let screen = cx.new(|cx| DetailScreen::new(target, cx));
         let navigation = self.screens(ix).navigation.clone();
         let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
             shell.pane_command(pane, command.clone(), cx);

@@ -78,6 +78,12 @@ pub struct FluxObjectPage {
 
 impl EventEmitter<Command> for FluxObjectPage {}
 
+impl gpui::Focusable for FluxObjectPage {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
 impl FluxObjectPage {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let menu = cx.new(|cx| ActionMenu::new("flux-actions", cx));
