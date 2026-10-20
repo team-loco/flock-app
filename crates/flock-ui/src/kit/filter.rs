@@ -49,6 +49,7 @@ pub struct FilterBar {
     placeholder: SharedString,
     field: Entity<TextFieldState>,
     scope: Option<AnyView>,
+    aside: Option<AnyView>,
     chips: Vec<SharedString>,
     chip: usize,
     matches: Option<(usize, usize)>,
@@ -82,6 +83,7 @@ impl FilterBar {
             placeholder,
             field,
             scope: None,
+            aside: None,
             chips: Vec::new(),
             chip: 0,
             matches: None,
@@ -199,6 +201,11 @@ impl FilterBar {
 
     pub fn scope(mut self, picker: impl Into<AnyView>) -> Self {
         self.scope = Some(picker.into());
+        self
+    }
+
+    pub fn aside(mut self, view: impl Into<AnyView>) -> Self {
+        self.aside = Some(view.into());
         self
     }
 
@@ -474,6 +481,7 @@ impl Render for FilterBar {
             .when_some(self.scope.clone(), ParentElement::child)
             .child(field)
             .children(chips)
+            .children(self.aside.clone())
             .children(clear)
             .child(div().flex_1())
             .children(note)

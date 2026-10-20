@@ -7,6 +7,7 @@ use flock_core::pods::{
     Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Probe, ProbeKind, Qos,
     Resources, Termination, Usage, Volume,
 };
+use flock_core::time::{self, Date, LocalTime};
 use flock_core::{ClusterId, ResourceRef, Status, Uid};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
@@ -32,7 +33,6 @@ const DEFAULT_PROTOCOL: &str = "TCP";
 const BYTES_PER_MIB: f64 = 1_048_576.;
 const CPU: &str = "cpu";
 const MEMORY: &str = "memory";
-const STAMP_FORMAT: &str = "%Y-%m-%d %H:%M";
 const EXEC_PROBE: &str = "exec";
 
 pub struct Clock<'a> {
@@ -119,8 +119,23 @@ fn probes(spec: &core::Container) -> Vec<Probe> {
     .collect()
 }
 
-fn stamp(at: Timestamp, zone: &TimeZone) -> String {
-    at.to_zoned(zone.clone()).strftime(STAMP_FORMAT).to_string()
+fn date(day: jiff::civil::Date) -> Date {
+    Date {
+        year: day.year(),
+        month: day.month(),
+        day: day.day(),
+    }
+}
+
+fn stamp(at: Timestamp, clock: &Clock<'_>) -> String {
+    let local = at.to_zoned(clock.zone.clone());
+    let today = clock.now.to_zoned(clock.zone.clone()).date();
+    let moment = LocalTime {
+        date: date(local.date()),
+        hour: local.hour(),
+        minute: local.minute(),
+    };
+    time::stamp(moment, date(today))
 }
 
 fn termination(terminated: &ContainerStateTerminated, clock: &Clock<'_>) -> Termination {
@@ -132,8 +147,8 @@ fn termination(terminated: &ContainerStateTerminated, clock: &Clock<'_>) -> Term
     Termination {
         reason: terminated.reason.clone().unwrap_or_default(),
         exit_code: terminated.exit_code,
-        started: started.map(|at| stamp(at, clock.zone)),
-        finished: finished.map(|at| stamp(at, clock.zone)),
+        started: started.map(|at| stamp(at, clock)),
+        finished: finished.map(|at| stamp(at, clock)),
         ago: finished.map(|at| between(at, clock.now)),
         ran,
     }
@@ -360,6 +375,10 @@ pub fn pod(
         node: pod.spec.as_ref().and_then(|s| s.node_name.clone()),
         ip: status.and_then(|s| s.pod_ip.clone()),
         owner,
+        service_account: pod
+            .spec
+            .as_ref()
+            .and_then(|s| s.service_account_name.clone()),
         qos: qos(status.and_then(|s| s.qos_class.as_deref())),
         age: age(&pod.metadata, now),
         labels: pod.metadata.labels.clone().unwrap_or_default(),
@@ -474,6 +493,7 @@ mod tests {
             },
             "spec": {
                 "nodeName": "fleet-a-control-plane",
+                "serviceAccountName": "checkout",
                 "containers": [{ "name": "api", "image": "ghcr.io/acme/checkout-api:2.14.0",
                     "ports": [{ "containerPort": 8080, "name": "http" }] }],
                 "volumes": [
@@ -513,6 +533,7 @@ mod tests {
         assert_eq!(pod.reason, "CrashLoopBackOff");
         assert_eq!(pod.phase, PodPhase::Running);
         assert_eq!(pod.qos, Qos::Guaranteed);
+        assert_eq!(pod.service_account.as_deref(), Some("checkout"));
         assert_eq!(pod.ip.as_deref(), Some("10.244.0.12"));
         assert_eq!(pod.age, Duration::from_mins(180));
         assert_eq!(
@@ -578,12 +599,14 @@ mod tests {
         );
         assert_eq!(last.ran, Some(Duration::from_mins(366)));
         assert_eq!(
-            last.span().map(|span| span.ends_with(" · 6h 6m")),
-            Some(true)
+            last.span().as_deref(),
+            Some("ran 2027-01-14 10:54 → 2027-01-14 17:00 · 6h 6m")
         );
         let migrate = &row.containers[1];
         assert_eq!(migrate.state_label(), "Terminated · Completed · exit 0");
         assert_eq!(migrate.since, Some(Duration::from_mins(29)));
+        let run = migrate.terminated.as_ref().and_then(Termination::run);
+        assert_eq!(run.as_deref(), Some("07:30 → 07:31 · 1m"));
         assert_eq!(migrate.requests.label(), None);
         assert_eq!(migrate.last_termination, None);
     }

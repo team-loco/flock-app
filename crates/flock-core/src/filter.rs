@@ -662,7 +662,7 @@ mod tests {
             (
                 "namespaces",
                 Namespace::FILTER.placeholder(),
-                "Filter by name, phase, namespace or label",
+                "Filter by name, phase or label",
             ),
             (
                 "resources",

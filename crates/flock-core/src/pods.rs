@@ -13,6 +13,9 @@ const RESTARTS_ERR: u32 = 5;
 const SHORT_NAME_MIN: usize = 4;
 const SEPARATOR: &str = " · ";
 const ARROW: &str = " → ";
+pub const OWNER_ARROW: &str = " ← ";
+const FAILING_GLYPH: &str = "✕";
+const LINK_ARROW: &str = "→";
 const RUNNING_LABEL: &str = "Running";
 const WAITING_LABEL: &str = "Waiting";
 const TERMINATED_LABEL: &str = "Terminated";
@@ -258,6 +261,7 @@ pub struct Pod {
     pub node: Option<String>,
     pub ip: Option<String>,
     pub owner: Option<ResourceRef>,
+    pub service_account: Option<String>,
     pub qos: Qos,
     pub age: Duration,
     pub labels: BTreeMap<String, String>,
@@ -300,15 +304,23 @@ impl Pod {
         ready == total
     }
 
-    pub fn owner_label(&self) -> Option<String> {
-        let owner = self.owner.as_ref()?;
+    pub fn owner_chain(&self) -> Vec<ResourceRef> {
+        let Some(owner) = &self.owner else {
+            return Vec::new();
+        };
         let deployment = (owner.kind == REPLICA_SET)
             .then(|| deployment_name(&owner.name, &self.labels))
-            .flatten();
-        Some(match deployment {
-            Some(name) => format!("{}/{name}", short_kind(DEPLOYMENT)),
-            None => format!("{}/{}", short_kind(&owner.kind), owner.name),
-        })
+            .flatten()
+            .map(|name| ResourceRef {
+                kind: DEPLOYMENT.to_owned(),
+                name: name.to_owned(),
+                ..owner.clone()
+            });
+        deployment.into_iter().chain([owner.clone()]).collect()
+    }
+
+    pub fn owner_label(&self) -> Option<String> {
+        self.owner_chain().first().map(owner_segment)
     }
 
     pub fn restarts(&self) -> u32 {
@@ -373,6 +385,31 @@ impl Pod {
             (_, Some(container)) => container_sentence(container),
             (_, None) => format!("{}.", self.reason),
         }
+    }
+}
+
+pub fn owner_segment(owner: &ResourceRef) -> String {
+    format!("{}/{}", short_kind(&owner.kind), owner.name)
+}
+
+pub fn owner_chain_label(chain: &[ResourceRef]) -> String {
+    chain
+        .iter()
+        .map(owner_segment)
+        .collect::<Vec<_>>()
+        .join(OWNER_ARROW)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FailingElsewhere {
+    pub count: usize,
+    pub namespace: Option<String>,
+}
+
+impl FailingElsewhere {
+    pub fn label(&self) -> String {
+        let count = self.count;
+        format!("{FAILING_GLYPH} {count} failing in other namespaces {LINK_ARROW}")
     }
 }
 
@@ -494,6 +531,24 @@ impl PodQuery {
             })
             .filter(|pod| matches_query(pod, &self.text))
             .collect()
+    }
+
+    pub fn failing_elsewhere(&self, pods: &[Pod], cluster: &ClusterId) -> Option<FailingElsewhere> {
+        let chosen = self.namespace.as_ref()?;
+        let elsewhere: Vec<&str> = pods
+            .iter()
+            .filter(|pod| &pod.cluster == cluster && &pod.namespace != chosen && failing(pod))
+            .map(|pod| pod.namespace.as_str())
+            .collect();
+        let first = *elsewhere.first()?;
+        let namespace = elsewhere
+            .iter()
+            .all(|namespace| *namespace == first)
+            .then(|| first.to_owned());
+        Some(FailingElsewhere {
+            count: elsewhere.len(),
+            namespace,
+        })
     }
 
     pub fn apply<'a>(&self, pods: &'a [Pod], cluster: &ClusterId) -> Vec<&'a Pod> {
@@ -713,14 +768,76 @@ mod tests {
         pod.labels = BTreeMap::from([("pod-template-hash".into(), "cbf5d9d89".into())]);
         assert_eq!(pod.owner_label().as_deref(), Some("deploy/podinfo"));
         pod.labels.clear();
-        assert_eq!(
-            pod.owner_label().as_deref(),
-            Some("replicaset/podinfo-cbf5d9d89")
-        );
+        assert_eq!(pod.owner_label().as_deref(), Some("rs/podinfo-cbf5d9d89"));
         pod.owner = Some(owner("StatefulSet", "redis"));
         assert_eq!(pod.owner_label().as_deref(), Some("sts/redis"));
         pod.owner = Some(owner("Job", "migrate-29031"));
         assert_eq!(pod.owner_label().as_deref(), Some("job/migrate-29031"));
+    }
+
+    #[test]
+    fn owner_chains_lead_from_the_deployment_to_the_replica_set() {
+        let mut pod = healthy("podinfo-cbf5d9d89-9clpk", "web");
+        assert_eq!(pod.owner_chain(), Vec::<ResourceRef>::new());
+        let set = ResourceRef {
+            cluster: ClusterId::new("prod"),
+            kind: "ReplicaSet".into(),
+            namespace: Some("web".into()),
+            name: "podinfo-cbf5d9d89".into(),
+        };
+        pod.owner = Some(set.clone());
+        assert_eq!(
+            owner_chain_label(&pod.owner_chain()),
+            "rs/podinfo-cbf5d9d89"
+        );
+        pod.labels = BTreeMap::from([("pod-template-hash".into(), "cbf5d9d89".into())]);
+        let chain = pod.owner_chain();
+        assert_eq!(
+            owner_chain_label(&chain),
+            "deploy/podinfo ← rs/podinfo-cbf5d9d89"
+        );
+        let deployment = ResourceRef {
+            kind: "Deployment".into(),
+            name: "podinfo".into(),
+            ..set.clone()
+        };
+        assert_eq!(chain, [deployment, set]);
+    }
+
+    #[test]
+    fn failing_pods_in_other_namespaces_point_at_where_they_are() {
+        let cluster = ClusterId::new("prod");
+        let mut pods = vec![crashing(), healthy("web-1", "web"), pending()];
+        let mut query = PodQuery::default();
+        assert_eq!(query.failing_elsewhere(&pods, &cluster), None);
+        query.namespace = Some("payments".into());
+        assert_eq!(query.failing_elsewhere(&pods, &cluster), None);
+        query.namespace = Some("web".into());
+        let one = query.failing_elsewhere(&pods, &cluster);
+        assert_eq!(
+            one,
+            Some(FailingElsewhere {
+                count: 1,
+                namespace: Some("payments".into()),
+            })
+        );
+        assert_eq!(
+            one.map(|elsewhere| elsewhere.label()).as_deref(),
+            Some("✕ 1 failing in other namespaces →")
+        );
+        let mut ml = pending();
+        ml.status = Status::Err;
+        pods.push(ml);
+        let spread = query.failing_elsewhere(&pods, &cluster);
+        assert_eq!(
+            spread,
+            Some(FailingElsewhere {
+                count: 2,
+                namespace: None,
+            })
+        );
+        let elsewhere_cluster = ClusterId::new("staging");
+        assert_eq!(query.failing_elsewhere(&pods, &elsewhere_cluster), None);
     }
 
     #[test]

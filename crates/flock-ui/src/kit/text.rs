@@ -2,7 +2,7 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, FontWeight, HighlightStyle, InteractiveElement,
+    AnyElement, App, ClickEvent, ElementId, FontWeight, HighlightStyle, Hsla, InteractiveElement,
     IntoElement, ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement,
     Styled, StyledText, Window, div, prelude::FluentBuilder,
 };
@@ -130,6 +130,7 @@ pub struct Link {
     id: ElementId,
     text: SharedString,
     mono: bool,
+    color: Option<Hsla>,
     on_click: Option<ClickHandler>,
 }
 
@@ -139,12 +140,18 @@ impl Link {
             id: id.into(),
             text: text.into(),
             mono: false,
+            color: None,
             on_click: None,
         }
     }
 
     pub fn mono(mut self) -> Self {
         self.mono = true;
+        self
+    }
+
+    pub fn color(mut self, color: Hsla) -> Self {
+        self.color = Some(color);
         self
     }
 
@@ -159,12 +166,12 @@ impl Link {
 
 impl RenderOnce for Link {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let acc = cx.palette().acc;
+        let color = self.color.unwrap_or(cx.palette().acc);
         let selector = self.id.to_string();
         div()
             .debug_selector(|| selector)
             .id(self.id)
-            .text_color(acc)
+            .text_color(color)
             .cursor_pointer()
             .whitespace_nowrap()
             .when(self.mono, |link| link.font_family(FONT_MONO))

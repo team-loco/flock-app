@@ -38,7 +38,7 @@ impl Namespace {
             ("name", |n, (), out| out.push(n.name.as_str().into())),
             ("phase", |n, (), out| out.push(n.phase.as_str().into())),
         ],
-        namespace: true,
+        namespace: false,
         labels: true,
     };
 
@@ -266,7 +266,7 @@ mod tests {
     fn namespace_label_tokens_match_its_metadata() {
         let mut namespace = namespace("payments", Counts::default());
         namespace.labels.insert("team".into(), "checkout".into());
-        assert!(namespace.matches(&TextFilter::parse("ns:pay label:team=checkout")));
+        assert!(namespace.matches(&TextFilter::parse("pay label:team=checkout")));
         assert!(!namespace.matches(&TextFilter::parse("label:team=platform")));
     }
 
@@ -274,8 +274,11 @@ mod tests {
     fn namespace_filter_matches_its_name() {
         let ns = namespace("payments", Counts::default());
         assert!(ns.matches(&TextFilter::parse("pay")));
-        assert!(ns.matches(&TextFilter::parse("ns:pay")));
         assert!(!ns.matches(&TextFilter::parse("orders")));
+        assert_eq!(
+            Namespace::FILTER.placeholder(),
+            "Filter by name, phase or label"
+        );
     }
 
     fn namespace(name: &str, problems: Counts) -> Namespace {

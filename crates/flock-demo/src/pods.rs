@@ -11,6 +11,7 @@ use flock_core::{ClusterId, Condition, ResourceRef, Status, Uid};
 mod fill;
 
 const CLUSTER: &str = "prod-us-east";
+const SERVICE_ACCOUNT: &str = "default";
 const MINUTE: u64 = 60;
 const HOUR: u64 = 60 * MINUTE;
 const DAY: u64 = 24 * HOUR;
@@ -219,6 +220,7 @@ fn pod(seed: Seed) -> Pod {
         node: seed.node.map(Into::into),
         ip: seed.ip.map(Into::into),
         owner: Some(owner(seed.owner.0, seed.namespace, seed.owner.1)),
+        service_account: Some(SERVICE_ACCOUNT.into()),
         qos: seed.qos,
         age: age(seed.age),
         labels,
@@ -279,8 +281,8 @@ fn crashing_checkout() -> Seed {
         last_termination: Some(Termination {
             reason: "Error".into(),
             exit_code: 1,
-            started: Some("2026-10-20 14:08".into()),
-            finished: Some("2026-10-20 14:09".into()),
+            started: Some("14:08".into()),
+            finished: Some("14:09".into()),
             ago: Some(age(2 * MINUTE)),
             ran: Some(age(MINUTE + 12)),
         }),
