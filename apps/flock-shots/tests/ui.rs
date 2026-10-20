@@ -2925,39 +2925,50 @@ fn back_from_a_related_link_reopens_the_inspector_it_left() -> anyhow::Result<()
 }
 
 #[test]
-fn a_namespace_page_links_to_its_objects_and_back_returns_to_it() -> anyhow::Result<()> {
+fn a_namespace_page_opens_what_needs_attention_its_contents_and_its_events() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Namespace)?;
     let namespace = ui.state().location().clone();
     assert_eq!(
         namespace.detail().map(|target| target.name.as_str()),
         Some("payments")
     );
-    ui.click("related-Deployments-checkout-api")?;
+    let first = ui
+        .state()
+        .snapshot
+        .home
+        .problems
+        .iter()
+        .find(|problem| problem.target.namespace.as_deref() == Some("payments"))
+        .map(|problem| problem.target.name.clone());
+    ui.click("namespace-attention-row-0")?;
+    assert_eq!(
+        ui.state().workload().map(|target| target.name.clone()),
+        first
+    );
+    ui.click("pane-0-back")?;
+    assert_eq!(ui.state().location(), &namespace);
+    ui.click("namespace-Deployments-row-0")?;
     let workload = ui.state().workload().map(|target| target.name.clone());
     assert_eq!(workload.as_deref(), Some("checkout-api"));
     ui.click("pane-0-back")?;
-    assert_eq!(ui.state().location(), &namespace);
-    ui.click("related-Pods-checkout-api-7f9c6d-x2lqp")?;
+    assert!(ui.bounds("namespace-Pods-row-0").is_none());
+    ui.click("namespace-group-Pods")?;
+    ui.click("namespace-Pods-row-0")?;
     let pod = ui.state().location().clone();
     assert_eq!(pod.page, Page::Pods);
     assert_eq!(
         pod.resource.map(|target| target.name),
         Some("checkout-api-7f9c6d-x2lqp".to_owned())
     );
-    assert!(ui.bounds("pod-inspector-pane").is_some());
     ui.click("pane-0-back")?;
-    ui.click("pane-0-forward")?;
-    assert_eq!(ui.state().location().page, Page::Pods);
-    ui.click("pane-0-back")?;
-    ui.click("related-list-Deployments")?;
-    assert_eq!(ui.state().location().page, Page::Deployments);
-    assert_eq!(ui.state().location().resource, None);
+    ui.click("namespace-all-events")?;
+    assert_eq!(ui.state().location().page, Page::Events);
     let scoped = ui
         .state()
         .snapshot
         .catalog
         .get(&ClusterId::new("prod-us-east"))
-        .map(|settings| settings.preferences.namespace_selection("Deployment"));
+        .map(|settings| settings.preferences.namespace_selection("Event"));
     assert_eq!(
         scoped.as_ref().and_then(|selection| selection.namespace()),
         Some("payments")

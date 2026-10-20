@@ -683,11 +683,25 @@ impl Shell {
         if let Some((screen, _)) = &screens.detail {
             self.sync_detail(screen, location, cx);
         }
+        if let Some((screen, _)) = &screens.namespace {
+            self.sync_namespace(screen, location, cx);
+        }
     }
 
     pub(super) fn sync_detail(
         &self,
         screen: &Entity<crate::screens::detail::DetailScreen>,
+        location: &Location,
+        cx: &mut App,
+    ) {
+        let preferences = self.preferences_of(location);
+        let snapshot = &self.state.snapshot;
+        screen.update(cx, |screen, cx| screen.set(snapshot, &preferences, cx));
+    }
+
+    pub(super) fn sync_namespace(
+        &self,
+        screen: &Entity<crate::screens::namespace::NamespaceScreen>,
         location: &Location,
         cx: &mut App,
     ) {

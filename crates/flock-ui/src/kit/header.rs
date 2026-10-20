@@ -16,6 +16,7 @@ const META_LINE: &str = "meta-line";
 #[derive(IntoElement)]
 pub struct PageHeader {
     title: SharedString,
+    kicker: Option<SharedString>,
     mono: bool,
     status: Option<(Status, SharedString)>,
     actions: Vec<AnyElement>,
@@ -29,6 +30,7 @@ impl PageHeader {
     pub fn new(title: impl Into<SharedString>) -> Self {
         Self {
             title: title.into(),
+            kicker: None,
             mono: false,
             status: None,
             actions: Vec::new(),
@@ -41,6 +43,11 @@ impl PageHeader {
 
     pub fn leading(mut self, element: Option<impl IntoElement>) -> Self {
         self.leading = element.map(IntoElement::into_any_element);
+        self
+    }
+
+    pub fn kicker(mut self, kicker: impl Into<SharedString>) -> Self {
+        self.kicker = Some(kicker.into());
         self
     }
 
@@ -90,6 +97,16 @@ impl RenderOnce for PageHeader {
             .items_center()
             .gap(SPACE_5)
             .children(self.leading)
+            .when_some(self.kicker, |row, kicker| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .font_family(FONT_MONO)
+                        .text_size(TEXT_SMALL)
+                        .text_color(mute)
+                        .child(kicker),
+                )
+            })
             .child(title)
             .when_some(self.status, |row, (status, label)| {
                 row.child(

@@ -34,12 +34,6 @@ const MEMORY: &str = "memory";
 const REVISION_ANNOTATION: &str = "deployment.kubernetes.io/revision";
 const CHANGE_CAUSE: &str = "kubernetes.io/change-cause";
 const REVISION_HASH_LABEL: &str = "controller-revision-hash";
-const KUSTOMIZE_NAME: &str = "kustomize.toolkit.fluxcd.io/name";
-const KUSTOMIZE_NAMESPACE: &str = "kustomize.toolkit.fluxcd.io/namespace";
-const HELM_NAME: &str = "helm.toolkit.fluxcd.io/name";
-const HELM_NAMESPACE: &str = "helm.toolkit.fluxcd.io/namespace";
-const KUSTOMIZATION: &str = "Kustomization";
-const HELM_RELEASE: &str = "HelmRelease";
 const TEMPLATE_IMAGE: &str = "/spec/template/spec/containers/0/image";
 const DEFAULT_REPLICAS: i32 = 1;
 const DEFAULT_PERIOD_SECS: i32 = 10;
@@ -66,17 +60,7 @@ fn owner_key(target: &ResourceRef) -> OwnerKey {
 
 pub fn managed_by(target: &ResourceRef, meta: &ObjectMeta) -> Option<ResourceRef> {
     let labels = meta.labels.as_ref()?;
-    let flux = |name: &str, namespace: &str, kind: &str| {
-        let name = labels.get(name)?;
-        Some(ResourceRef {
-            cluster: target.cluster.clone(),
-            kind: kind.to_owned(),
-            namespace: labels.get(namespace).cloned(),
-            name: name.clone(),
-        })
-    };
-    flux(HELM_NAME, HELM_NAMESPACE, HELM_RELEASE)
-        .or_else(|| flux(KUSTOMIZE_NAME, KUSTOMIZE_NAMESPACE, KUSTOMIZATION))
+    flock_core::flux::managed_by(&target.cluster, labels)
 }
 
 fn quantity(map: Option<&BTreeMap<String, Quantity>>, key: &str) -> Option<String> {

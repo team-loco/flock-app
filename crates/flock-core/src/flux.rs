@@ -18,6 +18,10 @@ const NOTHING_APPLIED_RETRYING: &str =
     "Nothing applied: the last reconcile failed and is being retried.";
 const NOTHING_APPLIED_SUSPENDED: &str = "Nothing applied while suspended.";
 const NOTHING_MANAGED: &str = "This object manages nothing.";
+const KUSTOMIZE_NAME: &str = "kustomize.toolkit.fluxcd.io/name";
+const KUSTOMIZE_NAMESPACE: &str = "kustomize.toolkit.fluxcd.io/namespace";
+const HELM_NAME: &str = "helm.toolkit.fluxcd.io/name";
+const HELM_NAMESPACE: &str = "helm.toolkit.fluxcd.io/namespace";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum FluxKind {
@@ -622,6 +626,20 @@ impl Snapshot {
     }
 }
 
+pub fn managed_by(cluster: &ClusterId, labels: &BTreeMap<String, String>) -> Option<ResourceRef> {
+    let owner = |name: &str, namespace: &str, kind: FluxKind| {
+        let name = labels.get(name)?;
+        Some(ResourceRef {
+            cluster: cluster.clone(),
+            kind: kind.label().to_owned(),
+            namespace: labels.get(namespace).cloned(),
+            name: name.clone(),
+        })
+    };
+    owner(HELM_NAME, HELM_NAMESPACE, FluxKind::HelmRelease)
+        .or_else(|| owner(KUSTOMIZE_NAME, KUSTOMIZE_NAMESPACE, FluxKind::Kustomization))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -942,5 +960,27 @@ pub(crate) mod tests {
             Span::Text(" did not become ready.".into()),
         ]);
         assert_eq!(sentence.plain(), "checkout-api did not become ready.");
+    }
+
+    #[test]
+    fn flux_labels_name_the_owner_and_helm_wins_over_kustomize() {
+        let cluster = ClusterId::new("a");
+        let mut labels = BTreeMap::from([
+            (KUSTOMIZE_NAME.to_owned(), "apps-payments".to_owned()),
+            (KUSTOMIZE_NAMESPACE.to_owned(), "flux-system".to_owned()),
+        ]);
+        let owner = managed_by(&cluster, &labels);
+        assert_eq!(
+            owner.map(|o| (o.kind, o.namespace, o.name)),
+            Some((
+                "Kustomization".to_owned(),
+                Some("flux-system".to_owned()),
+                "apps-payments".to_owned()
+            ))
+        );
+        labels.insert(HELM_NAME.to_owned(), "payments".to_owned());
+        let owner = managed_by(&cluster, &labels);
+        assert_eq!(owner.map(|o| o.kind), Some("HelmRelease".to_owned()));
+        assert_eq!(managed_by(&cluster, &BTreeMap::new()), None);
     }
 }

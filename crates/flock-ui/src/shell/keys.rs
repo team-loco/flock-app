@@ -130,6 +130,9 @@ impl Shell {
         if let Some((screen, _)) = &screens.detail {
             return Some(screen.focus_handle(cx));
         }
+        if let Some((screen, _)) = &screens.namespace {
+            return Some(screen.focus_handle(cx));
+        }
         self.state
             .location()
             .flux_object
@@ -167,6 +170,9 @@ impl Shell {
             return Some(screen.read(cx).list_focus(cx));
         }
         if let Some((screen, _)) = &screens.detail {
+            return Some(screen.focus_handle(cx));
+        }
+        if let Some((screen, _)) = &screens.namespace {
             return Some(screen.focus_handle(cx));
         }
         if self.state.location().flux_object.is_some() {

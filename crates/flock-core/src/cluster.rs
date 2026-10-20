@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use crate::events::{self, Event};
 use crate::filter::{FilterSpec, TextFilter};
+use crate::namespace::NamespaceDetail;
 use crate::nodes::{Node, NodeSummary};
 use crate::overview::{Capacity, Overview, WorkloadHealth};
 use crate::related::Related;
@@ -160,6 +161,7 @@ pub struct ClusterDetail {
     pub events: Vec<Event>,
     pub resources: BTreeMap<ResourceKind, Vec<Resource>>,
     pub related: Vec<Related>,
+    pub namespace_details: Vec<NamespaceDetail>,
 }
 
 impl ClusterDetail {
@@ -191,6 +193,12 @@ impl ClusterDetail {
         self.related
             .iter()
             .find(|related| &related.target == target)
+    }
+
+    pub fn namespace_detail(&self, name: &str) -> Option<&NamespaceDetail> {
+        self.namespace_details
+            .iter()
+            .find(|detail| detail.name == name)
     }
 
     pub fn resources(&self, kind: ResourceKind) -> &[Resource] {

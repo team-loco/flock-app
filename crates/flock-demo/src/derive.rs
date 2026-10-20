@@ -92,6 +92,7 @@ pub fn cluster(
         resources: resources(&template.detail.resources, share, checkout),
         nodes,
         related: Vec::new(),
+        namespace_details: Vec::new(),
     };
     let pods = pods(
         summary,

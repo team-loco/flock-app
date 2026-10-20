@@ -8,7 +8,8 @@ use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Event, Namespace, Node, PersistentVolumeClaim, Pod, Secret, Service, ServiceAccount,
+    ConfigMap, Event, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret, Service,
+    ServiceAccount,
 };
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
@@ -71,6 +72,7 @@ pub enum WatchKind {
     Secrets,
     ServiceAccounts,
     NetworkPolicies,
+    ResourceQuotas,
     Events,
     PersistentVolumeClaims,
     CustomResourceDefinitions,
@@ -96,6 +98,7 @@ impl WatchKind {
             Self::Secrets => "Secret",
             Self::ServiceAccounts => "ServiceAccount",
             Self::NetworkPolicies => "NetworkPolicy",
+            Self::ResourceQuotas => "ResourceQuota",
             Self::Events => "Event",
             Self::PersistentVolumeClaims => "PersistentVolumeClaim",
             Self::CustomResourceDefinitions => "CustomResourceDefinition",
@@ -132,7 +135,8 @@ watched! {
     PartialObjectMeta<ConfigMap> => ConfigMaps,
     PartialObjectMeta<Secret> => Secrets,
     PartialObjectMeta<ServiceAccount> => ServiceAccounts,
-    PartialObjectMeta<NetworkPolicy> => NetworkPolicies,
+    NetworkPolicy => NetworkPolicies,
+    ResourceQuota => ResourceQuotas,
     Event => Events,
     PersistentVolumeClaim => PersistentVolumeClaims,
     CustomResourceDefinition => CustomResourceDefinitions,
@@ -287,9 +291,8 @@ pub fn spawn_builtin(
         WatchKind::ServiceAccounts => {
             spawn_full::<PartialObjectMeta<ServiceAccount>>(runtime, client, signals)
         }
-        WatchKind::NetworkPolicies => {
-            spawn_full::<PartialObjectMeta<NetworkPolicy>>(runtime, client, signals)
-        }
+        WatchKind::NetworkPolicies => spawn_full::<NetworkPolicy>(runtime, client, signals),
+        WatchKind::ResourceQuotas => spawn_full::<ResourceQuota>(runtime, client, signals),
         WatchKind::Events => spawn_events(runtime, client, event_window, signals),
         WatchKind::PersistentVolumeClaims => {
             spawn_full::<PersistentVolumeClaim>(runtime, client, signals)

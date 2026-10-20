@@ -1,8 +1,6 @@
 use std::rc::Rc;
 
-use flock_core::cluster::Namespace;
-use flock_core::overview::plural;
-use flock_core::related::{JOB, ListLink, NAMESPACE, Related};
+use flock_core::related::{JOB, ListLink, Related};
 use flock_core::resources::{EVENT_LIST, POD_LIST, Resource, ResourceKind};
 use flock_core::settings::NamespaceSelection;
 use flock_core::{Command, LogTarget, Page, Preferences, ResourceRef, Snapshot, Status};
@@ -20,17 +18,12 @@ use crate::theme::{ActiveTheme, SPACE_8};
 const YAML: &str = "YAML";
 const ALL_LOGS: &str = "Logs for all pods";
 const SEPARATOR: &str = " · ";
-const POD: &str = "pod";
-const PODS: &str = "pods";
-const NEEDS_ATTENTION: &str = "needs attention";
-const NEED_ATTENTION: &str = "need attention";
 const GONE: &str = "is not on this cluster any more.";
 
 pub struct DetailScreen {
     pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     target: ResourceRef,
     row: Option<Resource>,
-    namespace: Option<Namespace>,
     related: Option<Related>,
     preferences: Preferences,
     loaded: bool,
@@ -59,30 +52,12 @@ fn list_key(page: Page) -> Option<&'static str> {
     }
 }
 
-fn attention(flagged: usize) -> String {
-    plural(flagged, NEEDS_ATTENTION, NEED_ATTENTION)
-}
-
-fn pods_listed(related: &Related) -> Option<usize> {
-    related
-        .groups
-        .iter()
-        .find(|group| {
-            group
-                .list
-                .as_ref()
-                .is_some_and(|list| list.page == Page::Pods)
-        })
-        .map(|group| group.total)
-}
-
 impl DetailScreen {
     pub fn new(target: ResourceRef, cx: &mut Context<Self>) -> Self {
         Self {
             navigation: None,
             target,
             row: None,
-            namespace: None,
             related: None,
             preferences: Preferences::default(),
             loaded: false,
@@ -108,21 +83,11 @@ impl DetailScreen {
                     })
                     .cloned()
             });
-        let namespace = detail
-            .filter(|_| self.target.kind == NAMESPACE)
-            .and_then(|detail| {
-                detail
-                    .namespaces
-                    .iter()
-                    .find(|namespace| namespace.name == self.target.name)
-                    .cloned()
-            });
         let related = detail
             .and_then(|detail| detail.related(&self.target).cloned())
             .or_else(|| self.related.clone());
         let loaded = detail.is_some();
         let unchanged = self.row == row
-            && self.namespace == namespace
             && self.related == related
             && self.loaded == loaded
             && &self.preferences == preferences;
@@ -130,7 +95,6 @@ impl DetailScreen {
             return;
         }
         self.row = row;
-        self.namespace = namespace;
         self.related = related;
         self.loaded = loaded;
         self.preferences = preferences.clone();
@@ -155,19 +119,6 @@ impl DetailScreen {
     }
 
     fn status(&self) -> Option<(Status, String)> {
-        if let Some(namespace) = &self.namespace {
-            let flagged = namespace.problems.flagged();
-            let label = if flagged == 0 {
-                namespace.phase.clone()
-            } else {
-                format!(
-                    "{}{SEPARATOR}{}",
-                    namespace.phase,
-                    attention(flagged as usize)
-                )
-            };
-            return Some((namespace.status, label));
-        }
         let row = self.row.as_ref()?;
         let label = kind_of(&self.target)
             .and_then(|kind| kind.status_cell(row))
@@ -178,11 +129,6 @@ impl DetailScreen {
     fn meta(&self) -> String {
         let mut parts = vec![self.target.kind.clone()];
         parts.extend(self.target.namespace.clone());
-        if let Some(namespace) = &self.namespace {
-            let listed = self.related.as_ref().and_then(pods_listed);
-            let pods = listed.unwrap_or(namespace.pods as usize);
-            parts.push(plural(pods, POD, PODS));
-        }
         parts.join(SEPARATOR)
     }
 
@@ -249,7 +195,7 @@ impl Render for DetailScreen {
             .flex_col()
             .bg(palette.editor)
             .child(self.header(cx));
-        let missing = self.loaded && self.row.is_none() && self.namespace.is_none();
+        let missing = self.loaded && self.row.is_none();
         if missing {
             let sentence = format!("{} {} {GONE}", self.target.kind, self.target);
             return root.child(EmptyState::new(sentence).selector("detail-gone"));
@@ -285,36 +231,5 @@ mod tests {
         assert_eq!(list_key(Page::Events), Some(EVENT_LIST));
         assert_eq!(list_key(Page::Pvcs), Some("PersistentVolumeClaim"));
         assert_eq!(list_key(Page::Nodes), None);
-    }
-
-    #[test]
-    fn one_flagged_pod_needs_attention_and_two_need_it() {
-        assert_eq!(attention(1), "1 needs attention");
-        assert_eq!(attention(2), "2 need attention");
-    }
-
-    #[test]
-    fn the_pod_count_is_the_listed_pods_including_finished_ones() {
-        let target = ResourceRef {
-            cluster: flock_core::ClusterId::new("a"),
-            kind: NAMESPACE.into(),
-            namespace: None,
-            name: "reports".into(),
-        };
-        let pods = flock_core::related::Group {
-            title: "Pods".into(),
-            items: Vec::new(),
-            total: 100,
-            counts: flock_core::Counts::default(),
-            list: Some(ListLink {
-                page: Page::Pods,
-                namespace: "reports".into(),
-            }),
-        };
-        let related = Related {
-            target,
-            groups: vec![pods],
-        };
-        assert_eq!(pods_listed(&related), Some(100));
     }
 }

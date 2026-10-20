@@ -14,6 +14,7 @@ mod lists;
 #[cfg(feature = "loco")]
 mod loco;
 mod multi_logs;
+mod namespace;
 mod pod_streams;
 mod pods;
 mod related;
