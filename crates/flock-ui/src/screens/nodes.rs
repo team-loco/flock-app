@@ -109,7 +109,8 @@ impl NodesScreen {
             this.select(name, cx);
         })
         .detach();
-        let filter = cx.new(|cx| FilterBar::new("node-filter", window, cx));
+        let filter =
+            cx.new(|cx| FilterBar::new("node-filter", Node::FILTER.placeholder(), window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })

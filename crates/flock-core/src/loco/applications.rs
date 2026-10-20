@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use super::Workspace;
-use crate::filter::TextFilter;
+use crate::filter::{FilterSpec, TextFilter};
 use crate::time::age;
 use crate::{ClusterId, ResourceRef, Seen, Status, Uid};
 
@@ -303,16 +303,35 @@ pub struct Applications {
 }
 
 impl Application {
+    pub const FILTER: FilterSpec<Self, Workspace> = FilterSpec {
+        fields: &[
+            ("name", |a, _, out| out.push(a.name.as_str().into())),
+            ("environment", |a, _, out| {
+                out.push(a.environment.as_str().into());
+            }),
+            ("workspace", |_, w, out| out.push(w.label().into())),
+            ("namespace", |_, w, out| {
+                out.push(w.namespace.as_str().into());
+            }),
+            ("image", |a, _, out| {
+                out.push(a.image.as_deref().unwrap_or_default().into());
+            }),
+            ("hostname", |a, _, out| {
+                out.push(a.hostname.as_deref().unwrap_or_default().into());
+            }),
+        ],
+        namespace: true,
+        labels: true,
+    };
+
     pub fn matches(&self, workspace: &Workspace, query: &TextFilter) -> bool {
-        let fields = [
-            self.name.as_str(),
-            self.environment.as_str(),
-            workspace.label(),
-            workspace.namespace.as_str(),
-            self.image.as_deref().unwrap_or_default(),
-            self.hostname.as_deref().unwrap_or_default(),
-        ];
-        query.matches_labeled(Some(&workspace.namespace), &self.labels, &fields)
+        Self::FILTER.matches_in(
+            self,
+            workspace,
+            query,
+            Some(&workspace.namespace),
+            &[&self.labels],
+        )
     }
 }
 

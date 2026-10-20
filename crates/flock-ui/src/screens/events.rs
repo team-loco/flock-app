@@ -104,8 +104,10 @@ impl EventsScreen {
             this.choose_namespace(scope, cx);
         })
         .detach();
-        let filter =
-            cx.new(|cx| FilterBar::new("event-filter", window, cx).scope(namespaces.clone()));
+        let filter = cx.new(|cx| {
+            FilterBar::new("event-filter", Event::FILTER.placeholder(), window, cx)
+                .scope(namespaces.clone())
+        });
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })

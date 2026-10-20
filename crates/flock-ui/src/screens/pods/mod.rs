@@ -118,7 +118,10 @@ impl PodsScreen {
                 .mono()
                 .width(NAMESPACE_SELECT)
         });
-        let filter = cx.new(|cx| FilterBar::new("pod-filter", window, cx).scope(namespace.clone()));
+        let filter = cx.new(|cx| {
+            FilterBar::new("pod-filter", Pod::FILTER.placeholder(), window, cx)
+                .scope(namespace.clone())
+        });
         let containers = cx.new(|cx| {
             Select::new("pod-container", Vec::new(), cx)
                 .mono()

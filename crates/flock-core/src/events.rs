@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use crate::filter::TextFilter;
+use crate::filter::{FilterSpec, TextFilter};
 use crate::{ClusterId, Command, Counts, FluxKey, FluxKind, ResourceRef, Status};
 
 pub const FLUX_EVENT_KINDS: [&str; 6] = [
@@ -110,15 +110,22 @@ impl Event {
         self.status != Status::Ok
     }
 
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("reason", |e, (), out| out.push(e.reason.as_str().into())),
+            ("object", |e, (), out| out.push(e.object.as_str().into())),
+            ("message", |e, (), out| out.push(e.message.as_str().into())),
+            ("namespace", |e, (), out| {
+                out.push(e.namespace.as_deref().unwrap_or_default().into());
+            }),
+        ],
+        namespace: true,
+        labels: true,
+    };
+
     fn matches(&self, filter: EventFilter, query: &TextFilter) -> bool {
-        let fields = [
-            self.reason.as_str(),
-            self.object.as_str(),
-            self.message.as_str(),
-            self.namespace.as_deref().unwrap_or_default(),
-        ];
         filter.keeps(self)
-            && query.matches_labeled(self.namespace.as_deref(), &self.labels, &fields)
+            && Self::FILTER.matches(self, query, self.namespace.as_deref(), &[&self.labels])
     }
 }
 
@@ -237,18 +244,31 @@ impl ClusterEvent {
         Some(Command::OpenFluxObject(key))
     }
 
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("cluster", |e, (), out| {
+                out.push(e.cluster_name.as_str().into());
+            }),
+            ("kind", |e, (), out| out.push(e.kind().into())),
+            ("reason", |e, (), out| {
+                out.push(e.event.reason.as_str().into());
+            }),
+            ("name", |e, (), out| out.push(e.name().into())),
+            ("message", |e, (), out| {
+                out.push(e.event.message.as_str().into());
+            }),
+            ("namespace", |e, (), out| {
+                out.push(e.event.namespace.as_deref().unwrap_or_default().into());
+            }),
+        ],
+        namespace: true,
+        labels: true,
+    };
+
     fn matches(&self, filter: EventFilter, query: &TextFilter) -> bool {
         let event = &self.event;
-        let fields = [
-            self.cluster_name.as_str(),
-            self.kind(),
-            event.reason.as_str(),
-            self.name(),
-            event.message.as_str(),
-            event.namespace.as_deref().unwrap_or_default(),
-        ];
         filter.keeps(event)
-            && query.matches_labeled(event.namespace.as_deref(), &event.labels, &fields)
+            && Self::FILTER.matches(self, query, event.namespace.as_deref(), &[&event.labels])
     }
 }
 

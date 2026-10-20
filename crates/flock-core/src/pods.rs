@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::filter::TextFilter;
+use crate::filter::{FilterSpec, TextFilter};
 use std::time::Duration;
 
 use crate::diagnosis::{self, Condition, Diagnosis};
@@ -312,22 +312,27 @@ pub fn nav_counts(pods: &[Pod], cluster: &ClusterId) -> Counts {
     Counts::total(tally(PodFilter::All)).with_err(tally(PodFilter::Failing))
 }
 
+impl Pod {
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("name", |p, (), out| out.push(p.name.as_str().into())),
+            ("namespace", |p, (), out| {
+                out.push(p.namespace.as_str().into());
+            }),
+            ("node", |p, (), out| {
+                out.push(p.node.as_deref().unwrap_or_default().into());
+            }),
+            ("label", |p, (), out| {
+                out.extend(p.labels.iter().map(|(k, v)| format!("{k}={v}").into()));
+            }),
+        ],
+        namespace: true,
+        labels: true,
+    };
+}
+
 pub fn matches_query(pod: &Pod, query: &TextFilter) -> bool {
-    if query.is_empty() {
-        return true;
-    }
-    let pairs: Vec<String> = pod
-        .labels
-        .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect();
-    let mut fields: Vec<&str> = vec![
-        pod.name.as_str(),
-        pod.namespace.as_str(),
-        pod.node.as_deref().unwrap_or_default(),
-    ];
-    fields.extend(pairs.iter().map(String::as_str));
-    query.matches_labeled(Some(&pod.namespace), &pod.labels, &fields)
+    Pod::FILTER.matches(pod, query, Some(&pod.namespace), &[&pod.labels])
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

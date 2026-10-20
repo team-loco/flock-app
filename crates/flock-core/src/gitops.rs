@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use crate::filter::TextFilter;
+use crate::filter::{FilterScope, FilterSpec, TextFilter};
 use crate::{ClusterId, ClusterSummary, ResourceRef, Status};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -68,15 +68,20 @@ impl SyncRow {
         self.cells.iter().any(SyncCell::out_of_sync)
     }
 
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("name", |r, (), out| out.push(r.name.as_str().into())),
+            ("namespace", |r, (), out| {
+                out.push(r.namespace.as_str().into());
+            }),
+        ],
+        namespace: true,
+        labels: true,
+    };
+
     pub fn matches(&self, query: &TextFilter) -> bool {
-        let fields = [self.name.as_str(), self.namespace.as_str()];
-        query.matches_namespace(Some(&self.namespace))
-            && query.matches_text(&fields)
-            && (query.labels.is_empty()
-                || self
-                    .label_sets
-                    .iter()
-                    .any(|labels| query.matches_labels(labels)))
+        let label_sets: Vec<&BTreeMap<String, String>> = self.label_sets.iter().collect();
+        Self::FILTER.matches(self, query, Some(&self.namespace), &label_sets)
     }
 
     pub fn target(&self, cluster: &ClusterId) -> ResourceRef {
@@ -197,13 +202,24 @@ pub struct Source {
 }
 
 impl Source {
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("name", |s, (), out| out.push(s.name.as_str().into())),
+            ("namespace", |s, (), out| {
+                out.push(s.namespace.as_str().into());
+            }),
+            ("url", |s, (), out| out.push(s.url.as_str().into())),
+        ],
+        namespace: true,
+        labels: false,
+    };
+
     pub fn matches(&self, query: &TextFilter) -> bool {
-        let fields = [
-            self.name.as_str(),
-            self.namespace.as_str(),
-            self.url.as_str(),
-        ];
-        query.matches(Some(&self.namespace), &fields)
+        Self::FILTER.matches(self, query, Some(&self.namespace), &[])
+    }
+
+    pub fn page_scope() -> FilterScope {
+        Self::FILTER.scope().union(SyncRow::FILTER.scope())
     }
 
     pub fn status(&self) -> Status {

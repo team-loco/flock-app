@@ -168,8 +168,15 @@ impl ResourcesScreen {
                 .mono()
                 .width(SELECT_WIDTH)
         });
-        let filter =
-            cx.new(|cx| FilterBar::new("resource-filter", window, cx).scope(namespaces.clone()));
+        let filter = cx.new(|cx| {
+            FilterBar::new(
+                "resource-filter",
+                Resource::FILTER.placeholder(),
+                window,
+                cx,
+            )
+            .scope(namespaces.clone())
+        });
         let subscriptions = vec![
             cx.subscribe(&namespaces, |this, select, _: &SelectEvent, cx| {
                 let choice = chosen_namespace(select.read(cx));

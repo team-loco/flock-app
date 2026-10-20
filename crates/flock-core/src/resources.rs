@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::diagnosis::{self, Condition, Diagnosis};
 use crate::events::Event;
-use crate::filter::{StatusFilter, TextFilter};
+use crate::filter::{FilterSpec, StatusFilter, TextFilter};
 use crate::{Page, Status, Uid};
 
 const READY_COLUMN: &str = "Ready";
@@ -159,10 +159,20 @@ impl Resource {
         diagnosis::about(events, kind.name(), Some(&self.namespace), &self.name)
     }
 
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("name", |r, (), out| out.push(r.name.as_str().into())),
+            ("namespace", |r, (), out| {
+                out.push(r.namespace.as_str().into());
+            }),
+        ],
+        namespace: true,
+        labels: true,
+    };
+
     pub fn matches(&self, namespace: Option<&str>, query: &TextFilter) -> bool {
         let in_namespace = namespace.is_none_or(|ns| ns == self.namespace);
-        let fields = [self.name.as_str(), self.namespace.as_str()];
-        in_namespace && query.matches_labeled(Some(&self.namespace), &self.labels, &fields)
+        in_namespace && Self::FILTER.matches(self, query, Some(&self.namespace), &[&self.labels])
     }
 }
 

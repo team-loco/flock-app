@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::events::{self, Event, recent_warnings};
-use crate::filter::TextFilter;
+use crate::filter::{FilterSpec, TextFilter};
 use crate::nodes::{Node, NodeSummary};
 use crate::overview::{Capacity, Overview, WorkloadHealth};
 use crate::related::Related;
@@ -28,12 +28,17 @@ pub struct Namespace {
 }
 
 impl Namespace {
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("name", |n, (), out| out.push(n.name.as_str().into())),
+            ("phase", |n, (), out| out.push(n.phase.as_str().into())),
+        ],
+        namespace: true,
+        labels: true,
+    };
+
     pub fn matches(&self, query: &TextFilter) -> bool {
-        query.matches_labeled(
-            Some(&self.name),
-            &self.labels,
-            &[self.name.as_str(), self.phase.as_str()],
-        )
+        Self::FILTER.matches(self, query, Some(&self.name), &[&self.labels])
     }
 
     pub fn cpu_label(&self) -> String {

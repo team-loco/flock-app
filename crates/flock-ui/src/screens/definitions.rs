@@ -41,7 +41,8 @@ impl DefinitionsScreen {
                 .row_key(|d: &Definition| d.name().into())
                 .click_opens()
         });
-        let filter = cx.new(|cx| FilterBar::new(FILTER_ID, window, cx));
+        let filter =
+            cx.new(|cx| FilterBar::new(FILTER_ID, Definition::FILTER.placeholder(), window, cx));
         let subscriptions = vec![
             cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
                 let TableEvent::Opened(ix) = *event else {

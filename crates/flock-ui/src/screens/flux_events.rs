@@ -47,7 +47,14 @@ impl FluxEventsScreen {
             }
         })
         .detach();
-        let filter = cx.new(|cx| FilterBar::new("flux-events-filter", window, cx));
+        let filter = cx.new(|cx| {
+            FilterBar::new(
+                "flux-events-filter",
+                ClusterEvent::FILTER.placeholder(),
+                window,
+                cx,
+            )
+        });
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })

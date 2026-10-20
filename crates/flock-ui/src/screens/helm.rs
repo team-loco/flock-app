@@ -64,7 +64,8 @@ impl EventEmitter<ScreenEvent> for HelmReleasesScreen {}
 
 impl HelmReleasesScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter = cx.new(|cx| FilterBar::new("helm-filter", window, cx));
+        let filter = cx
+            .new(|cx| FilterBar::new("helm-filter", HelmRelease::FILTER.placeholder(), window, cx));
         let table = cx.new(|cx| {
             Table::new("helm-releases", columns(), cx)
                 .row_key(|r: &HelmRelease| format!("{}/{}", r.key.namespace, r.key.name).into())

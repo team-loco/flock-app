@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::filter::TextFilter;
+use crate::filter::{FilterSpec, TextFilter};
 use crate::flux::HelmRevision;
 use crate::{ClusterId, FluxKey, Status};
 
@@ -49,16 +49,24 @@ impl HelmRelease {
         format!("{}-{}", self.chart, self.chart_version)
     }
 
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("name", |r, (), out| out.push(r.key.name.as_str().into())),
+            ("namespace", |r, (), out| {
+                out.push(r.key.namespace.as_str().into());
+            }),
+            ("chart", |r, (), out| out.push(r.chart_label().into())),
+            ("version", |r, (), out| {
+                out.push(r.app_version.as_str().into());
+            }),
+            ("status", |r, (), out| out.push(r.state.as_str().into())),
+        ],
+        namespace: true,
+        labels: false,
+    };
+
     pub fn matches(&self, query: &TextFilter) -> bool {
-        let chart = self.chart_label();
-        let fields = [
-            self.key.name.as_str(),
-            self.key.namespace.as_str(),
-            chart.as_str(),
-            self.app_version.as_str(),
-            self.state.as_str(),
-        ];
-        query.matches(Some(&self.key.namespace), &fields)
+        Self::FILTER.matches(self, query, Some(&self.key.namespace), &[])
     }
 }
 

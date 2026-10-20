@@ -43,7 +43,8 @@ impl FluxListScreen {
                 .row_key(|o: &FluxObject| format!("{}/{}", o.key.namespace, o.key.name).into())
                 .type_ahead(|o: &FluxObject| o.key.name.clone().into())
         });
-        let filter = cx.new(|cx| FilterBar::new("flux-filter", window, cx));
+        let filter = cx
+            .new(|cx| FilterBar::new("flux-filter", FluxObject::FILTER.placeholder(), window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })
@@ -113,14 +114,7 @@ impl FluxListScreen {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let base: Vec<&FluxObject> = self
-            .objects
-            .iter()
-            .filter(|o| {
-                let fields = [o.key.name.as_str(), o.key.kind.label()];
-                query.matches_labeled(Some(&o.key.namespace), &o.labels, &fields)
-            })
-            .collect();
+        let base: Vec<&FluxObject> = self.objects.iter().filter(|o| o.matches(&query)).collect();
         let chips = StatusFilter::counts(base.iter().map(|o| o.status()))
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))
