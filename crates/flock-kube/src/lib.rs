@@ -8,6 +8,7 @@ pub mod clock;
 pub mod cluster_changes;
 pub mod compare;
 pub mod conditions;
+pub mod control_plane;
 pub mod crd;
 pub mod detail;
 pub mod discovery;

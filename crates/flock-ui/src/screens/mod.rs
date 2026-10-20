@@ -384,6 +384,7 @@ impl ClusterPages {
             Page::Nodes => self.nodes.read(cx).inspecting(),
             Page::Events => self.events.read(cx).inspecting(),
             Page::CustomResources => self.custom.read(cx).inspecting(),
+            Page::ClusterOverview => self.overview.read(cx).inspecting(),
             other if ResourceKind::for_page(other).is_some() => {
                 self.resources.read(cx).inspecting()
             }
@@ -398,6 +399,7 @@ impl ClusterPages {
             Page::CustomResources => self
                 .custom
                 .update(cx, CustomResourcesScreen::close_inspector),
+            Page::ClusterOverview => self.overview.update(cx, OverviewScreen::close_inspector),
             other if ResourceKind::for_page(other).is_some() => {
                 self.resources.update(cx, ResourcesScreen::close_inspector)
             }

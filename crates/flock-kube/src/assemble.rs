@@ -53,6 +53,7 @@ pub struct Extras {
     pub polled: bool,
     pub prometheus: Option<Prometheus>,
     pub observed: Observed,
+    pub control_plane: crate::control_plane::State,
 }
 
 impl Extras {
@@ -297,6 +298,7 @@ fn cluster_detail(
             network,
             unready_services,
             changes: object_changes(id, handle, extras, parts, now),
+            control_plane: extras.control_plane.view(&TimeZone::system()),
         },
         nodes,
         namespaces: detail::namespaces(

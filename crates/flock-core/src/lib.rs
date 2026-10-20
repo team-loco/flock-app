@@ -6,6 +6,7 @@ pub mod cluster;
 pub mod cluster_changes;
 pub mod compare;
 pub mod condition_line;
+pub mod control_plane;
 pub mod crd;
 pub mod diagnosis;
 pub mod edit;

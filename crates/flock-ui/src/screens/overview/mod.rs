@@ -1,5 +1,7 @@
+mod api_drill;
 mod changes;
 mod charts;
+mod control_plane;
 mod facts;
 mod header;
 mod namespaces;
@@ -10,6 +12,7 @@ mod workloads;
 
 use flock_core::cluster::{Namespace, NamespaceSort};
 use flock_core::cluster_changes::{ClusterChange, newest_first};
+use flock_core::control_plane::ControlPlane;
 use flock_core::node_pools::{KubeletSkew, NodePool};
 use flock_core::nodes::NodeSummary;
 use flock_core::overview::{
@@ -21,9 +24,9 @@ use flock_core::{
     ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Page, ResourceRef, Status,
 };
 use gpui::{
-    AnyElement, App, AppContext, Context, Div, ElementId, Entity, EventEmitter, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement, Styled,
-    Window, div, relative,
+    AnyElement, App, AppContext, Context, Div, ElementId, Entity, EventEmitter, FocusHandle,
+    InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Window, div, relative,
 };
 
 use super::ScreenEvent;
@@ -39,6 +42,7 @@ const LIVE_TOOLTIP: &str = "Follow new data; turn off to hold the current view";
 const SEPARATOR: &str = " · ";
 const ACTIONS: &str = "overview-actions";
 const SCROLL: &str = "overview-scroll";
+const ESCAPE: &str = "escape";
 const CLUSTER_SETTINGS: &str = "Cluster settings";
 const CLUSTER_SETTINGS_DESCRIPTION: &str =
     "Change this cluster's default namespace, metrics source and labels.";
@@ -63,6 +67,7 @@ struct OverviewData {
     tops: PodTops,
     namespaces: Vec<Namespace>,
     changes: Vec<ClusterChange>,
+    control_plane: ControlPlane,
 }
 
 impl OverviewData {
@@ -99,6 +104,7 @@ impl OverviewData {
             tops: detail.overview.tops.clone(),
             namespaces: detail.namespaces.clone(),
             changes,
+            control_plane: detail.overview.control_plane.clone(),
         }
     }
 }
@@ -109,6 +115,9 @@ pub struct OverviewScreen {
     live: bool,
     range: TimeRange,
     sort: NamespaceSort,
+    drill: bool,
+    code: Option<String>,
+    focus: FocusHandle,
     menu: Entity<ActionMenu>,
 }
 
@@ -123,6 +132,9 @@ impl OverviewScreen {
             live: true,
             range: TimeRange::default(),
             sort: NamespaceSort::default(),
+            drill: false,
+            code: None,
+            focus: cx.focus_handle(),
             menu,
         }
     }
@@ -151,6 +163,8 @@ impl OverviewScreen {
             .is_none_or(|shown| shown.cluster != data.cluster)
         {
             self.set_actions(data.cluster.clone(), cx);
+            self.drill = false;
+            self.code = None;
         }
         self.data = Some(data);
         cx.notify();
@@ -218,6 +232,32 @@ impl OverviewScreen {
         }
     }
 
+    pub fn inspecting(&self) -> bool {
+        self.drill
+    }
+
+    pub fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
+        let open = self.drill;
+        self.close_drill(cx);
+        open
+    }
+
+    fn toggle_drill(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.drill = !self.drill;
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    fn close_drill(&mut self, cx: &mut Context<Self>) {
+        self.drill = false;
+        cx.notify();
+    }
+
+    fn filter_code(&mut self, code: Option<String>, cx: &mut Context<Self>) {
+        self.code = code;
+        cx.notify();
+    }
+
     fn sort_by(&mut self, sort: NamespaceSort, cx: &mut Context<Self>) {
         self.sort = sort;
         cx.notify();
@@ -254,13 +294,17 @@ impl Render for OverviewScreen {
             .into_iter()
             .chain(pools::render(&data, &palette, cx))
             .collect();
+        let facts_band: Vec<AnyElement> =
+            std::iter::once(control_plane::render(&data, self.drill, &palette, cx))
+                .chain(facts::render(&data, &palette, cx))
+                .collect();
         let sections = [
             Some(header::render(&data, &palette, cx)),
             Some(summary::render(&data, &palette, cx)),
             weighted_band(changes_band, &CHANGES_BAND_WEIGHTS, &palette),
             band(pods::render(&data, &palette, cx), &palette),
             Some(namespaces::render(&data, self.sort, &palette, cx)),
-            band(facts::render(&data, &palette, cx), &palette),
+            band(facts_band, &palette),
             Some(workloads::render(&data, &palette, cx)),
             Some(charts::render(&data, self.range, &palette, cx)),
         ];
@@ -270,12 +314,29 @@ impl Render for OverviewScreen {
             .tab_group()
             .pb(SPACE_8)
             .children(sections.into_iter().flatten());
-        div()
+        let scroll = div()
             .debug_selector(|| SCROLL.to_owned())
             .id(SCROLL)
-            .size_full()
+            .flex_1()
+            .min_w_0()
+            .h_full()
             .overflow_y_scroll()
-            .child(content)
+            .child(content);
+        let drill = self
+            .drill
+            .then(|| api_drill::render(&data.control_plane, self.code.as_deref(), &palette, cx));
+        div()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == ESCAPE && this.drill {
+                    this.close_drill(cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .flex()
+            .size_full()
+            .child(scroll)
+            .children(drill)
             .into_any_element()
     }
 }

@@ -28,6 +28,7 @@ use crate::actions::{Actions, cluster_of};
 use crate::assemble::{self, Extras, Prometheus, Selection};
 use crate::checks::{self, CheckResult, run_checks_streaming};
 use crate::cluster_changes::Workloads;
+use crate::control_plane::Sampled;
 use crate::discovery::{
     ContextRef, Discovery, DiscoveryEvent, DiscoverySources, KubeContext, discover,
 };
@@ -103,6 +104,7 @@ enum Fetched {
     NodeUsage(ContextRef, Option<Vec<NodeUsage>>),
     PodUsage(ContextRef, Option<Vec<PodUsage>>),
     Prometheus(ContextRef, Option<Prometheus>),
+    ControlPlane(ContextRef, Box<Sampled>),
     Yaml(u64, ResourceRef, inspect::Inspected),
     Comparison(u64, Box<Comparison>),
 }
@@ -115,6 +117,7 @@ struct Connected {
     usage_task: Option<TaskGuard>,
     pod_usage_task: Option<TaskGuard>,
     prometheus_task: Option<TaskGuard>,
+    control_plane_task: Option<TaskGuard>,
 }
 
 impl Connected {
@@ -131,6 +134,7 @@ impl Connected {
             usage_task: None,
             pod_usage_task: None,
             prometheus_task: None,
+            control_plane_task: None,
         }
     }
 }
@@ -507,7 +511,10 @@ impl Live {
 
     fn poll_page(&mut self) {
         match self.navigation.page {
-            Page::ClusterOverview => self.poll_prometheus(),
+            Page::ClusterOverview => {
+                self.poll_prometheus();
+                self.poll_control_plane();
+            }
             Page::Namespaces => self.poll_pod_usage(),
             Page::Pods => self.poll_pod_usage(),
             _ => {}
@@ -616,6 +623,37 @@ impl Live {
         }));
     }
 
+    fn on_overviews(&mut self, poll: fn(&mut Self)) {
+        self.for_each_window(|live| {
+            if live.navigation.page == Page::ClusterOverview {
+                poll(live);
+            }
+        });
+    }
+
+    fn poll_control_plane(&mut self) {
+        let timeout = self.settings.check_timeout;
+        let fetched = self.fetched.clone();
+        let Some(key) = self.selected_key() else {
+            return;
+        };
+        let Some(cluster) = self.clusters.get_mut(&key) else {
+            return;
+        };
+        if !reachable(&cluster.handle.status()) {
+            return;
+        }
+        let handle = cluster.handle.clone();
+        cluster.control_plane_task = Some(TaskGuard::spawn(async move {
+            let Ok(sampled) = tokio::time::timeout(timeout, handle.control_plane()).await else {
+                return;
+            };
+            let _ = fetched
+                .send(Fetched::ControlPlane(key, Box::new(sampled)))
+                .await;
+        }));
+    }
+
     fn cluster_event(&mut self, event: &ClusterEvent) {
         if let ClusterEvent::Changed { id, .. } = event {
             self.for_each_window(|live| {
@@ -642,6 +680,15 @@ impl Live {
             Fetched::Prometheus(key, found) => {
                 if let Some(cluster) = self.clusters.get_mut(&key) {
                     cluster.extras.prometheus = found;
+                }
+            }
+            Fetched::ControlPlane(key, sampled) => {
+                let interval = self.settings.control_plane_interval;
+                if let Some(cluster) = self.clusters.get_mut(&key) {
+                    cluster
+                        .extras
+                        .control_plane
+                        .record(*sampled, Timestamp::now(), interval);
                 }
             }
             Fetched::Comparison(window, comparison) => {
@@ -1591,6 +1638,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
     let mut publish = Throttle::new(live.settings.snapshot_interval);
     let mut poll = ticker(EXTENSION_POLL_INTERVAL);
     let mut history_tick = ticker(metrics_history::SAVE_INTERVAL);
+    let mut control_plane_tick = ticker(live.settings.control_plane_interval);
     loop {
         tokio::select! {
             event = discovery_events.recv(), if !discovery_events.is_closed() => {
@@ -1616,11 +1664,8 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
             }
             _ = usage_tick.tick() => live.poll_usage(),
             _ = history_tick.tick() => live.save_histories(),
-            _ = prometheus_tick.tick() => {
-                live.for_each_window(|live| {
-                    if live.navigation.page == Page::ClusterOverview { live.poll_prometheus(); }
-                });
-            }
+            _ = control_plane_tick.tick() => live.on_overviews(Live::poll_control_plane),
+            _ = prometheus_tick.tick() => live.on_overviews(Live::poll_prometheus),
             command = commands.recv() => {
                 let Ok(command) = command else { live.save_histories(); return };
                 live.apply(&command);
@@ -2009,6 +2054,7 @@ mod tests {
                     usage_task: None,
                     pod_usage_task: None,
                     prometheus_task: None,
+                    control_plane_task: None,
                 },
             );
         }
@@ -2165,6 +2211,7 @@ mod tests {
                 usage_task: None,
                 pod_usage_task: None,
                 prometheus_task: None,
+                control_plane_task: None,
             },
         );
         let pages = [
@@ -2215,6 +2262,7 @@ mod tests {
                     usage_task: None,
                     pod_usage_task: None,
                     prometheus_task: None,
+                    control_plane_task: None,
                 },
             );
         }

@@ -131,6 +131,9 @@ impl PodIndex {
                 PodHealth::Warning if phase == Some(PHASE_PENDING) => index.phases.pending += 1,
                 PodHealth::Warning => index.phases.running += 1,
             }
+            if phase == Some(PHASE_PENDING) && crate::pods::unschedulable(pod).is_some() {
+                index.phases.unschedulable += 1;
+            }
             if !is_active(pod) {
                 continue;
             }
@@ -616,19 +619,28 @@ mod tests {
             "metadata": { "name": "p", "namespace": "apps" },
             "status": { "phase": "Pending" }
         }));
+        let unschedulable: Arc<Pod> = parse(json!({
+            "metadata": { "name": "u", "namespace": "apps" },
+            "status": {
+                "phase": "Pending",
+                "conditions": [{ "type": "PodScheduled", "status": "False", "reason": "Unschedulable" }]
+            }
+        }));
         let pods = [
             pod_with_resources("a", "w1", "500m", "1Gi"),
             pod_with_resources("b", "w1", "1500m", "3Gi"),
             replica_pod("api-1-x", "api", "1", &crash_status()),
             pending,
+            unschedulable,
         ];
         let index = PodIndex::build(&pods, now());
         assert_eq!(
             index.phases,
             PodPhases {
                 running: 2,
-                pending: 1,
-                failing: 1
+                pending: 2,
+                failing: 1,
+                unschedulable: 1,
             }
         );
         let nodes = [worker("w1")];
