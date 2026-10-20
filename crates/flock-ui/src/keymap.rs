@@ -6,7 +6,7 @@ use crate::actions::{
     ActivateTab, CloseTab, CloseWindow, CompareAcrossClusters, FocusContent, FocusFilter,
     FocusPane, FocusSidebar, FollowLogs, GoBack, GoForward, NewTab, NewWindow, NextTab,
     OpenSelectedInSplit, OpenSelectedNewWindow, OpenSettings, PreviousTab, QuickOpen, Quit,
-    ShowAllClusters, ShowCommands, ShowFluxOwner, SplitRight, ToggleClusterSwitcher,
+    RefreshView, ShowAllClusters, ShowCommands, ShowFluxOwner, SplitRight, ToggleClusterSwitcher,
     ToggleCommandPalette, ToggleDock, ToggleSidebar,
 };
 use crate::kit::{SelectAllText, SendBackTab, SendTab, TERMINAL_CONTEXT};
@@ -169,6 +169,12 @@ pub const BINDINGS: &[Binding] = &[
         "Switch cluster",
         Group::General,
         |k, c| KeyBinding::new(k, ToggleClusterSwitcher, c),
+    ),
+    Binding::new(
+        &["cmd-shift-r"],
+        "Refresh this view",
+        Group::General,
+        |k, c| KeyBinding::new(k, RefreshView, c),
     ),
     Binding::new(
         &["cmd-0"],

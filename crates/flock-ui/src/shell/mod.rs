@@ -8,6 +8,8 @@ pub(crate) mod switcher;
 mod tab_motion;
 mod tabs;
 
+use std::time::Instant;
+
 use flock_core::history::Location;
 use flock_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use flock_core::resource::short_kind;
@@ -23,8 +25,8 @@ use gpui::{
 
 use crate::Store;
 use crate::actions::{
-    CompareAcrossClusters, FocusFilter, FollowLogs, OpenSettings, ShowAllClusters, ShowFluxOwner,
-    ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
+    CompareAcrossClusters, FocusFilter, FollowLogs, OpenSettings, RefreshView, ShowAllClusters,
+    ShowFluxOwner, ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
 };
 use crate::kit::{FilterBar, Split, Toast, toast};
 use crate::screens::ScreenEvent;
@@ -61,6 +63,8 @@ pub struct Shell {
     tab_menu: Entity<crate::kit::ActionMenu>,
     _switcher_events: Subscription,
     _updates: Task<()>,
+    synced_at: Instant,
+    _clock: Task<()>,
     _store: Entity<Store>,
     _window_closed: Subscription,
     _focus_recovery: Subscription,
@@ -86,6 +90,14 @@ impl Shell {
                     shell.receive(update, window, cx);
                 });
                 if applied.is_err() {
+                    break;
+                }
+            }
+        });
+        let clock = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(status_bar::SYNC_TICK).await;
+                if this.update(cx, |_, cx| cx.notify()).is_err() {
                     break;
                 }
             }
@@ -125,6 +137,8 @@ impl Shell {
             tab_menu,
             _switcher_events: switcher_events,
             _updates: listen,
+            synced_at: Instant::now(),
+            _clock: clock,
             _store: store,
             _window_closed: window_closed,
             _focus_recovery: focus_recovery,
@@ -215,6 +229,7 @@ impl Shell {
         }
         if let Update::Snapshot(_) = update {
             self.loaded = true;
+            self.synced_at = Instant::now();
         }
         self.state.update(update);
         self.run_pending(window, cx);
@@ -529,6 +544,7 @@ impl Shell {
             Command::Reauthenticate(_) => {}
             Command::ConfirmContext(_) => {}
             Command::Disconnect(_) => {}
+            Command::Refresh(_) => {}
             Command::PortForward {
                 service,
                 local,
@@ -830,6 +846,9 @@ impl Render for Shell {
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
                 this.dispatch(Command::ToggleSidebar, cx);
             }))
+            .on_action(cx.listener(|this, _: &RefreshView, _, cx| {
+                this.refresh_view(cx);
+            }))
             .on_action(cx.listener(|this, _: &ShowAllClusters, _, cx| {
                 this.retarget(None, cx);
             }))
@@ -1070,6 +1089,26 @@ mod tests {
             shell.read_with(cx, |shell, _| shell.state.location().page),
             Page::GitOps
         );
+    }
+
+    #[gpui::test]
+    fn the_refresh_shortcut_asks_the_backend_to_relist_the_current_scope(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(Some(theme::Appearance::Dark), cx)
+                .unwrap_or_else(|error| panic!("UI init: {error}"));
+            cx.bind_keys(crate::keymap::key_bindings());
+        });
+        let (backend, updates) = async_channel::unbounded();
+        let (commands, received) = async_channel::unbounded();
+        let store = cx.new(|cx| Store::new(updates, commands, cx));
+        let (_shell, window) = cx.update(|cx| open_window(&store, Vec::new(), cx));
+        assert!(backend.try_send(Update::Snapshot(Box::default())).is_ok());
+        cx.run_until_parked();
+        while received.try_recv().is_ok() {}
+        cx.simulate_keystrokes(window, "cmd-shift-r");
+        cx.run_until_parked();
+        let sent: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
+        assert!(scope_of(&sent, &Command::Refresh(None)).is_some());
     }
 
     #[gpui::test]
