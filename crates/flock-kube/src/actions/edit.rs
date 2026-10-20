@@ -248,6 +248,15 @@ fn same_object(current: &Value, base: &Live) -> bool {
     uid == Some(base.uid.as_str()) && version == Some(base.resource_version.as_str())
 }
 
+fn current_base(current: &Value, base: &Live) -> Result<Option<Live>> {
+    if same_object(current, base) {
+        return Ok(Some(base.clone()));
+    }
+    let now = live(current, base.revealed)?;
+    let unchanged = parse(&base.text)? == shown(current, base.revealed);
+    Ok((now.uid == base.uid && unchanged).then_some(now))
+}
+
 fn is_conflict(error: &Error) -> bool {
     matches!(error, Error::Kube(kube::Error::Api(status)) if status.code == HTTP_CONFLICT)
 }
@@ -301,9 +310,13 @@ async fn submit(
     mode: Mode,
 ) -> Result<EditEvent> {
     let before = current(handle, target).await?;
-    if !same_object(&before, &draft.base) {
+    let Some(base) = current_base(&before, &draft.base)? else {
         return conflict(draft, &before);
-    }
+    };
+    let draft = &Draft {
+        text: draft.text.clone(),
+        base,
+    };
     let body = payload(draft, &before)?;
     let result = match send(handle, target, &body, mode).await {
         Ok(result) => result,
@@ -663,7 +676,9 @@ mod tests {
     #[tokio::test]
     async fn a_stale_edit_is_never_sent_and_reports_the_conflict() {
         let (_manager, handle, traffic) = fake(|method, _, _| {
-            (method == Method::GET).then(|| (StatusCode::OK, secret("9").to_string()))
+            let mut theirs = secret("9");
+            theirs["metadata"]["labels"]["tier"] = json!("backend");
+            (method == Method::GET).then(|| (StatusCode::OK, theirs.to_string()))
         });
         let draft = draft_from(&secret("7"), |text| {
             text.replace("app: db", "app: database")
@@ -679,6 +694,29 @@ mod tests {
             traffic.bodies(&Method::PATCH, SECRET_PATH),
             Vec::<Value>::new()
         );
+    }
+
+    #[tokio::test]
+    async fn a_new_version_with_the_same_editable_text_is_not_a_conflict() {
+        let (_manager, handle, traffic) = fake(|method, _, body| {
+            if method == Method::GET {
+                return Some((StatusCode::OK, secret("9").to_string()));
+            }
+            let mut applied = body.clone();
+            applied["metadata"]["resourceVersion"] = json!("10");
+            Some((StatusCode::OK, applied.to_string()))
+        });
+        let draft = draft_from(&secret("7"), |text| {
+            text.replace("app: db", "app: database")
+        });
+        let event = outcome(&handle, secret_ref(), EditStep::Apply(draft)).await;
+        let EditEvent::Applied(applied) = event else {
+            panic!("{event:?}");
+        };
+        assert_eq!(applied.resource_version, "10");
+        let sent = traffic.bodies(&Method::PATCH, SECRET_PATH);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0]["metadata"]["resourceVersion"], json!("9"));
     }
 
     #[tokio::test]
