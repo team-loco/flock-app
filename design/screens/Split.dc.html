@@ -104,20 +104,20 @@ class Component extends DCLogic {
     const deploy = {
       east: {
         cluster: 'prod-us-east', status: '✕ 2/3 ready', c: 'var(--err)',
-        sentence: 'One pod is crash-looping, so the rollout to revision 37 is stuck.',
+        sentence: 'Progressing=False · ProgressDeadlineExceeded',
         fields: [['Ready', '2/3', 'err'], ['Image', 'checkout-api:2.14.0'], ['Revision', '37 · 3h ago'], ['STRIPE_WEBHOOK_SECRET', 'stripe / webhook_secret · key not found', 'err'], ['Replicas (HPA)', '3 · 3–12 @ 70% cpu'], ['CPU req / limit', '500m / 1'], ['Memory req / limit', '512Mi / 1Gi'], ['Managed by', 'apps-payments @ a41e07c']],
         pods: [['err', 'checkout-api-7f9c6d-x2lqp', 'CrashLoopBackOff', '14'], ['ok', 'checkout-api-7f9c6d-m8vtn', 'Running', '0'], ['ok', 'checkout-api-7f9c6d-q4zhk', 'Running', '0']]
       },
       west: {
         cluster: 'prod-eu-west', status: '● 3/3 ready', c: 'var(--ok)',
-        sentence: 'Healthy. Flux is suspended here, so this is still the previous release.',
+        sentence: 'Available=True · MinimumReplicasAvailable',
         fields: [['Ready', '3/3'], ['Image', 'checkout-api:2.13.4'], ['Revision', '35 · 2d ago'], ['STRIPE_WEBHOOK_SECRET', 'stripe / webhook-secret'], ['Replicas (HPA)', '3 · 3–12 @ 70% cpu'], ['CPU req / limit', '500m / 1'], ['Memory req / limit', '512Mi / 1Gi'], ['Managed by', 'apps-payments @ 7c2d9e0 (suspended)']],
         pods: [['ok', 'checkout-api-5b8f2a-k2p9w', 'Running', '0'], ['ok', 'checkout-api-5b8f2a-v7c1d', 'Running', '0'], ['ok', 'checkout-api-5b8f2a-z4m6t', 'Running', '0']]
       }
     };
     const ks = {
-      east: { status: '✕ Failing', c: 'var(--err)', sentence: 'checkout-api did not become ready within the 5m health check.', rev: 'applied a41e07c · 3h ago' },
-      west: { status: '‖ Suspended', c: 'var(--sus)', sentence: 'Suspended 2d ago for the change freeze. 2 commits behind main.', rev: 'applied 7c2d9e0 · 2d ago' }
+      east: { status: '✕ Failing', c: 'var(--err)', sentence: 'Ready=False · HealthCheckFailed', rev: 'applied a41e07c · 3h ago' },
+      west: { status: '‖ Suspended', c: 'var(--sus)', sentence: 'spec.suspend=true · last applied 7c2d9e0', rev: 'applied 7c2d9e0 · 2d ago' }
     };
     const leftTabs = [
       { kind: 'deploy', label: 'checkout-api', ctx: 'us-east', g: '✕', gc: 'var(--err)', view: 'deploy', at: 'east' },

@@ -42,7 +42,7 @@ body{margin:0}
               </sc-if>
             </div>
           </div>
-          <p style="margin:0;font-size:13px;line-height:1.5;color:var(--fg2)">{{st.pre}}<a href="Workload.dc.html" style="color:var(--acc);text-decoration:none;font-family:'IBM Plex Mono',monospace;font-size:12.5px">checkout-api</a>{{st.post}}</p>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.5;color:var(--fg2)"><span style="color:{{st.c}}">{{st.cond}}</span> {{st.reason}} <span style="color:var(--mute)">·</span> {{st.msg}}</div>
           <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--mute)">applied <a href="Changes.dc.html" style="color:var(--acc);text-decoration:none">a41e07c</a> 3h ago · last healthy <a href="Changes.dc.html" style="color:var(--acc);text-decoration:none">7c2d9e0</a> 1d ago</div>
         </div>
 
@@ -135,8 +135,8 @@ class Component extends DCLogic {
     const C = { ok: 'var(--ok)', err: 'var(--err)', warn: 'var(--warn)', sus: 'var(--sus)', prog: 'var(--acc)' };
     const G = { ok: '●', err: '✕', warn: '▲', sus: '‖', prog: '◐' };
     const st = this.state.reconciling
-      ? { label: '◐ Reconciling', c: 'var(--acc)', pre: 'Applying a41e07c, then waiting up to 5m for ', post: ' to become ready.' }
-      : { label: '✕ Failing', c: 'var(--err)', pre: '', post: ' did not become ready within the 5m health check. Retrying in 1m48s.' };
+      ? { label: '◐ Reconciling', c: 'var(--acc)', cond: 'Reconciling=True', reason: 'Progressing', msg: 'Reconciliation in progress' }
+      : { label: '✕ Failing', c: 'var(--err)', cond: 'Ready=False', reason: 'HealthCheckFailed', msg: "Health check failed after 5m0s: timeout waiting for: [Deployment/payments/checkout-api status: 'InProgress']" };
     const O = (s, kind, name, detail, changed, href) => ({ s, changed: !!changed, g: G[s], c: C[s], kind, name, detail, dc: s === 'err' ? 'var(--err)' : 'var(--mute)', href: href || '#' });
     const allInv = [
       O('err', 'Deployment', 'payments/checkout-api', '2/3 ready', true, 'Workload.dc.html'),

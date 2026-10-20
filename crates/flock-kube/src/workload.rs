@@ -7,7 +7,7 @@ use flock_core::workload::{
     Commit, ContainerSpec, ContainerStatus, EnvResolution, EnvSource, EnvVar, Event, Exit, Pod,
     Port, Probe, ProbeAction, Resources, Revision,
 };
-use flock_core::{ResourceRef, Uid, Workload, WorkloadKind};
+use flock_core::{Condition, ResourceRef, Uid, Workload, WorkloadKind};
 use futures::{StreamExt, stream};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
@@ -22,6 +22,7 @@ use kube::api::ListParams;
 use kube::{Api, Client};
 
 use crate::clock::{age, since};
+use crate::conditions::conditions;
 use crate::detail;
 use crate::manager::ClusterHandle;
 use crate::metrics::PodUsage;
@@ -33,7 +34,6 @@ const MEMORY: &str = "memory";
 const REVISION_ANNOTATION: &str = "deployment.kubernetes.io/revision";
 const CHANGE_CAUSE: &str = "kubernetes.io/change-cause";
 const REVISION_HASH_LABEL: &str = "controller-revision-hash";
-const PROGRESS_DEADLINE: &str = "ProgressDeadlineExceeded";
 const KUSTOMIZE_NAME: &str = "kustomize.toolkit.fluxcd.io/name";
 const KUSTOMIZE_NAMESPACE: &str = "kustomize.toolkit.fluxcd.io/namespace";
 const HELM_NAME: &str = "helm.toolkit.fluxcd.io/name";
@@ -514,7 +514,7 @@ struct Spec {
     meta: ObjectMeta,
     template: Option<PodTemplateSpec>,
     desired: u32,
-    stalled: bool,
+    conditions: Vec<Condition>,
     current_revision: Option<String>,
 }
 
@@ -529,49 +529,49 @@ fn count(value: i32) -> u32 {
     u32::try_from(value).unwrap_or_default()
 }
 
-fn spec(handle: &ClusterHandle, kind: WorkloadKind, target: &ResourceRef) -> Option<Spec> {
+fn spec(
+    handle: &ClusterHandle,
+    kind: WorkloadKind,
+    target: &ResourceRef,
+    now: Timestamp,
+) -> Option<Spec> {
     match kind {
         WorkloadKind::Deployment => {
             let item = find(handle.objects::<Deployment>(), target)?;
             let spec = item.spec.as_ref();
-            let stalled = item
-                .status
-                .as_ref()
-                .and_then(|s| s.conditions.as_ref())
-                .into_iter()
-                .flatten()
-                .any(|c| c.reason.as_deref() == Some(PROGRESS_DEADLINE));
+            let status = item.status.as_ref();
             Some(Spec {
                 meta: item.metadata.clone(),
                 template: spec.map(|s| s.template.clone()),
                 desired: count(spec.and_then(|s| s.replicas).unwrap_or(DEFAULT_REPLICAS)),
-                stalled,
+                conditions: conditions(status.and_then(|s| s.conditions.as_ref()), now),
                 current_revision: None,
             })
         }
         WorkloadKind::StatefulSet => {
             let item = find(handle.objects::<StatefulSet>(), target)?;
             let spec = item.spec.as_ref();
+            let status = item.status.as_ref();
             Some(Spec {
                 meta: item.metadata.clone(),
                 template: spec.map(|s| s.template.clone()),
                 desired: count(spec.and_then(|s| s.replicas).unwrap_or(DEFAULT_REPLICAS)),
-                stalled: false,
-                current_revision: item.status.as_ref().and_then(|s| s.update_revision.clone()),
+                conditions: conditions(status.and_then(|s| s.conditions.as_ref()), now),
+                current_revision: status.and_then(|s| s.update_revision.clone()),
             })
         }
         WorkloadKind::DaemonSet => {
             let item = find(handle.objects::<DaemonSet>(), target)?;
+            let status = item.status.as_ref();
             Some(Spec {
                 meta: item.metadata.clone(),
                 template: item.spec.as_ref().map(|s| s.template.clone()),
                 desired: count(
-                    item.status
-                        .as_ref()
+                    status
                         .map(|s| s.desired_number_scheduled)
                         .unwrap_or_default(),
                 ),
-                stalled: false,
+                conditions: conditions(status.and_then(|s| s.conditions.as_ref()), now),
                 current_revision: None,
             })
         }
@@ -585,7 +585,7 @@ pub async fn build(
 ) -> Option<Workload> {
     let kind = WorkloadKind::from_kind(&target.kind)?;
     let namespace = target.namespace.clone()?;
-    let spec = spec(handle, kind, target)?;
+    let spec = spec(handle, kind, target, now)?;
     let all_pods = handle.objects::<core::Pod>();
     let owner = owner_key(target);
     let raw: Vec<&core::Pod> = all_pods
@@ -632,7 +632,7 @@ pub async fn build(
         uid: Uid::new(spec.meta.uid.clone().unwrap_or_default()),
         kind,
         desired: spec.desired,
-        stalled: spec.stalled,
+        conditions: spec.conditions,
         pending: None,
         managed_by: managed_by(target, &spec.meta),
         pods: pods(target, &raw, &usage, now),

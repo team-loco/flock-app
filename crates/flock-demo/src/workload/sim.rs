@@ -3,7 +3,7 @@ use std::time::Duration;
 use flock_core::workload::{Event, Pending, Pod, Revision};
 use flock_core::{Status, Workload};
 
-use super::data::{BROKEN_IMAGE, crashing_pod, running_pod};
+use super::data::{BROKEN_IMAGE, crashing_pod, healthy_conditions, running_pod};
 
 const NODES: [&str; 3] = ["ip-10-4-12-87", "ip-10-4-14-201", "ip-10-4-22-63"];
 const HEALTHY_CPU: u32 = 196;
@@ -67,7 +67,9 @@ pub fn finish(workload: &mut Workload, action: Action, names: &mut Names) {
         current.ready = ready;
         current.replicas = workload.desired;
     }
-    workload.stalled = workload.stalled && ready < workload.desired;
+    if ready >= workload.desired {
+        workload.conditions = healthy_conditions(workload);
+    }
 }
 
 fn next_number(workload: &Workload) -> u64 {
@@ -213,7 +215,14 @@ mod tests {
         );
         assert_eq!(current.map(|r| r.pods_label()).as_deref(), Some("3/3"));
         assert_eq!(workload.status(), Status::Ok);
-        assert!(!workload.stalled);
+        assert!(!workload.stalled());
+        assert_eq!(
+            workload
+                .condition_line()
+                .map(|line| line.compact())
+                .as_deref(),
+            Some("Available=True · MinimumReplicasAvailable")
+        );
         assert_eq!(
             workload.sentence(),
             "All three pods are ready on revision 38."

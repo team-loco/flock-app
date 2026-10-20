@@ -34,8 +34,8 @@ pub use button::{Button, ButtonSize, ButtonVariant, Checkbox, IconButton, Segmen
 pub use chart::{CapacityMeter, LineChart, Meter, MiniMeter, Series, StackedBar};
 pub use code::CodeView;
 pub use diagnosis::{
-    CONDITIONS, ConditionTable, EVENTS, EventList, WHATS_WRONG, WhatsWrong, reason_cell,
-    reason_tooltip,
+    CONDITIONS, ConditionTable, ConditionText, EVENTS, EventList, WHATS_WRONG, WhatsWrong,
+    reason_cell, reason_tooltip,
 };
 pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};

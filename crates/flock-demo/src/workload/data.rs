@@ -4,7 +4,9 @@ use flock_core::workload::{
     Commit, ContainerSpec, ContainerStatus, EnvResolution, EnvSource, EnvVar, Event, Exit, Pod,
     Port, Probe, ProbeAction, Resources, Revision,
 };
-use flock_core::{ClusterId, ResourceRef, Status, Uid, Workload, WorkloadKind};
+use flock_core::{ClusterId, Condition, ResourceRef, Status, Uid, Workload, WorkloadKind};
+
+use crate::lists::{deployment_conditions, rolled_out, timed_out};
 
 pub const CLUSTER: &str = "prod-us-east";
 pub const NAMESPACE: &str = "payments";
@@ -12,6 +14,7 @@ pub const NAME: &str = "checkout-api";
 pub const API: &str = "api";
 pub const ENVOY: &str = "envoy";
 pub const BROKEN_IMAGE: &str = "ghcr.io/acme/checkout-api:2.14.0";
+const BROKEN_REPLICA_SET: &str = "checkout-api-7f9c6d";
 
 const SECOND: u64 = 1;
 const MINUTE: u64 = 60 * SECOND;
@@ -45,7 +48,7 @@ pub fn checkout_api() -> Workload {
         target: target(),
         kind: WorkloadKind::Deployment,
         desired: DESIRED,
-        stalled: true,
+        conditions: deployment_conditions(true, timed_out(BROKEN_REPLICA_SET)),
         pending: None,
         managed_by: Some(ResourceRef {
             cluster: ClusterId::new(CLUSTER),
@@ -90,7 +93,7 @@ pub fn healthy_checkout(
         owner.cluster = cluster.clone();
     }
     workload.desired = replicas;
-    workload.stalled = false;
+    workload.conditions = healthy_conditions(&workload);
     workload.pods = pods
         .iter()
         .map(|(name, node)| {
@@ -118,6 +121,13 @@ pub fn healthy_checkout(
     }
     workload.events = Vec::new();
     workload
+}
+
+pub fn healthy_conditions(workload: &Workload) -> Vec<Condition> {
+    let owner = workload
+        .current_revision()
+        .map_or(NAME, |revision| revision.owner.as_str());
+    deployment_conditions(true, rolled_out(owner))
 }
 
 fn secs(n: u64) -> Duration {
@@ -233,7 +243,7 @@ fn revisions() -> Vec<Revision> {
     vec![
         revision(
             37,
-            "checkout-api-7f9c6d",
+            BROKEN_REPLICA_SET,
             BROKEN_IMAGE,
             3 * HOUR,
             (

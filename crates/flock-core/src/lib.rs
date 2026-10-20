@@ -4,6 +4,7 @@ pub mod app_settings;
 pub mod changes;
 pub mod cluster;
 pub mod compare;
+pub mod condition_line;
 pub mod crd;
 pub mod diagnosis;
 pub mod edit;

@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::condition_line::ConditionLine;
 use crate::filter::{FilterSpec, TextFilter};
 
 use crate::{
@@ -465,6 +466,14 @@ impl FluxObject {
         self.phase.status()
     }
 
+    pub fn condition_line(&self) -> Option<ConditionLine> {
+        if self.phase.is_suspended() {
+            let applied = self.applied.as_ref().map(|revision| revision.id.as_str());
+            return Some(ConditionLine::suspended(applied));
+        }
+        ConditionLine::pick(&self.conditions)
+    }
+
     pub fn current_diagnosis(&self) -> Option<&Diagnosis> {
         self.diagnosis
             .as_ref()
@@ -641,6 +650,23 @@ pub(crate) mod tests {
             conditions: Vec::new(),
             diagnosis: None,
         }
+    }
+
+    #[test]
+    fn a_suspended_object_names_its_spec_field_instead_of_a_condition() {
+        let mut held = object("west", Phase::Suspended { since: None }, "7c2d9e0");
+        held.conditions = vec![Condition::new("Ready", "True").reason("ReconciliationSucceeded")];
+        let line = held.condition_line().map(|line| line.compact());
+        assert_eq!(
+            line.as_deref(),
+            Some("spec.suspend=true · last applied 7c2d9e0")
+        );
+        held.phase = Phase::Ready;
+        let line = held.condition_line().map(|line| line.compact());
+        assert_eq!(
+            line.as_deref(),
+            Some("Ready=True · ReconciliationSucceeded")
+        );
     }
 
     #[test]

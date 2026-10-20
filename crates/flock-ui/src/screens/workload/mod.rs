@@ -19,8 +19,8 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    ActionMenu, Button, CodeView, Column, ConfirmDialog, DockState, EmptyState, Entrance,
-    ErrorState, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView, MenuItem,
+    ActionMenu, Button, CodeView, Column, ConditionText, ConfirmDialog, DockState, EmptyState,
+    Entrance, ErrorState, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView, MenuItem,
     PageHeader, Rule, SectionHeader, SectionLabel, Segmented, Skeleton, StatusText, Table,
     TableEvent, Terminal, TextFieldState, Toast, Width, confirm, min_row_width, slide_in, toast,
 };
@@ -238,7 +238,7 @@ impl WorkloadScreen {
             .mono()
             .status(workload.status(), workload.ready_label())
             .action(cluster)
-            .sentence(SelectableText::new(workload.sentence()))
+            .sentence(compact_status_line(workload))
             .footer(full_view_link("workload-full-view", open));
         let fields: Vec<AnyElement> = workload
             .fields()
@@ -470,7 +470,7 @@ impl WorkloadScreen {
             .mono()
             .status(workload.status(), workload.ready_label())
             .action(self.menu.clone())
-            .sentence(SelectableText::new(workload.sentence()))
+            .sentence(status_line(workload))
             .meta(meta)
     }
 
@@ -1131,6 +1131,20 @@ fn unavailable_note(target: &ResourceRef) -> String {
         "{} {target} is not available on {}.",
         target.kind, target.cluster
     )
+}
+
+fn status_line(workload: &Workload) -> AnyElement {
+    match workload.condition_line() {
+        Some(line) => ConditionText::new(line).into_any_element(),
+        None => SelectableText::new(workload.sentence()).into_any_element(),
+    }
+}
+
+fn compact_status_line(workload: &Workload) -> SelectableText {
+    let text = workload
+        .condition_line()
+        .map_or_else(|| workload.sentence(), |line| line.compact());
+    SelectableText::new(text)
 }
 
 #[cfg(test)]

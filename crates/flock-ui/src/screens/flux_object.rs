@@ -12,9 +12,10 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, DiffView,
-    InspectorPane, KeyValue, MenuItem, PageHeader, Prose, SectionHeader, SectionLabel, Segmented,
-    StatusGlyph, Table, TableEvent, Toast, WHATS_WRONG, WhatsWrong, confirm, parse_unified, toast,
+    ActionMenu, Button, CONDITIONS, CodeView, Column, ConditionTable, ConditionText, ConfirmDialog,
+    DiffView, InspectorPane, KeyValue, MenuItem, PageHeader, Prose, SectionHeader, SectionLabel,
+    Segmented, StatusGlyph, Table, TableEvent, Toast, WHATS_WRONG, WhatsWrong, confirm,
+    parse_unified, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{EDIT_DESCRIPTION, EDIT_YAML};
@@ -163,7 +164,7 @@ impl FluxObjectPage {
             .leading(self.navigation.clone())
             .mono()
             .status(object.status(), object.phase.label())
-            .sentence(Self::sentence(object, cx))
+            .sentence(Self::compact_status_line(object, cx))
             .meta(Self::meta(object, cx))
             .footer(full_view_link("flux-full-view", open))
             .into_any_element()
@@ -393,9 +394,23 @@ impl FluxObjectPage {
             .status(object.status(), object.phase.label())
             .action(primary.primary())
             .action(self.menu.clone())
-            .sentence(Self::sentence(object, cx))
+            .sentence(Self::status_line(object, cx))
             .meta(Self::meta(object, cx))
             .into_any_element()
+    }
+
+    fn status_line(object: &FluxObject, cx: &mut Context<Self>) -> AnyElement {
+        match object.condition_line() {
+            Some(line) => ConditionText::new(line).into_any_element(),
+            None => Self::sentence(object, cx),
+        }
+    }
+
+    fn compact_status_line(object: &FluxObject, cx: &mut Context<Self>) -> AnyElement {
+        match object.condition_line() {
+            Some(line) => SelectableText::new(line.compact()).into_any_element(),
+            None => Self::sentence(object, cx),
+        }
     }
 
     fn sentence(object: &FluxObject, cx: &mut Context<Self>) -> AnyElement {
