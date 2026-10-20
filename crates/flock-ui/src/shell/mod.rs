@@ -320,6 +320,10 @@ impl Shell {
         Some((legend, text))
     }
 
+    pub fn custom_empty_sentence(&self, cx: &App) -> Option<String> {
+        self.focused_screens().pages.custom_empty_sentence(cx)
+    }
+
     pub fn switcher_open(&self, cx: &App) -> bool {
         self.switcher.read(cx).is_open()
     }

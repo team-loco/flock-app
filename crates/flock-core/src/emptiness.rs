@@ -1,24 +1,33 @@
+use std::borrow::Cow;
+
 use crate::Page;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Noun {
-    pub singular: &'static str,
-    pub plural: &'static str,
+    pub singular: Cow<'static, str>,
+    pub plural: Cow<'static, str>,
 }
 
 impl Noun {
     pub const fn of(page: Page) -> Self {
         Self {
-            singular: page.singular(),
-            plural: page.label(),
+            singular: Cow::Borrowed(page.singular()),
+            plural: Cow::Borrowed(page.label()),
         }
     }
 
-    pub fn counted(self, count: usize) -> String {
+    pub fn named(singular: impl Into<String>, plural: impl Into<String>) -> Self {
+        Self {
+            singular: Cow::Owned(singular.into()),
+            plural: Cow::Owned(plural.into()),
+        }
+    }
+
+    pub fn counted(&self, count: usize) -> String {
         let word = if count == 1 {
-            self.singular
+            &self.singular
         } else {
-            self.plural
+            &self.plural
         };
         format!("{count} {word}")
     }
@@ -47,8 +56,8 @@ impl Emptiness {
         }
     }
 
-    pub fn sentence(&self, noun: Noun, cluster: &str) -> String {
-        let plural = noun.plural;
+    pub fn sentence(&self, noun: &Noun, cluster: &str) -> String {
+        let plural = &noun.plural;
         match self {
             Self::Cluster => format!("No {plural} in {cluster}"),
             Self::Namespace { namespace, .. } => format!("No {plural} in namespace {namespace}"),
@@ -57,7 +66,7 @@ impl Emptiness {
         }
     }
 
-    pub fn detail(&self, noun: Noun) -> Option<String> {
+    pub fn detail(&self, noun: &Noun) -> Option<String> {
         match self {
             Self::Namespace { elsewhere, .. } => {
                 let place = if *elsewhere == 1 {
@@ -107,36 +116,36 @@ mod tests {
     fn sentences_name_what_hides_the_rows() {
         let cluster = Emptiness::Cluster;
         assert_eq!(
-            cluster.sentence(DEPLOYMENTS, "kind-fleet-a"),
+            cluster.sentence(&DEPLOYMENTS, "kind-fleet-a"),
             "No Deployments in kind-fleet-a"
         );
         let namespace = Emptiness::classify(6, Some(("default", 0)), "");
         assert_eq!(
-            namespace.sentence(DEPLOYMENTS, "kind-fleet-a"),
+            namespace.sentence(&DEPLOYMENTS, "kind-fleet-a"),
             "No Deployments in namespace default"
         );
         assert_eq!(
-            namespace.detail(DEPLOYMENTS).as_deref(),
+            namespace.detail(&DEPLOYMENTS).as_deref(),
             Some("6 Deployments in other namespaces")
         );
         let text = Emptiness::classify(6, None, "web");
         assert_eq!(
-            text.sentence(DEPLOYMENTS, "kind-fleet-a"),
+            text.sentence(&DEPLOYMENTS, "kind-fleet-a"),
             "No Deployments match \"web\""
         );
         let chip = Emptiness::classify(6, None, "");
         assert_eq!(
-            chip.sentence(DEPLOYMENTS, "kind-fleet-a"),
+            chip.sentence(&DEPLOYMENTS, "kind-fleet-a"),
             "No Deployments match the filter"
         );
-        assert_eq!(text.detail(DEPLOYMENTS), None);
+        assert_eq!(text.detail(&DEPLOYMENTS), None);
     }
 
     #[test]
     fn one_object_elsewhere_is_singular() {
         let namespace = Emptiness::classify(1, Some(("default", 0)), "");
         assert_eq!(
-            namespace.detail(DEPLOYMENTS).as_deref(),
+            namespace.detail(&DEPLOYMENTS).as_deref(),
             Some("1 Deployment in another namespace")
         );
         assert_eq!(Noun::of(Page::Ingresses).counted(1), "1 Ingress");

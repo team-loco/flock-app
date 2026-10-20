@@ -190,6 +190,10 @@ impl EmptyState {
         self
     }
 
+    pub fn sentence(&self) -> &str {
+        &self.sentence
+    }
+
     pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
         self.detail = Some(detail.into());
         self
@@ -202,7 +206,7 @@ impl EmptyState {
 
     pub fn for_list(
         emptiness: &Emptiness,
-        noun: Noun,
+        noun: &Noun,
         cluster: &str,
         filter: &Entity<FilterBar>,
         show_all: Option<ShowAll>,

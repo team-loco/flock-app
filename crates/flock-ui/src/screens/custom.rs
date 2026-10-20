@@ -16,7 +16,7 @@ use flock_core::{
     Status,
 };
 use gpui::{
-    AnyElement, AnyView, AppContext, Context, Entity, EventEmitter, InteractiveElement,
+    AnyElement, AnyView, App, AppContext, Context, Entity, EventEmitter, InteractiveElement,
     IntoElement, ParentElement, Pixels, Render, Styled, Subscription, Window, div,
     prelude::FluentBuilder, px,
 };
@@ -282,22 +282,35 @@ impl CustomResourcesScreen {
     }
 
     fn empty_state(&self, cx: &mut Context<Self>) -> Option<EmptyState> {
-        let namespace = self.namespace.as_deref().map(|namespace| {
-            let inside = self.rows.iter().filter(|r| r.namespace == namespace);
-            (namespace, inside.count())
-        });
-        let shape = ListShape {
-            shown: self.shown,
-            total: self.rows.len(),
-            namespace,
-            noun: Noun::of(Page::CustomResources),
-            cluster: &self.cluster_name,
-        };
         let screen = cx.weak_entity();
         let show_all: ShowAll = Rc::new(move |_, cx| {
             let _ = screen.update(cx, CustomResourcesScreen::show_all_namespaces);
         });
-        empty_list(&shape, &self.filter, Some(show_all), cx)
+        self.empty_with(Some(show_all), cx)
+    }
+
+    pub fn empty_sentence(&self, cx: &App) -> Option<String> {
+        let state = self.empty_with(None, cx)?;
+        Some(state.sentence().to_owned())
+    }
+
+    fn empty_with(&self, show_all: Option<ShowAll>, cx: &App) -> Option<EmptyState> {
+        let namespace = self.namespace.as_deref().map(|namespace| {
+            let inside = self.rows.iter().filter(|r| r.namespace == namespace);
+            (namespace, inside.count())
+        });
+        let noun = self
+            .crd
+            .as_ref()
+            .map_or_else(|| Noun::of(Page::CustomResources), Crd::noun);
+        let shape = ListShape {
+            shown: self.shown,
+            total: self.rows.len(),
+            namespace,
+            noun,
+            cluster: &self.cluster_name,
+        };
+        empty_list(&shape, &self.filter, show_all, cx)
     }
 
     fn table(&mut self, cx: &mut Context<Self>) -> Option<Entity<Table<Resource>>> {
