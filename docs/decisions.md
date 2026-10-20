@@ -274,7 +274,9 @@ Settled; change only with a new entry that says why.
     and offers the edit rebased onto the new object (a field-level three-way merge; where both
     sides changed a field the edit wins and is named). Redacted values the user left alone are
     restored from the live object before sending; a mask that is typed or partly kept is refused,
-    so a placeholder is never written back.
+    so a placeholder is never written back. A newer resourceVersion whose editable text is unchanged
+    (a controller only touched `status` or server metadata) is not a conflict: the edit is pinned to
+    the new version and sent.
 37. **Unhealthy rows say why; inspectors lead with what's wrong** (#239, product owner): every
     resource list, Pods, Nodes and the Flux lists carry a Reason column (Pods: Message, since their
     Status column already shows the reason) filled only for Err and Warn rows and truncated with
