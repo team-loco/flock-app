@@ -75,6 +75,8 @@ Settled; change only with a new entry that says why.
     ⌘[ / ⌘] history, / or ⌘F the page filter; ⌘K stays. ⌘W now closes the inspector, then the
     dock, then the window (amends 17). History and the recent-page cycle live in
     `flock_core::history`; a page restored from history replays the commands that reach it.
+    A list's inspected object (`Location::inspecting`, #281) belongs to the current history entry:
+    inspecting or closing a row amends that entry instead of adding one, so Back reopens the inspector.
     ⌘1 focuses the sidebar (arrows move a focus ring, Enter opens), ⌘2 the page's main list,
     and Tab / ⇧Tab walk gpui's tab stops. After any navigation the shell takes keyboard focus
     back so keys keep working when the focused list disappears.

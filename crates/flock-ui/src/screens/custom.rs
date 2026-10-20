@@ -388,9 +388,8 @@ impl CustomResourcesScreen {
     fn select(&mut self, key: Option<(String, String)>, cx: &mut Context<Self>) {
         self.selected = key;
         let target = self.selected_row().and_then(|row| self.target(row));
-        if let Some(target) = target {
-            cx.emit(ScreenEvent::Command(Command::InspectResource(target)));
-        }
+        let command = target.map_or(Command::CloseInspector, Command::InspectResource);
+        cx.emit(ScreenEvent::Command(command));
         cx.notify();
     }
 

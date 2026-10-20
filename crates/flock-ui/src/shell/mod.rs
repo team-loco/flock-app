@@ -400,7 +400,11 @@ impl Shell {
         if let Some(target) = revealed(&command) {
             self.focused_screens().pages.reveal(target, cx);
         }
-        self.keys.refocus |= self.state.location() != &before;
+        let moved = Location {
+            inspecting: before.inspecting.clone(),
+            ..self.state.location().clone()
+        } != before;
+        self.keys.refocus |= moved;
         self.sync_page(cx);
         self.track_load(cx);
         self.send(command);
@@ -424,7 +428,8 @@ impl Shell {
         for command in location.commands() {
             screens.scope.send(command);
         }
-        if let Some(resource) = location.resource.as_ref().filter(|_| reveal) {
+        let shown = location.inspecting.as_ref().or(location.resource.as_ref());
+        if let Some(resource) = shown.filter(|_| reveal) {
             screens.pages.reveal(resource, cx);
         }
     }
@@ -501,6 +506,7 @@ impl Shell {
             Command::SelectPage(_) => {}
             Command::OpenResource(_) => {}
             Command::InspectResource(_) => {}
+            Command::CloseInspector => {}
             Command::OpenCrd { .. } => {}
             Command::OpenHelmRelease(_) => {}
             Command::FollowLogs(_) => {}
@@ -638,8 +644,9 @@ impl Shell {
             compare.set_snapshot(snapshot, resource, cx);
         });
         let cluster = location.cluster.as_ref();
+        let pod = location.inspecting.as_ref().or(resource);
         screens.pods.update(cx, |pods, cx| {
-            pods.set_context(cluster, resource, &preferences, cx);
+            pods.set_context(cluster, pod, &preferences, cx);
         });
         if let Some(bar) = self.filter_bar_at(ix, location, cx) {
             let namespaces = snapshot

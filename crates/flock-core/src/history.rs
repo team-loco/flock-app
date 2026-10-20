@@ -22,6 +22,8 @@ pub struct Location {
     pub crd: Option<CrdKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub helm: Option<HelmKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspecting: Option<ResourceRef>,
 }
 
 impl Default for Location {
@@ -41,6 +43,7 @@ impl Location {
             logs: None,
             crd: None,
             helm: None,
+            inspecting: None,
         }
     }
 
@@ -124,6 +127,14 @@ impl Location {
     }
 
     pub fn commands(&self) -> Vec<Command> {
+        let mut commands = self.reach();
+        if let Some(target) = &self.inspecting {
+            commands.push(Command::InspectResource(target.clone()));
+        }
+        commands
+    }
+
+    fn reach(&self) -> Vec<Command> {
         if let Some(key) = &self.flux_object {
             return vec![Command::OpenFluxObject(key.clone())];
         }
@@ -238,6 +249,10 @@ impl History {
             };
         }
         target
+    }
+
+    pub fn amend(&mut self, location: Location) {
+        self.current = Some(location);
     }
 
     pub fn current(&self) -> Option<&Location> {
@@ -458,7 +473,19 @@ mod tests {
             resource: Some(pod.clone()),
             ..page(Page::Compare)
         };
-        assert_eq!(compare.commands(), [Command::Compare(pod)]);
+        assert_eq!(compare.commands(), [Command::Compare(pod.clone())]);
+        let inspected = Location {
+            inspecting: Some(pod.clone()),
+            ..page(Page::Pods)
+        };
+        assert_eq!(
+            inspected.commands(),
+            [
+                Command::SelectCluster(Some(ClusterId::new("a"))),
+                Command::SelectPage(Page::Pods),
+                Command::InspectResource(pod)
+            ]
+        );
         let workload = ResourceRef {
             cluster: ClusterId::new("a"),
             kind: "Deployment".into(),
