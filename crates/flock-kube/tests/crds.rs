@@ -358,3 +358,43 @@ fn live_helm_releases_come_from_storage_with_history_values_and_flux_owners() {
         snapshot.helm.is_empty() && snapshot.helm_details.is_empty()
     });
 }
+
+#[test]
+fn live_releases_flux_does_not_manage_are_listed_and_open() {
+    if !enabled() {
+        return;
+    }
+    let Some(context) = context(LOCO_CONTEXT) else {
+        return;
+    };
+    let running = start(&context);
+    let cluster = ClusterId::new(LOCO_CONTEXT);
+    running.send(Command::SelectCluster(Some(cluster.clone())));
+    running.send(Command::SelectPage(Page::Releases));
+    let listed = running.until("Flux and non-Flux releases", |snapshot| {
+        let releases = snapshot.helm_releases(&cluster);
+        releases.iter().any(|release| release.flux.is_none())
+            && releases.iter().any(|release| release.flux.is_some())
+    });
+    let Some(release) = listed
+        .helm_releases(&cluster)
+        .into_iter()
+        .find(|release| release.flux.is_none())
+        .cloned()
+    else {
+        panic!("no release outside Flux");
+    };
+    assert_ne!(release.chart, "");
+    running.send(Command::OpenHelmRelease(release.key.clone()));
+    let opened = running.until("the non-Flux release page", |snapshot| {
+        snapshot.helm_detail(&release.key).is_some()
+    });
+    let Some(detail) = opened.helm_detail(&release.key) else {
+        panic!("detail");
+    };
+    assert_eq!(
+        detail.history.first().map(|r| r.revision),
+        Some(release.revision)
+    );
+    assert!(detail.manifest.contains("kind:"), "{}", detail.manifest);
+}
