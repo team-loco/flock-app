@@ -149,7 +149,7 @@ pub fn page_kind(page: Page) -> Option<WatchKind> {
     }
 }
 
-pub const BACKGROUND_KINDS: [WatchKind; 14] = [
+pub const BACKGROUND_KINDS: [WatchKind; 15] = [
     WatchKind::Nodes,
     WatchKind::Namespaces,
     WatchKind::Events,
@@ -164,6 +164,7 @@ pub const BACKGROUND_KINDS: [WatchKind; 14] = [
     WatchKind::ConfigMaps,
     WatchKind::Secrets,
     WatchKind::PersistentVolumeClaims,
+    WatchKind::CustomResourceDefinitions,
 ];
 
 pub const OVERVIEW_KINDS: [WatchKind; 7] = [

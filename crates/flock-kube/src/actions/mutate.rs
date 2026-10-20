@@ -140,7 +140,7 @@ pub(crate) async fn explain(
 
 async fn patch(handle: &ClusterHandle, seen: &Seen, body: PatchBody) -> Result<()> {
     let uid = known(&seen.uid)?;
-    let object = object_ref(&seen.target)?;
+    let object = crate::crd::object_ref(handle, &seen.target)?;
     match handle.patch(&object, body.guarded(uid)).await {
         Ok(_) => Ok(()),
         Err(error) => Err(explain(handle, &object, uid, error).await),
@@ -170,7 +170,7 @@ pub async fn scale(handle: &ClusterHandle, seen: &Seen, replicas: u32) -> Result
     )?;
     let uid = known(&seen.uid)?;
     let replicas = i32::try_from(replicas).unwrap_or(i32::MAX);
-    let object = object_ref(&seen.target)?;
+    let object = crate::crd::object_ref(handle, &seen.target)?;
     match handle.scale(&object, replicas, uid).await {
         Ok(()) => Ok(()),
         Err(error) => Err(explain(handle, &object, uid, error).await),
@@ -192,7 +192,7 @@ pub async fn replace_template(handle: &ClusterHandle, seen: &Seen, template: &Va
 
 pub async fn delete(handle: &ClusterHandle, seen: &Seen) -> Result<()> {
     let uid = known(&seen.uid)?;
-    let object = object_ref(&seen.target)?;
+    let object = crate::crd::object_ref(handle, &seen.target)?;
     let propagation = propagation(&seen.target.kind);
     if let Err(error) = handle.delete(&object, propagation, Some(uid)).await {
         return Err(explain(handle, &object, uid, error).await);

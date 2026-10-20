@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::app_settings::Refresh;
+use crate::crd::CrdKey;
 use crate::history::Location;
 use crate::resource::page_for_kind;
 use crate::tabs::{Panes, SavedWindow, TabId};
@@ -21,6 +22,10 @@ pub enum Command {
     ToggleSidebar,
     OpenResource(ResourceRef),
     InspectResource(ResourceRef),
+    OpenCrd {
+        cluster: ClusterId,
+        crd: CrdKey,
+    },
     FollowLogs(LogTarget),
     OpenLogs {
         pod: ResourceRef,
@@ -145,6 +150,7 @@ impl AppState {
                 Some(commands)
             }
             Command::OpenResource(_) => Some(vec![command.clone()]),
+            Command::OpenCrd { .. } => Some(vec![command.clone()]),
             Command::FollowLogs(_) => Some(vec![command.clone()]),
             Command::OpenLogs { .. } => Some(vec![command.clone()]),
             Command::Compare(_) => Some(vec![command.clone()]),
@@ -237,6 +243,7 @@ impl AppState {
         match command {
             Command::SelectCluster(Some(id)) => has_cluster(id),
             Command::OpenResource(resource) => has_cluster(&resource.cluster),
+            Command::OpenCrd { cluster, .. } => has_cluster(cluster),
             Command::FollowLogs(target) => has_cluster(target.cluster()),
             Command::OpenLogs { pod, .. } => has_cluster(&pod.cluster),
             Command::Compare(resource) => has_cluster(&resource.cluster),
@@ -301,6 +308,11 @@ fn navigate(location: &mut Location, command: &Command, snapshot: &Snapshot) {
         Command::SelectPage(page) => select_page(location, *page),
         Command::OpenCommit(_) => select_page(location, Page::Changes),
         Command::OpenResource(resource) => open_resource(location, resource, snapshot),
+        Command::OpenCrd { cluster, crd } => {
+            if has_cluster(cluster) {
+                *location = Location::crd_on(cluster.clone(), crd.clone());
+            }
+        }
         Command::FollowLogs(target) => {
             if has_cluster(target.cluster()) {
                 *location = Location {
@@ -372,6 +384,7 @@ fn open_resource(location: &mut Location, resource: &ResourceRef, snapshot: &Sna
     }
     *location = Location {
         resource: Some(resource.clone()),
+        crd: CrdKey::parse(&resource.kind),
         ..Location::page_on(resource.cluster.clone(), page_for_kind(&resource.kind))
     };
 }
@@ -426,6 +439,12 @@ fn retargeted(location: &Location, cluster: Option<&ClusterId>, snapshot: &Snaps
             logs: Some(moved),
             ..Location::page_on(id.clone(), Page::Logs)
         };
+    }
+    if let Some(crd) = &location.crd {
+        if snapshot.crd(id, crd).is_none() {
+            return overview;
+        }
+        return Location::crd_on(id.clone(), crd.clone());
     }
     if let Some(resource) = &location.resource {
         let moved = ResourceRef {
@@ -770,6 +789,61 @@ mod tests {
         let title = crate::tabs::title(&location, &state.snapshot);
         assert_eq!(title.kind, crate::tabs::EDIT_KIND);
         assert!(!state.ready_for(&Command::EditYaml(deployment("gone"))));
+    }
+
+    fn with_crd(clusters: &[&str]) -> (AppState, CrdKey) {
+        let key = CrdKey::new("cert-manager.io", "Certificate");
+        let mut snapshot = sample();
+        for cluster in clusters {
+            let crd = crate::crd::Crd {
+                key: key.clone(),
+                plural: "certificates".into(),
+                version: "v1".into(),
+                namespaced: true,
+                columns: Vec::new(),
+            };
+            snapshot.crds.insert(ClusterId::new(*cluster), vec![crd]);
+        }
+        let mut state = AppState::default();
+        state.update(Update::Snapshot(Box::new(snapshot)));
+        (state, key)
+    }
+
+    #[test]
+    fn a_crd_opens_its_object_list_restores_and_follows_the_cluster_that_has_it() {
+        let (mut state, key) = with_crd(&["a", "b"]);
+        let open = Command::OpenCrd {
+            cluster: ClusterId::new("a"),
+            crd: key.clone(),
+        };
+        assert!(state.ready_for(&open));
+        state.apply(&open);
+        let location = state.location().clone();
+        assert_eq!(location.page, Page::CustomResources);
+        assert_eq!(location.crd, Some(key.clone()));
+        assert_eq!(location.commands(), vec![open]);
+        let title = crate::tabs::title(&location, &state.snapshot);
+        assert_eq!(
+            (title.kind.as_str(), title.label.as_str()),
+            (crate::tabs::CRD_KIND, "Certificate")
+        );
+        let object = key.object(ClusterId::new("a"), Some("web".into()), "tls".into());
+        state.apply(&Command::OpenResource(object.clone()));
+        assert_eq!(state.location().page, Page::CustomResources);
+        assert_eq!(state.location().crd, Some(key.clone()));
+        assert_eq!(state.location().resource, Some(object.clone()));
+        assert_eq!(state.workload(), None);
+        assert_eq!(state.location().detail(), None);
+        let title = crate::tabs::title(state.location(), &state.snapshot);
+        assert_eq!(title.kind, "Certificate");
+        state.retarget(Some(&ClusterId::new("b")));
+        assert_eq!(
+            state.location(),
+            &Location::crd_on(ClusterId::new("b"), key.clone())
+        );
+        state.retarget(Some(&ClusterId::new("c")));
+        assert_eq!(state.location().page, Page::ClusterOverview);
+        assert_eq!(state.location().crd, None);
     }
 
     #[test]

@@ -448,8 +448,16 @@ impl Shell {
                 div()
                     .text_size(TEXT_TITLE)
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(location.page.title()),
+                    .child(page_title(location)),
             )
+            .children(location.crd.as_ref().map(|crd| {
+                div()
+                    .debug_selector(|| "page-crd-group".to_owned())
+                    .font_family(FONT_MONO)
+                    .text_size(TEXT_SMALL)
+                    .text_color(palette.mute)
+                    .child(crd.group.clone())
+            }))
             .children(status)
             .children(settings)
             .child(div().flex_1())
@@ -511,6 +519,13 @@ impl Shell {
             .child(div().text_color(palette.fg2).child(scope))
             .into_any_element()
     }
+}
+
+fn page_title(location: &Location) -> String {
+    location
+        .crd
+        .as_ref()
+        .map_or_else(|| location.page.title().to_owned(), |crd| crd.kind.clone())
 }
 
 fn fill(screen: impl IntoElement) -> AnyElement {

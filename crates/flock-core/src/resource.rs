@@ -72,10 +72,14 @@ pub fn kind_rank(kind: &str) -> usize {
 }
 
 pub fn short_kind(kind: &str) -> String {
+    let kind = crate::crd::display_kind(kind);
     kind_info(kind).map_or_else(|| kind.to_lowercase(), |info| info.short.to_owned())
 }
 
 pub fn page_for_kind(kind: &str) -> Page {
+    if crate::crd::CrdKey::parse(kind).is_some() {
+        return Page::CustomResources;
+    }
     kind_info(kind)
         .and_then(|info| info.page)
         .unwrap_or(Page::ClusterOverview)
@@ -107,6 +111,11 @@ mod tests {
             Page::ClusterOverview
         );
         assert_eq!(page_for_kind("Widget"), Page::ClusterOverview);
+        assert_eq!(
+            page_for_kind("Certificate.cert-manager.io"),
+            Page::CustomResources
+        );
+        assert_eq!(short_kind("Certificate.cert-manager.io"), "certificate");
     }
 
     #[test]

@@ -3,6 +3,7 @@ pub mod app_settings;
 pub mod changes;
 pub mod command;
 pub mod compare;
+pub(crate) mod custom;
 pub mod detail;
 pub mod edit;
 mod event_inspector;
@@ -36,6 +37,7 @@ use gpui::{
 
 use crate::kit::{EmptyState, FilterBar, Link, MenuItem, Select, ShowAll};
 
+pub use custom::CustomResourcesScreen;
 pub use events::EventsScreen;
 pub use flux_events::FluxEventsScreen;
 pub use flux_graph::FluxGraphScreen;
@@ -148,6 +150,7 @@ pub struct ClusterPages {
     namespaces: Entity<NamespacesScreen>,
     events: Entity<EventsScreen>,
     resources: Entity<ResourcesScreen>,
+    custom: Entity<CustomResourcesScreen>,
     flux: Entity<FluxListScreen>,
     graph: Entity<FluxGraphScreen>,
     _subscriptions: Vec<Subscription>,
@@ -164,6 +167,7 @@ impl ClusterPages {
         let namespaces = cx.new(|cx| NamespacesScreen::new(window, cx));
         let events = cx.new(|cx| EventsScreen::new(window, cx));
         let resources = cx.new(|cx| ResourcesScreen::new(window, cx));
+        let custom = cx.new(|cx| CustomResourcesScreen::new(window, cx));
         let flux = cx.new(|cx| FluxListScreen::new(window, cx));
         let graph = cx.new(FluxGraphScreen::new);
         let subscriptions = vec![
@@ -173,6 +177,7 @@ impl ClusterPages {
             subscribe(&nodes, on_event.clone(), cx),
             subscribe(&namespaces, on_event.clone(), cx),
             subscribe(&events, on_event.clone(), cx),
+            subscribe(&custom, on_event.clone(), cx),
             subscribe(&resources, on_event, cx),
         ];
         Self {
@@ -181,6 +186,7 @@ impl ClusterPages {
             namespaces,
             events,
             resources,
+            custom,
             flux,
             graph,
             _subscriptions: subscriptions,
@@ -238,7 +244,35 @@ impl ClusterPages {
         }
     }
 
+    pub fn sync_custom(
+        &self,
+        cluster: Option<&ClusterSummary>,
+        crd: Option<&flock_core::crd::CrdKey>,
+        snapshot: &Snapshot,
+        preferences: &flock_core::Preferences,
+        cx: &mut App,
+    ) {
+        let Some((cluster, key)) = cluster.zip(crd) else {
+            return;
+        };
+        let Some(definition) = snapshot.crd(&cluster.id, key) else {
+            return;
+        };
+        let objects = snapshot.custom_objects(&cluster.id, key);
+        let detail = snapshot.detail(&cluster.id);
+        self.custom.update(cx, |screen, cx| {
+            screen.set(cluster, definition, objects, detail, preferences, cx);
+        });
+    }
+
     pub fn reveal(&self, target: &ResourceRef, cx: &mut App) {
+        if let Some(key) = flock_core::crd::CrdKey::parse(&target.kind) {
+            let namespace = target.namespace.clone().unwrap_or_default();
+            let name = target.name.clone();
+            self.custom
+                .update(cx, |screen, cx| screen.reveal(key, namespace, name, cx));
+            return;
+        }
         if target.kind == NODE_KIND {
             let name = target.name.clone();
             let cluster = target.cluster.clone();
@@ -263,6 +297,9 @@ impl ClusterPages {
         if is_flux_list(page) {
             return Some(self.flux.clone().into_any_element());
         }
+        if page == Page::CustomResources {
+            return Some(self.custom.clone().into_any_element());
+        }
         if !has_detail {
             return None;
         }
@@ -284,6 +321,7 @@ impl ClusterPages {
             Page::Nodes => self.nodes.read(cx).filter_bar(),
             Page::Namespaces => self.namespaces.read(cx).filter_bar(),
             Page::Events => self.events.read(cx).filter_bar(),
+            Page::CustomResources => self.custom.read(cx).filter_bar(),
             other if is_flux_list(other) => self.flux.read(cx).filter_bar(),
             other => {
                 ResourceKind::for_page(other)?;
@@ -297,6 +335,7 @@ impl ClusterPages {
         match page {
             Page::Nodes => self.nodes.read(cx).inspecting(),
             Page::Events => self.events.read(cx).inspecting(),
+            Page::CustomResources => self.custom.read(cx).inspecting(),
             other if ResourceKind::for_page(other).is_some() => {
                 self.resources.read(cx).inspecting()
             }
@@ -309,6 +348,9 @@ impl ClusterPages {
             Page::Nodes => self.nodes.update(cx, NodesScreen::close_inspector),
             Page::Events => self.events.update(cx, EventsScreen::close_inspector),
             Page::ClusterOverview => self.overview.update(cx, OverviewScreen::close_inspector),
+            Page::CustomResources => self
+                .custom
+                .update(cx, CustomResourcesScreen::close_inspector),
             other if ResourceKind::for_page(other).is_some() => {
                 self.resources.update(cx, ResourcesScreen::close_inspector)
             }
@@ -328,6 +370,7 @@ impl ClusterPages {
             Page::Events => Some(self.events.read(cx).list_focus(cx)),
             other if is_flux_list(other) => Some(self.flux.read(cx).list_focus(cx)),
             Page::FluxGraph => Some(gpui::Focusable::focus_handle(&self.graph, cx)),
+            Page::CustomResources => self.custom.update(cx, CustomResourcesScreen::list_focus),
             other => {
                 ResourceKind::for_page(other)?;
                 Some(self.resources.update(cx, ResourcesScreen::list_focus))
@@ -346,6 +389,9 @@ impl ClusterPages {
         }
         if is_flux_list(page) {
             return Some(self.flux.read(cx).header_note());
+        }
+        if page == Page::CustomResources {
+            return Some(self.custom.read(cx).header_note());
         }
         if !has_detail {
             return None;

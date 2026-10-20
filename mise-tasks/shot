@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Render a demo screen to a PNG headlessly: mise run shot -- <screen> [dark|light]"
-#USAGE arg "<screen>" help="flock, cluster, collapsed, switcher, command, changes, compare, edit-yaml, cluster-settings, settings, gitops, overview, nodes, namespaces, namespace, events, resources, resource-inspector, job, node, kit, kit-overlays, kit-panes, add-cluster, add-cluster-check, workload, split, pods, pods-shell, logs, kustomization, helmrelease, source, flux-graph or flux-events; with FLOCK_FEATURES=loco also loco-platform, loco-apps, loco-builds or loco-routes"
+#USAGE arg "<screen>" help="flock, cluster, collapsed, switcher, command, changes, compare, edit-yaml, cluster-settings, settings, gitops, overview, nodes, namespaces, namespace, events, resources, resource-inspector, job, node, kit, kit-overlays, kit-panes, add-cluster, add-cluster-check, workload, split, pods, pods-shell, logs, kustomization, helmrelease, source, flux-graph, flux-events, custom-resources or custom-resource-inspector; with FLOCK_FEATURES=loco also loco-platform, loco-apps, loco-builds or loco-routes"
 #USAGE arg "[appearance]" default="dark" help="dark or light"
 #USAGE flag "--state <state>" help="loading, connecting, empty, error, metrics-local, metrics-empty or metrics-error: render the screen in that page state"
 #USAGE flag "--primary <highlight>" help="primary highlight: blue, purple, teal, green, orange, pink, graphite or a #hex colour"

@@ -215,9 +215,12 @@ impl Shell {
     pub(super) fn sidebar_key(
         &mut self,
         event: &KeyDownEvent,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.crd_filter_focused(window, cx) {
+            return;
+        }
         let keystroke = &event.keystroke;
         let pages = self.nav_pages();
         let current = self

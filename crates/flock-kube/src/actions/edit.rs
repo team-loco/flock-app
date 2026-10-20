@@ -7,7 +7,6 @@ use kube::api::{Patch, PatchParams};
 use serde_json::{Map, Value};
 
 use super::failure::action_failure;
-use super::mutate;
 use crate::error::{Error, Result};
 use crate::manager::ClusterHandle;
 use crate::ops::{FIELD_MANAGER, ObjectRef};
@@ -326,7 +325,7 @@ async fn submit(
 }
 
 async fn step(handle: &ClusterHandle, request: &EditRequest) -> Result<EditEvent> {
-    let target = mutate::object_ref(&request.target)?;
+    let target = crate::crd::object_ref(handle, &request.target)?;
     match &request.step {
         EditStep::Load { reveal } => {
             let object = current(handle, &target).await?;

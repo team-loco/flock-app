@@ -7,6 +7,7 @@ pub const LOGS_KIND: &str = "Logs";
 pub const COMPARE_KIND: &str = "Compare";
 pub const EDIT_KIND: &str = "Edit";
 pub const CLUSTER_KIND: &str = "Cluster";
+pub const CRD_KIND: &str = "Custom";
 pub const MAX_PANES: usize = 2;
 const PER_MILLE: u16 = 1000;
 const EVEN: u16 = PER_MILLE / 2;
@@ -595,6 +596,9 @@ fn describe(location: &Location, snapshot: &Snapshot) -> (Option<Status>, String
         return (None, LOGS_KIND.to_owned(), target.label());
     }
     let Some(resource) = &location.resource else {
+        if let Some(crd) = &location.crd {
+            return (None, CRD_KIND.to_owned(), crd.kind.clone());
+        }
         return (
             None,
             page_kind(location.page),
@@ -610,7 +614,11 @@ fn describe(location: &Location, snapshot: &Snapshot) -> (Option<Status>, String
         ),
         Page::Compare => (None, COMPARE_KIND.to_owned(), resource.name.clone()),
         Page::EditYaml => (None, EDIT_KIND.to_owned(), resource.name.clone()),
-        _ => (status, resource.kind.clone(), resource.name.clone()),
+        _ => (
+            status,
+            crate::crd::display_kind(&resource.kind).to_owned(),
+            resource.name.clone(),
+        ),
     }
 }
 

@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::crd::{Crd, CrdKey, CustomObjects};
 use crate::home::{ClusterMetrics, problems_badge};
 use crate::{
     CLUSTER_NAV, ChangesLog, ClusterCatalog, ClusterDetail, ClusterId, Comparison, Counts,
@@ -46,6 +47,8 @@ pub struct Snapshot {
     pub catalog: ClusterCatalog,
     pub pods: Vec<crate::pods::Pod>,
     pub forwards: Vec<Forward>,
+    pub crds: BTreeMap<ClusterId, Vec<Crd>>,
+    pub custom: Vec<CustomObjects>,
 }
 
 impl Snapshot {
@@ -72,6 +75,20 @@ impl Snapshot {
     #[allow(clippy::unused_self)]
     fn shows_section(&self, _: &NavSection, _: &ClusterId) -> bool {
         true
+    }
+
+    pub fn crds(&self, id: &ClusterId) -> &[Crd] {
+        self.crds.get(id).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn crd(&self, id: &ClusterId, key: &CrdKey) -> Option<&Crd> {
+        self.crds(id).iter().find(|crd| &crd.key == key)
+    }
+
+    pub fn custom_objects(&self, id: &ClusterId, key: &CrdKey) -> Option<&CustomObjects> {
+        self.custom
+            .iter()
+            .find(|objects| &objects.cluster == id && &objects.key == key)
     }
 
     pub fn detail(&self, id: &ClusterId) -> Option<&ClusterDetail> {
@@ -174,6 +191,8 @@ impl Snapshot {
         self.catalog.clusters.retain(|c| &c.cluster != id);
         self.pods.retain(|p| &p.cluster != id);
         self.forwards.retain(|f| &f.target.cluster != id);
+        self.crds.remove(id);
+        self.custom.retain(|objects| &objects.cluster != id);
         let badge = problems_badge(&self.home.problems);
         self.flock_nav.insert(Page::Problems, badge);
     }
@@ -221,6 +240,8 @@ pub(crate) mod tests {
             catalog: ClusterCatalog::default(),
             pods: Vec::new(),
             forwards: Vec::new(),
+            crds: BTreeMap::new(),
+            custom: Vec::new(),
         }
     }
 

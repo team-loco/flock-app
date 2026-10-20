@@ -1,24 +1,43 @@
 use std::collections::BTreeMap;
 
+use flock_core::crd::grouped;
 use flock_core::switcher::ALL_CLUSTERS;
 use flock_core::{ClusterSummary, Command, Counts, NavSection, Page};
 use gpui::{
-    Animation, AnimationExt, AnyElement, ClickEvent, Context, ElementId, FontWeight, Hsla,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, ease_out_quint, prelude::FluentBuilder, svg,
+    Animation, AnimationExt, AnyElement, AppContext as _, ClickEvent, Context, ElementId, Entity,
+    FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, ease_out_quint,
+    prelude::FluentBuilder, svg,
 };
 
 use super::Shell;
 use super::keys::SIDEBAR_CONTEXT;
 use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
-use crate::kit::{Tooltip, status_symbols};
+use crate::kit::{InputEvent, TextField, TextFieldState, Tooltip, status_symbols};
 use crate::theme::{
     ActiveTheme, COLLAPSE, FONT_MONO, ICON, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, ROW_NAV,
-    RULE, SIDEBAR, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_UI,
-    TITLE_ROW, TRAFFIC_LIGHTS_INSET,
+    RULE, SIDEBAR, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_LABEL, TEXT_SMALL,
+    TEXT_UI, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
 };
 
 const COLLAPSE_TOOLTIP: &str = "Collapse sidebar  ⌘B";
+const CUSTOM_RESOURCES: &str = "Custom resources";
+const CRD_FILTER_PLACEHOLDER: &str = "Filter definitions";
+const NO_CRDS_MATCH: &str = "No definitions match";
+
+pub(super) fn crd_filter(
+    window: &mut Window,
+    cx: &mut Context<Shell>,
+) -> (Entity<TextFieldState>, Subscription) {
+    let field = cx.new(|cx| TextFieldState::new(window, cx).placeholder(CRD_FILTER_PLACEHOLDER));
+    let _ = gpui::Focusable::focus_handle(field.read(cx), cx).tab_stop(false);
+    let events = cx.subscribe(&field, |_, _, event: &InputEvent, cx| {
+        if let InputEvent::Change = event {
+            cx.notify();
+        }
+    });
+    (field, events)
+}
 const EXPAND_TOOLTIP: &str = "Expand sidebar  ⌘B";
 
 impl Shell {
@@ -145,6 +164,7 @@ impl Shell {
                 cx,
             ));
         }
+        items.extend(self.custom_resources(palette, cx));
         let collapse = icon_button("collapse-sidebar", CHEVRON_LEFT, COLLAPSE_TOOLTIP, palette)
             .on_click(cx.listener(|this, _, _, cx| this.dispatch(Command::ToggleSidebar, cx)));
         let scope: SharedString = match &self.state.location().cluster {
@@ -190,6 +210,93 @@ impl Shell {
                     .pb(SPACE_3)
                     .children(items),
             )
+    }
+}
+
+impl Shell {
+    pub(super) fn crd_filter_focused(&self, window: &Window, cx: &gpui::App) -> bool {
+        gpui::Focusable::focus_handle(self.crd_filter.read(cx), cx).is_focused(window)
+    }
+
+    fn custom_resources(&self, palette: &Palette, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let location = self.state.location();
+        let Some(cluster) = location.cluster.clone() else {
+            return Vec::new();
+        };
+        let crds = self.state.snapshot.crds(&cluster);
+        if crds.is_empty() {
+            return Vec::new();
+        }
+        let current = location
+            .crd
+            .as_ref()
+            .filter(|_| location.page == Page::CustomResources);
+        let query = self.crd_filter.read(cx).value().to_string();
+        let groups = grouped(crds, &query);
+        let mut items = vec![
+            section_head(CUSTOM_RESOURCES, palette).into_any_element(),
+            div()
+                .debug_selector(|| "crd-filter".to_owned())
+                .px(SPACE_2)
+                .pb(SPACE_2)
+                .child(TextField::new(&self.crd_filter).compact())
+                .into_any_element(),
+        ];
+        if groups.is_empty() {
+            items.push(
+                div()
+                    .px(SPACE_4)
+                    .text_size(TEXT_SMALL)
+                    .text_color(palette.mute)
+                    .child(NO_CRDS_MATCH)
+                    .into_any_element(),
+            );
+        }
+        for group in groups {
+            items.push(
+                div()
+                    .pt(SPACE_3)
+                    .pb(SPACE_1)
+                    .px(SPACE_4)
+                    .truncate()
+                    .font_family(FONT_MONO)
+                    .text_size(TEXT_SMALL)
+                    .text_color(palette.mute)
+                    .child(group.group.to_owned())
+                    .into_any_element(),
+            );
+            for crd in group.crds {
+                let selected = current == Some(&crd.key);
+                let selector = format!("nav-crd-{}", crd.name());
+                let command = Command::OpenCrd {
+                    cluster: cluster.clone(),
+                    crd: crd.key.clone(),
+                };
+                let middle = command.clone();
+                let row = nav_row(
+                    ElementId::Name(selector.clone().into()),
+                    ROW_NAV,
+                    selected,
+                    palette,
+                )
+                .debug_selector(move || selector.clone())
+                .when(!selected, |row| row.text_color(palette.fg2))
+                .tooltip(Tooltip::text(crd.name()))
+                .child(div().flex_1().truncate().child(crd.key.kind.clone()))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.dispatch(command.clone(), cx);
+                }))
+                .on_aux_click(cx.listener(
+                    move |this, event: &ClickEvent, _, cx| {
+                        if event.is_middle_click() {
+                            this.dispatch(middle.clone(), cx);
+                        }
+                    },
+                ));
+                items.push(row.into_any_element());
+            }
+        }
+        items
     }
 }
 

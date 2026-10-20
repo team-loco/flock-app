@@ -34,7 +34,7 @@ pub struct Scope<'a> {
     pub now: Timestamp,
 }
 
-fn owner(meta: &ObjectMeta) -> Option<Key> {
+pub(crate) fn owner(meta: &ObjectMeta) -> Option<Key> {
     meta.owner_references
         .iter()
         .flatten()
@@ -385,6 +385,10 @@ pub fn related(
             let facts = facts(handle, scope, Some(&target.name));
             let contents = related::contents(scope.cluster, &facts, scope.events, &target.name);
             built.push(contents);
+            continue;
+        }
+        if flock_core::crd::CrdKey::parse(&target.kind).is_some() {
+            built.extend(crate::crd::related(handle, scope, target));
             continue;
         }
         let facts = facts(handle, scope, target.namespace.as_deref());

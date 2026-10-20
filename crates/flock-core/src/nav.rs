@@ -36,6 +36,7 @@ pub enum Page {
     ConfigMaps,
     Secrets,
     Pvcs,
+    CustomResources,
     Compare,
     EditYaml,
     Logs,
@@ -78,6 +79,7 @@ impl Page {
             Self::ConfigMaps => "ConfigMaps",
             Self::Secrets => "Secrets",
             Self::Pvcs => "PVCs",
+            Self::CustomResources => "Custom resources",
             Self::Compare => "Compare",
             Self::EditYaml => "Edit YAML",
             Self::Logs => "Logs",
@@ -109,6 +111,7 @@ impl Page {
             Self::ConfigMaps => "ConfigMap",
             Self::Secrets => "Secret",
             Self::Pvcs => "PVC",
+            Self::CustomResources => "Custom resource",
             other => other.label(),
         }
     }

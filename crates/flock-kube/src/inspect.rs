@@ -11,7 +11,7 @@ use kube::Resource;
 use kube::api::PartialObjectMeta;
 use serde_json::Value;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::flux::custom_kind;
 use crate::manager::ClusterHandle;
 use crate::ops::ObjectRef;
@@ -86,10 +86,10 @@ pub struct Inspected {
 }
 
 pub async fn yaml(handle: &ClusterHandle, target: &ResourceRef) -> Result<Inspected> {
-    let reference = object_ref(target).ok_or_else(|| Error::UnknownKind {
-        api_version: String::new(),
-        kind: target.kind.clone(),
-    })?;
+    let reference = match object_ref(target) {
+        Some(reference) => reference,
+        None => crate::crd::object_ref(handle, target)?,
+    };
     let object = handle.get(&reference).await?;
     let version = object.metadata.resource_version.clone();
     let mut value = serde_json::to_value(&object)?;
@@ -116,6 +116,9 @@ where
 }
 
 pub fn cached_version(handle: &ClusterHandle, target: &ResourceRef) -> Option<String> {
+    if flock_core::crd::CrdKey::parse(&target.kind).is_some() {
+        return crate::crd::cached_version(handle, target);
+    }
     let flux = FLUX_KINDS
         .into_iter()
         .find(|kind| kind.as_str() == target.kind);
