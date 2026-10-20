@@ -58,6 +58,7 @@ pub const KINDS: &[KindInfo] = &[
     info("OCIRepository", "ocirepo", Some(Page::Sources)),
     info("Node", "node", Some(Page::Nodes)),
     info("Namespace", "ns", Some(Page::Namespaces)),
+    info("ReplicaSet", "rs", None),
 ];
 
 pub fn kind_info(kind: &str) -> Option<&'static KindInfo> {

@@ -29,7 +29,7 @@ const RAW: &str = "raw";
 const SEPARATOR: &str = " · ";
 const PREVIOUS_INSTANCE: &str = "previous instance";
 const PREVIOUS_BANNER: &str = "pod-logs-previous-banner";
-const TIMESTAMPS: &str = "timestamps";
+const TIME: &str = "time";
 const SELECT_FOR_LOGS: &str = "Select a pod to see its logs.";
 const SELECT_FOR_SHELL: &str = "Select a pod to open a shell.";
 const DOCK_EMPTY: &str = "pods-dock-empty";
@@ -417,7 +417,7 @@ impl PodsScreen {
                     })),
             )
             .child(
-                Button::new("pod-logs-timestamps", TIMESTAMPS)
+                Button::new("pod-logs-time", TIME)
                     .small()
                     .selected(timestamps)
                     .on_click(cx.listener(move |this, _, _, cx| {

@@ -2,30 +2,32 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::kit::SelectableText;
+use flock_core::diagnosis::true_label;
 use flock_core::emptiness::Noun;
 use flock_core::filter::label_values;
 use flock_core::multilog::LabelSelector;
 use flock_core::pods::{
-    Container, ContainerState, Pod, PodFilter, PodPhase, PodQuery, Resources, Termination, Usage,
-    filter_counts, nav_counts,
+    Container, ContainerState, FailingElsewhere, OWNER_ARROW, Pod, PodFilter, PodPhase, PodQuery,
+    Resources, Termination, Usage, filter_counts, nav_counts, owner_segment,
 };
 use flock_core::related::Related;
 use flock_core::resources::{NamespaceCount, POD_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
 use flock_core::{
-    ClusterId, Command, Counts, LogInstance, LogTarget, Page, Preferences, ResourceRef, Seen,
-    Snapshot, Status,
+    ClusterId, Command, Condition, Counts, LogInstance, LogTarget, Page, Preferences, ResourceRef,
+    Seen, Snapshot, Status,
 };
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Window, div, px,
+    Subscription, WeakEntity, Window, div, prelude::FluentBuilder, px, svg,
 };
 
 mod streams;
 
 use streams::{LogSession, ShellSession, TERMINAL_ID};
 
+use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::kit::{
     Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, EVENTS, Entrance,
     EventList, FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER,
@@ -38,11 +40,15 @@ use crate::screens::{
     set_namespace_options,
 };
 use crate::theme::{
-    ActiveTheme, FONT_MONO, FONT_SANS, INSPECTOR_POD, LINE_PROSE, Palette, RULE, SPACE_2, SPACE_3,
-    SPACE_4, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI, WHATS_WRONG_BAR,
+    ActiveTheme, FONT_MONO, FONT_SANS, ICON, INSPECTOR_POD, LINE_PROSE, Palette, RULE, SPACE_2,
+    SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI,
+    WHATS_WRONG_BAR,
 };
 
 const INSPECTOR_ID: &str = "pod-inspector";
+const CONDITIONS_TOGGLE: &str = "pod-conditions-toggle";
+const FAILING_ELSEWHERE: &str = "pod-failing-elsewhere";
+const OWNER_LINK: &str = "pod-owner";
 const NAME_MIN: Pixels = px(180.);
 const NAME_WEIGHT: f32 = 2.;
 const OWNER_MIN: Pixels = px(96.);
@@ -84,6 +90,8 @@ pub struct PodsScreen {
     related: Vec<Related>,
     container: Option<String>,
     instance: LogInstance,
+    conditions_open: bool,
+    elsewhere: Entity<ElsewhereLink>,
     log: Option<LogSession>,
     shell: Option<ShellSession>,
     table: Entity<Table<Pod>>,
@@ -130,10 +138,7 @@ impl PodsScreen {
                 .mono()
                 .width(NAMESPACE_SELECT)
         });
-        let filter = cx.new(|cx| {
-            FilterBar::new("pod-filter", Pod::FILTER.placeholder(), window, cx)
-                .scope(namespace.clone())
-        });
+        let (filter, elsewhere) = filter_bar(&namespace, window, cx);
         let containers = cx.new(|cx| {
             Select::new("pod-container", Vec::new(), cx)
                 .mono()
@@ -199,6 +204,8 @@ impl PodsScreen {
             related: Vec::new(),
             container: None,
             instance: LogInstance::Current,
+            conditions_open: false,
+            elsewhere,
             log: None,
             shell: None,
             table,
@@ -423,6 +430,16 @@ impl PodsScreen {
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))
             .collect();
+        let elsewhere = self
+            .cluster
+            .as_ref()
+            .and_then(|cluster| self.query.failing_elsewhere(&self.pods, cluster));
+        self.elsewhere.update(cx, |link, cx| {
+            if link.elsewhere != elsewhere {
+                link.elsewhere = elsewhere;
+                cx.notify();
+            }
+        });
         let shown = rows.len();
         self.shown = shown;
         let total = self.cluster_total();
@@ -453,6 +470,18 @@ impl PodsScreen {
             table.select(position, cx);
         });
         self.sync_selection(cx);
+    }
+
+    fn go_elsewhere(&mut self, cx: &mut Context<Self>) {
+        let target = self.elsewhere.read(cx).elsewhere.clone();
+        if let Some(target) = target {
+            self.choose_namespace(target.namespace, cx);
+        }
+    }
+
+    fn toggle_conditions(&mut self, cx: &mut Context<Self>) {
+        self.conditions_open = !self.conditions_open;
+        cx.notify();
     }
 
     fn show_all_namespaces(&mut self, cx: &mut Context<Self>) {
@@ -540,10 +569,11 @@ impl PodsScreen {
         let related = section(&palette)
             .child(SectionLabel::new(RELATED))
             .child(inspector_section(related, &pick, cx));
+        let conditions_open = self.conditions_open;
         let (header, body) = match self.selected_pod() {
             Some(pod) => (
                 Some(Self::pod_header(pod, &palette, cx)),
-                Self::pod_details(pod, &palette, cx)
+                Self::pod_details(pod, conditions_open, &palette, cx)
                     .child(related)
                     .into_any_element(),
             ),
@@ -610,7 +640,12 @@ impl PodsScreen {
         header.flex_none().into_any_element()
     }
 
-    fn pod_details(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> gpui::Div {
+    fn pod_details(
+        pod: &Pod,
+        conditions_open: bool,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
         let whats_wrong = pod.diagnosis().map(|diagnosis| {
             section(palette)
                 .child(SectionLabel::new(WHATS_WRONG))
@@ -622,25 +657,14 @@ impl PodsScreen {
             .children(whats_wrong)
             .child(Self::facts(pod, palette, cx))
             .child(Self::containers_section(pod, palette, cx))
-            .child(conditions(pod, palette))
+            .child(Self::conditions(pod, conditions_open, palette, cx))
             .child(events(pod, palette))
             .child(labels(pod, palette))
             .child(volumes(pod, palette))
     }
 
     fn facts(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-        let owner = match &pod.owner {
-            Some(owner) => {
-                let target = owner.clone();
-                let link = Link::new("pod-owner", format!("{}/{}", owner.kind, owner.name))
-                    .mono()
-                    .on_click(cx.listener(move |_, _, _, cx| {
-                        cx.emit(Command::OpenResource(target.clone()));
-                    }));
-                div().min_w_0().truncate().child(link).into_any_element()
-            }
-            None => missing(palette),
-        };
+        let owner = Self::owner_chain(pod, palette, cx);
         let created = format!("{} ago", flock_core::time::age(pod.age));
         let ready = div()
             .text_color(palette.status(pod.status))
@@ -654,8 +678,69 @@ impl PodsScreen {
                 .row("Ready", ready)
                 .row("Controlled by", owner)
                 .text("QoS", pod.qos.label())
+                .text("Service account", or_missing(pod.service_account.clone()))
                 .text("Created", created),
         )
+    }
+
+    fn owner_chain(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let chain = pod.owner_chain();
+        if chain.is_empty() {
+            return missing(palette);
+        }
+        let mut parts: Vec<AnyElement> = Vec::new();
+        for (ix, target) in chain.into_iter().enumerate() {
+            if ix > 0 {
+                let arrow = div().text_color(palette.mute).child(OWNER_ARROW);
+                parts.push(arrow.into_any_element());
+            }
+            let id = gpui::ElementId::NamedInteger(OWNER_LINK.into(), ix as u64);
+            let link = Link::new(id, owner_segment(&target))
+                .mono()
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.emit(Command::OpenResource(target.clone()));
+                }));
+            parts.push(link.into_any_element());
+        }
+        div()
+            .min_w_0()
+            .flex()
+            .flex_wrap()
+            .font_family(FONT_MONO)
+            .children(parts)
+            .into_any_element()
+    }
+
+    fn conditions(
+        pod: &Pod,
+        open: bool,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let all_true = pod.conditions.iter().all(Condition::is_true);
+        let summary_color = if all_true { palette.ok } else { palette.fg2 };
+        let chevron = if open { CHEVRON_DOWN } else { CHEVRON_RIGHT };
+        let toggle = div()
+            .debug_selector(|| CONDITIONS_TOGGLE.into())
+            .id(CONDITIONS_TOGGLE)
+            .flex()
+            .items_center()
+            .gap(SPACE_4)
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_conditions(cx)))
+            .child(SectionLabel::new(CONDITIONS))
+            .child(
+                div()
+                    .font_family(FONT_MONO)
+                    .text_size(TEXT_SMALL)
+                    .text_color(summary_color)
+                    .child(true_label(&pod.conditions)),
+            )
+            .child(div().flex_1())
+            .child(svg().path(chevron).size(ICON).text_color(palette.mute));
+        section(palette).child(toggle).when(open, |section| {
+            section.child(ConditionTable::new(&pod.conditions))
+        })
     }
 
     fn containers_section(
@@ -886,12 +971,6 @@ fn labels(pod: &Pod, palette: &Palette) -> impl IntoElement {
     )
 }
 
-fn conditions(pod: &Pod, palette: &Palette) -> impl IntoElement {
-    section(palette)
-        .child(SectionLabel::new(CONDITIONS))
-        .child(ConditionTable::new(&pod.conditions))
-}
-
 fn volumes(pod: &Pod, palette: &Palette) -> impl IntoElement {
     let rows = pod.volumes.iter().fold(
         KeyValue::new().label_width(INSPECTOR_LABEL),
@@ -912,7 +991,7 @@ fn open_logs(target: LogTarget, cx: &mut Context<PodsScreen>) {
     cx.emit(Command::NewTab(Box::new(Command::FollowLogs(target))));
 }
 
-fn menu_items(pod: &Pod, screen: &gpui::WeakEntity<PodsScreen>) -> Vec<MenuItem> {
+fn menu_items(pod: &Pod, screen: &WeakEntity<PodsScreen>) -> Vec<MenuItem> {
     let screen = screen.clone();
     let logs_screen = screen.clone();
     let logs_pod = pod.resource();
@@ -1106,6 +1185,45 @@ fn columns() -> Vec<Column<Pod>> {
         .fixed(AGE)
         .sort_by_key(|p: &Pod| p.age),
     ]
+}
+
+fn filter_bar(
+    namespace: &Entity<Select>,
+    window: &mut Window,
+    cx: &mut Context<PodsScreen>,
+) -> (Entity<FilterBar>, Entity<ElsewhereLink>) {
+    let screen = cx.weak_entity();
+    let elsewhere = cx.new(|_| ElsewhereLink {
+        elsewhere: None,
+        screen,
+    });
+    let filter = cx.new(|cx| {
+        FilterBar::new("pod-filter", Pod::FILTER.placeholder(), window, cx)
+            .scope(namespace.clone())
+            .aside(elsewhere.clone())
+    });
+    (filter, elsewhere)
+}
+
+struct ElsewhereLink {
+    elsewhere: Option<FailingElsewhere>,
+    screen: WeakEntity<PodsScreen>,
+}
+
+impl Render for ElsewhereLink {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = *cx.palette();
+        let link = self.elsewhere.as_ref().map(|elsewhere| {
+            let screen = self.screen.clone();
+            Link::new(FAILING_ELSEWHERE, elsewhere.label())
+                .mono()
+                .color(palette.err)
+                .on_click(move |_, _, cx| {
+                    let _ = screen.update(cx, PodsScreen::go_elsewhere);
+                })
+        });
+        div().text_size(TEXT_SMALL).children(link)
+    }
 }
 
 impl Render for PodsScreen {

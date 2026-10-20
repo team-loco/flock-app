@@ -30,6 +30,29 @@ pub fn span(elapsed: Duration) -> String {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Date {
+    pub year: i16,
+    pub month: i8,
+    pub day: i8,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LocalTime {
+    pub date: Date,
+    pub hour: i8,
+    pub minute: i8,
+}
+
+pub fn stamp(at: LocalTime, today: Date) -> String {
+    let clock = format!("{:02}:{:02}", at.hour, at.minute);
+    if at.date == today {
+        return clock;
+    }
+    let Date { year, month, day } = at.date;
+    format!("{year:04}-{month:02}-{day:02} {clock}")
+}
+
 pub fn age_since(then: SystemTime, now: SystemTime) -> String {
     let elapsed = now.duration_since(then).unwrap_or_default();
     age(elapsed)
@@ -71,6 +94,24 @@ mod tests {
         for (secs, expected) in cases {
             assert_eq!(span(Duration::from_secs(secs)), expected, "{secs}s");
         }
+    }
+
+    #[test]
+    fn stamps_show_the_time_today_and_the_date_otherwise() {
+        let today = Date {
+            year: 2026,
+            month: 10,
+            day: 20,
+        };
+        let at = |date: Date, hour, minute| LocalTime { date, hour, minute };
+        assert_eq!(stamp(at(today, 2, 7), today), "02:07");
+        let yesterday = Date { day: 19, ..today };
+        assert_eq!(stamp(at(yesterday, 16, 31), today), "2026-10-19 16:31");
+        let last_year = Date {
+            year: 2025,
+            ..today
+        };
+        assert_eq!(stamp(at(last_year, 9, 5), today), "2025-10-20 09:05");
     }
 
     #[test]

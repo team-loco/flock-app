@@ -5,8 +5,8 @@ use flock_core::pods::{Container, ContainerState, Pod, PodPhase, Qos, Usage};
 use flock_core::{ClusterId, Status, Uid};
 
 use super::{
-    CLUSTER, CRASH_LOOP, DAY, HOUR, RUNNING, conditions, owner, running, suffix, template_hash,
-    volumes,
+    CLUSTER, CRASH_LOOP, DAY, HOUR, RUNNING, SERVICE_ACCOUNT, conditions, owner, running, suffix,
+    template_hash, volumes,
 };
 
 const NODE_DOMAIN: &str = ".ec2.internal";
@@ -501,6 +501,7 @@ fn filler(group: &Group, replica: u32, index: u32, node: Option<String>) -> Pod 
         node,
         ip: None,
         owner: Some(owner(group.kind, group.namespace, group.owner)),
+        service_account: Some(SERVICE_ACCOUNT.into()),
         qos: Qos::Burstable,
         age: Duration::from_secs(group.age),
         labels: labels(group, app),

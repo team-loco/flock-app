@@ -1,7 +1,7 @@
 use anyhow::Context as _;
 use flock::Screen;
 use flock_core::resource::page_for_kind;
-use flock_core::resources::EVENT_LIST;
+use flock_core::resources::{EVENT_LIST, POD_LIST};
 use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
@@ -2408,6 +2408,40 @@ fn the_pod_phase_filter_keeps_one_phase() -> anyhow::Result<()> {
 }
 
 #[test]
+fn a_namespace_filter_links_to_pods_failing_in_other_namespaces() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    assert!(ui.bounds("pod-failing-elsewhere").is_some());
+    let before = picked(&ui, SAMPLE, POD_LIST);
+    ui.click("pod-failing-elsewhere")?;
+    let after = picked(&ui, SAMPLE, POD_LIST);
+    assert_ne!(after, before);
+    assert!(after.is_some());
+    assert!(ui.bounds("pod-failing-elsewhere").is_none());
+    ui.click("pod-namespace")?;
+    ui.click("pod-namespace-option-1")?;
+    assert_ne!(picked(&ui, SAMPLE, POD_LIST), after);
+    Ok(())
+}
+
+#[test]
+fn the_pod_owner_chain_links_each_owner() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    let row = (0..POD_ROWS).find(|ix| {
+        let row: &'static str = format!("pods-row-{ix}").leak();
+        ui.click(row).is_ok() && ui.bounds("pod-owner-1").is_some()
+    });
+    let row = row.context("no demo pod shows a two-step owner chain")?;
+    let row: &'static str = format!("pods-row-{row}").leak();
+    for (link, kind) in [("pod-owner-0", "Deployment"), ("pod-owner-1", "ReplicaSet")] {
+        let mut ui = Ui::open(Screen::Pods)?;
+        ui.click(row)?;
+        ui.click(link)?;
+        assert_eq!(opened(&ui).map(|(kind, _)| kind).as_deref(), Some(kind));
+    }
+    Ok(())
+}
+
+#[test]
 fn the_pods_dock_waits_for_a_pod_before_offering_log_controls() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
     assert!(ui.bounds("pod-logs-follow").is_some());
@@ -3079,8 +3113,16 @@ fn a_node_inspector_links_the_pods_scheduled_on_it() -> anyhow::Result<()> {
 #[test]
 fn crashing_pod_inspector_says_whats_wrong_above_conditions_and_events() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
+    ui.press("cmd-j")?;
+    ui.scroll(
+        "pod-inspector-pane",
+        gpui::point(gpui::px(0.), gpui::px(-INSPECTOR_SCROLL)),
+    )?;
+    assert!(ui.bounds("condition-table").is_none());
+    ui.click("pod-conditions-toggle")?;
+    assert!(ui.bounds("condition-table").is_some());
     let wrong = top(&mut ui, "whats-wrong")?;
-    let conditions = top(&mut ui, "condition-table")?;
+    let conditions = top(&mut ui, "pod-conditions-toggle")?;
     let events = top(&mut ui, "object-events")?;
     assert!(wrong < conditions && conditions < events);
     let pane = ui
@@ -3175,11 +3217,12 @@ fn the_pod_namespace_picker_lists_every_cluster_namespace() -> anyhow::Result<()
             .position(|name| *name == empty)
             .ok_or_else(|| anyhow::anyhow!("{empty} is listed"))?;
         ui.click(selector(format!("pod-namespace-option-{}", ix + 1)))?;
-        let chosen = ui.state().snapshot.catalog.get(&cluster).map(|settings| {
-            settings
-                .preferences
-                .namespace_selection(flock_core::resources::POD_LIST)
-        });
+        let chosen = ui
+            .state()
+            .snapshot
+            .catalog
+            .get(&cluster)
+            .map(|settings| settings.preferences.namespace_selection(POD_LIST));
         assert_eq!(
             chosen.as_ref().and_then(|scope| scope.namespace()),
             Some(empty.as_str())

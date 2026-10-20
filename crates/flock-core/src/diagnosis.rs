@@ -34,6 +34,11 @@ pub struct Condition {
     pub age: Option<Duration>,
 }
 
+pub fn true_label(conditions: &[Condition]) -> String {
+    let set = conditions.iter().filter(|c| c.is_true()).count();
+    format!("{set}/{} {CONDITION_TRUE}", conditions.len())
+}
+
 impl Condition {
     pub fn new(kind: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
@@ -225,6 +230,18 @@ mod tests {
             age: Duration::from_secs(minutes * 60),
             count: 1,
         }
+    }
+
+    #[test]
+    fn true_labels_count_the_set_conditions() {
+        let conditions = [
+            Condition::new("PodScheduled", "True"),
+            Condition::new("Ready", "False"),
+            Condition::new("Initialized", "True"),
+        ];
+        assert_eq!(true_label(&conditions), "2/3 True");
+        assert_eq!(true_label(&conditions[..1]), "1/1 True");
+        assert_eq!(true_label(&[]), "0/0 True");
     }
 
     #[test]
