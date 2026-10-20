@@ -3273,3 +3273,49 @@ fn helm_releases_open_their_history_values_and_flux_owner() -> anyhow::Result<()
     assert_eq!(flux, Some(flock_core::FluxKind::HelmRelease));
     Ok(())
 }
+
+fn device_span(bounds: gpui::Bounds<Pixels>) -> anyhow::Result<(u32, u32, u32, u32)> {
+    const SCALE: f32 = 2.;
+    let device = bounds.to_device_pixels(SCALE);
+    let left = u32::try_from(i32::from(device.origin.x))?;
+    let top = u32::try_from(i32::from(device.origin.y))?;
+    let width = u32::try_from(i32::from(device.size.width))?;
+    let height = u32::try_from(i32::from(device.size.height))?;
+    Ok((left, top, left + width, top + height))
+}
+
+#[test]
+fn end_aligned_cells_with_tooltips_stay_end_aligned() -> anyhow::Result<()> {
+    const INK: u8 = 40;
+    const INSET: u32 = 12;
+    let mut ui = Ui::open(Screen::Namespaces)?;
+    let (_, _, pods_edge, _) = device_span(bounds_of(&mut ui, "namespaces-resize-2")?)?;
+    let (_, _, cpu_edge, _) = device_span(bounds_of(&mut ui, "namespaces-resize-3")?)?;
+    let (_, top, _, bottom) = device_span(bounds_of(&mut ui, "namespaces-row-2")?)?;
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("namespaces.png");
+    ui.save_png(&path)?;
+    let image = image::open(&path)?.to_rgba8();
+    let (left, right) = (pods_edge + INSET, cpu_edge - INSET);
+    let (top, bottom) = (top + INSET, bottom - INSET);
+    let background = image.get_pixel(left, top).0;
+    let inked = |x: u32| {
+        (top..bottom).any(|y| {
+            let pixel = image.get_pixel(x, y).0;
+            pixel
+                .iter()
+                .zip(background.iter())
+                .any(|(a, b)| a.abs_diff(*b) > INK)
+        })
+    };
+    let ink: Vec<u32> = (left..right).filter(|&x| inked(x)).collect();
+    let middle = left.midpoint(right);
+    assert!(!ink.is_empty(), "the CPU cell drew nothing");
+    assert!(
+        ink.iter().all(|&x| x > middle),
+        "CPU text should hug the right edge of its column: ink {:?}..{:?}, middle {middle}",
+        ink.first(),
+        ink.last()
+    );
+    Ok(())
+}

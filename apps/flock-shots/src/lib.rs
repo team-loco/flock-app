@@ -162,6 +162,7 @@ enum Step {
         from: Point<Pixels>,
         to: Point<Pixels>,
     },
+    Pause(Duration),
 }
 
 fn mouse_down(
@@ -254,6 +255,7 @@ fn apply(step: &Step, window: &mut Window, cx: &mut App) -> anyhow::Result<()> {
             }
             window.dispatch_event(mouse_up(*to, MouseButton::Left, SINGLE, none), cx);
         }
+        Step::Pause(_) => {}
     }
     Ok(())
 }
@@ -305,6 +307,13 @@ impl Headless {
     }
 
     fn run(&mut self, step: &Step) -> anyhow::Result<()> {
+        if let Step::Pause(duration) = step {
+            let start = Instant::now();
+            while start.elapsed() < *duration {
+                self.settle()?;
+            }
+            return Ok(());
+        }
         self.cx
             .update_window(self.window, |_, window, cx| apply(step, window, cx))??;
         self.settle()
@@ -713,6 +722,7 @@ impl Ui {
         loop {
             self.settle()?;
             if done(&self.state()) {
+                self.steps.push(Step::Pause(start.elapsed()));
                 return Ok(());
             }
             if start.elapsed() > timeout {
@@ -726,6 +736,7 @@ impl Ui {
         while start.elapsed() < duration {
             self.settle()?;
         }
+        self.steps.push(Step::Pause(duration));
         Ok(())
     }
 

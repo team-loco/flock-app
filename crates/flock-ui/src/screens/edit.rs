@@ -1,7 +1,8 @@
-use flock_core::changes::PatchLine;
+use flock_core::changes::{LineChange, PatchLine};
 use flock_core::edit::{
     Conflict, Draft, EditEvent, EditRequest, EditStep, Invalid, Live, is_secret, validate,
 };
+use flock_core::overview::plural;
 use flock_core::{Command, ResourceRef, Sink, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, InteractiveElement,
@@ -46,6 +47,8 @@ const LOADING: &str = "Loading the live object…";
 const REVIEWING: &str = "Running a server-side dry run…";
 const APPLYING: &str = "Applying…";
 const LINE_LABEL: &str = "Line";
+const LINE: &str = "line";
+const LINES: &str = "lines";
 const FOOTER_SELECTOR: &str = "edit-footer";
 const INVALID_SELECTOR: &str = "edit-invalid";
 const FAILED_SELECTOR: &str = "edit-failed";
@@ -487,9 +490,9 @@ fn scrolled(id: &'static str, header: SectionHeader, content: impl IntoElement) 
 fn changes(lines: &[PatchLine]) -> String {
     let changed = lines
         .iter()
-        .filter(|line| line.change != flock_core::changes::LineChange::Context)
+        .filter(|line| matches!(line.change, LineChange::Added | LineChange::Removed))
         .count();
-    format!("{changed} lines")
+    plural(changed, LINE, LINES)
 }
 
 fn review(lines: &[PatchLine], target: &ResourceRef, palette: &Palette) -> AnyElement {
@@ -597,4 +600,30 @@ impl Render for EditScreen {
 
 pub fn edit_command(target: ResourceRef) -> Command {
     Command::NewTab(Box::new(Command::EditYaml(target)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line(change: LineChange) -> PatchLine {
+        PatchLine {
+            change,
+            number: 1,
+            text: String::new(),
+            note: None,
+        }
+    }
+
+    #[test]
+    fn the_review_counts_changed_lines_without_hunk_headers() {
+        let one = [
+            line(LineChange::Hunk),
+            line(LineChange::Context),
+            line(LineChange::Added),
+        ];
+        assert_eq!(changes(&one), "1 line");
+        let two = [line(LineChange::Removed), line(LineChange::Added)];
+        assert_eq!(changes(&two), "2 lines");
+    }
 }

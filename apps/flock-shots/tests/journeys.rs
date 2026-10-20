@@ -1932,3 +1932,58 @@ fn live_kustomization_drift_flags_changed_and_extra_objects() -> anyhow::Result<
     drop(scenario);
     Ok(())
 }
+
+const DRY_RUN_EDIT: &str = "{apiVersion: v1, kind: ConfigMap, metadata: {name: cluster-info, namespace: kube-public}, data: {flock-qa: dry-run}}";
+
+#[test]
+fn live_keyboard_reaches_yaml_and_an_edit_draft_survives_a_tab_switch() -> anyhow::Result<()> {
+    let Some(make) = kind()? else {
+        return Ok(());
+    };
+    let (mut ui, before) = opened(&make, Screen::Flock)?;
+    switch_to(&mut ui, CLUSTERS[0].0)?;
+    visit(&mut ui, Page::Deployments)?;
+    all_namespaces(&mut ui, "resource-namespace")?;
+    filter(&mut ui, "podinfo")?;
+    ui.double_click("resources-Deployment-row-0")?;
+    anyhow::ensure!(ui.state().workload().is_some(), "no workload page opened");
+    ui.press("cmd-y")?;
+    until_shown(&mut ui, "workload-edit-yaml").context("⌘Y on a workload page")?;
+    visit(&mut ui, Page::ConfigMaps)?;
+    all_namespaces(&mut ui, "resource-namespace")?;
+    filter(&mut ui, "cluster-info")?;
+    ui.double_click("resources-ConfigMap-row-0")?;
+    anyhow::ensure!(
+        ui.state().location().detail().is_some(),
+        "no detail page opened"
+    );
+    ui.press("cmd-e")?;
+    anyhow::ensure!(
+        ui.state().location().editing().is_some(),
+        "⌘E on a detail page did not open Edit YAML"
+    );
+    until_shown(&mut ui, "edit-discard")?;
+    ui.click("edit-editor")?;
+    ui.press("cmd-a")?;
+    ui.type_text(DRY_RUN_EDIT)?;
+    let editor = ui
+        .state()
+        .panes()
+        .focused()
+        .tabs()
+        .iter()
+        .position(|tab| tab.location().editing().is_some())
+        .context("no editor tab")?;
+    ui.press("cmd-t")?;
+    ui.press(&format!("cmd-{}", editor + 1))?;
+    anyhow::ensure!(
+        ui.state().location().editing().is_some(),
+        "selecting the editor tab again did not show the editor"
+    );
+    ui.click("edit-review")?;
+    until_shown(&mut ui, "edit-review-view").context("the draft was lost or the dry run failed")?;
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(SHOTS_DIR);
+    ui.save_png(&dir.join("fleet-a-edit-dry-run-dark.png"))?;
+    ui.click("edit-back")?;
+    check_invariants(&mut ui, &before, "editing a ConfigMap with a dry run")
+}
