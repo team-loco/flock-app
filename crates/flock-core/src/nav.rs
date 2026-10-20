@@ -13,6 +13,7 @@ pub enum Page {
     Nodes,
     Namespaces,
     Events,
+    ClusterProblems,
     #[cfg(feature = "loco")]
     LocoPlatform,
     #[cfg(feature = "loco")]
@@ -57,6 +58,7 @@ impl Page {
             Self::Nodes => "Nodes",
             Self::Namespaces => "Namespaces",
             Self::Events => "Events",
+            Self::ClusterProblems => "Problems",
             #[cfg(feature = "loco")]
             Self::LocoPlatform => "Platform",
             #[cfg(feature = "loco")]
@@ -189,6 +191,7 @@ pub const CLUSTER_NAV: &[NavSection] = &[
             Page::Nodes,
             Page::Namespaces,
             Page::Events,
+            Page::ClusterProblems,
         ],
     },
     #[cfg(feature = "loco")]
@@ -267,7 +270,20 @@ mod tests {
         assert_eq!(Page::Sources.section(), Some("Flux"));
         assert_eq!(Page::CustomResources.section(), Some("Extensions"));
         assert_eq!(Page::Nodes.section(), None);
+        assert_eq!(Page::ClusterProblems.section(), None);
         assert_eq!(Page::Overview.section(), None);
+    }
+
+    #[test]
+    fn cluster_problems_follow_events() {
+        let basics = CLUSTER_NAV[0].pages;
+        let events = basics.iter().position(|page| *page == Page::Events);
+        assert_eq!(
+            basics.get(events.map_or(0, |ix| ix + 1)),
+            Some(&Page::ClusterProblems)
+        );
+        assert_eq!(Page::ClusterProblems.label(), Page::Problems.label());
+        assert!(!Page::ClusterProblems.is_flock());
     }
 
     #[cfg(feature = "loco")]

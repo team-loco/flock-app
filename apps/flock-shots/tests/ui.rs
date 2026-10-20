@@ -1,5 +1,6 @@
 use anyhow::Context as _;
 use flock::Screen;
+use flock_core::resource::page_for_kind;
 use flock_core::resources::EVENT_LIST;
 use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
@@ -3485,5 +3486,25 @@ fn end_aligned_cells_with_tooltips_stay_end_aligned() -> anyhow::Result<()> {
         ink.first(),
         ink.last()
     );
+    Ok(())
+}
+
+#[test]
+fn cluster_problems_group_by_cause_and_rows_open_the_object() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("nav-problems")?;
+    assert_eq!(ui.state().location().page, Page::ClusterProblems);
+    assert!(ui.bounds("problem-template").is_some());
+    assert!(ui.bounds("problem-histogram").is_some());
+    ui.click("problem-cause-1")?;
+    ui.click("problem-affected-row-0")?;
+    let state = ui.state();
+    let opened = state
+        .location()
+        .resource
+        .clone()
+        .context("the row opens its object")?;
+    assert_eq!(opened.cluster, ClusterId::new("prod-us-east"));
+    assert_eq!(state.location().page, page_for_kind(&opened.kind));
     Ok(())
 }

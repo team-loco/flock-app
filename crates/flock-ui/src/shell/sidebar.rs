@@ -121,6 +121,11 @@ impl Shell {
         let definitions = self.state.snapshot.crds(&cluster.id).len();
         let definitions = u32::try_from(definitions).unwrap_or(u32::MAX);
         counts.insert(Page::CustomResources, Counts::total(definitions));
+        let problems = self.state.snapshot.home.problems.iter();
+        let found =
+            flock_core::home::problem_counts(problems.filter(|p| p.target.cluster == cluster.id));
+        let badge = Counts::default().with_err(found.err).with_warn(found.warn);
+        counts.insert(Page::ClusterProblems, badge);
         counts
     }
 

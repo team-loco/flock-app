@@ -1,6 +1,7 @@
 pub mod add_cluster;
 pub mod app_settings;
 pub mod changes;
+mod cluster_problems;
 pub mod command;
 pub mod compare;
 pub(crate) mod custom;
@@ -39,6 +40,7 @@ use gpui::{
 
 use crate::kit::{EmptyState, FilterBar, Link, MenuItem, Select, ShowAll};
 
+pub use cluster_problems::ClusterProblemsScreen;
 pub use custom::CustomResourcesScreen;
 pub use events::EventsScreen;
 pub use flux_events::FluxEventsScreen;
@@ -151,6 +153,7 @@ pub struct ClusterPages {
     nodes: Entity<NodesScreen>,
     namespaces: Entity<NamespacesScreen>,
     events: Entity<EventsScreen>,
+    problems: Entity<ClusterProblemsScreen>,
     resources: Entity<ResourcesScreen>,
     custom: Entity<CustomResourcesScreen>,
     helm: Entity<helm::HelmReleasesScreen>,
@@ -169,6 +172,7 @@ impl ClusterPages {
         let nodes = cx.new(|cx| NodesScreen::new(window, cx));
         let namespaces = cx.new(|cx| NamespacesScreen::new(window, cx));
         let events = cx.new(|cx| EventsScreen::new(window, cx));
+        let problems = cx.new(|cx| ClusterProblemsScreen::new(window, cx));
         let resources = cx.new(|cx| ResourcesScreen::new(window, cx));
         let custom = cx.new(|cx| CustomResourcesScreen::new(window, cx));
         let helm = cx.new(|cx| helm::HelmReleasesScreen::new(window, cx));
@@ -181,6 +185,7 @@ impl ClusterPages {
             subscribe(&nodes, on_event.clone(), cx),
             subscribe(&namespaces, on_event.clone(), cx),
             subscribe(&events, on_event.clone(), cx),
+            subscribe(&problems, on_event.clone(), cx),
             subscribe(&custom, on_event.clone(), cx),
             subscribe(&helm, on_event.clone(), cx),
             subscribe(&resources, on_event, cx),
@@ -190,6 +195,7 @@ impl ClusterPages {
             nodes,
             namespaces,
             events,
+            problems,
             resources,
             custom,
             helm,
@@ -212,6 +218,13 @@ impl ClusterPages {
             && page == Page::FluxGraph
         {
             self.graph
+                .update(cx, |screen, cx| screen.set(cluster, snapshot, cx));
+            return;
+        }
+        if let Some(cluster) = cluster
+            && page == Page::ClusterProblems
+        {
+            self.problems
                 .update(cx, |screen, cx| screen.set(cluster, snapshot, cx));
             return;
         }
@@ -323,6 +336,9 @@ impl ClusterPages {
         if page == Page::Releases {
             return Some(self.helm.clone().into_any_element());
         }
+        if page == Page::ClusterProblems {
+            return Some(self.problems.clone().into_any_element());
+        }
         if !has_detail {
             return None;
         }
@@ -347,6 +363,7 @@ impl ClusterPages {
             Page::Nodes => self.nodes.read(cx).filter_bar(),
             Page::Namespaces => self.namespaces.read(cx).filter_bar(),
             Page::Events => self.events.read(cx).filter_bar(),
+            Page::ClusterProblems => self.problems.read(cx).filter_bar(),
             Page::Releases => self.helm.read(cx).filter_bar(),
             other if is_flux_list(other) => self.flux.read(cx).filter_bar(),
             other => {
@@ -398,6 +415,7 @@ impl ClusterPages {
             Page::Nodes => Some(self.nodes.read(cx).list_focus(cx)),
             Page::Namespaces => Some(self.namespaces.read(cx).list_focus(cx)),
             Page::Events => Some(self.events.read(cx).list_focus(cx)),
+            Page::ClusterProblems => Some(self.problems.read(cx).list_focus(cx)),
             other if is_flux_list(other) => Some(self.flux.read(cx).list_focus(cx)),
             Page::FluxGraph => Some(gpui::Focusable::focus_handle(&self.graph, cx)),
             Page::CustomResources => self.custom.update(cx, CustomResourcesScreen::list_focus),
@@ -426,6 +444,9 @@ impl ClusterPages {
         }
         if page == Page::Releases {
             return Some(self.helm.read(cx).header_note());
+        }
+        if page == Page::ClusterProblems {
+            return Some(self.problems.read(cx).header_note());
         }
         if !has_detail {
             return None;

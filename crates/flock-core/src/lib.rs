@@ -31,6 +31,7 @@ pub mod notify;
 pub mod overview;
 pub mod palette;
 pub mod pods;
+pub mod problem_groups;
 pub mod related;
 pub mod resource;
 pub mod resources;

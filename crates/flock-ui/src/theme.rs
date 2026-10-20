@@ -556,6 +556,21 @@ pub const EVENT_COUNT_WIDTH: Pixels = px(56.);
 pub const EVENT_AGE_WIDTH: Pixels = px(44.);
 pub const FLUX_EVENT_CLUSTER_WIDTH: Pixels = px(130.);
 
+pub const PROBLEM_CAUSES_WIDTH: Pixels = px(360.);
+pub const PROBLEM_HISTOGRAM: Pixels = px(84.);
+pub const PROBLEM_BAR_GAP: Pixels = px(2.);
+pub const PROBLEM_BAR_EMPTY: Pixels = px(1.);
+pub const PROBLEM_TRAIT_NAME: Pixels = px(150.);
+pub const PROBLEM_TRAIT_BAR: Pixels = px(140.);
+pub const PROBLEM_TRAIT_BAR_HEIGHT: Pixels = px(5.);
+pub const PROBLEM_TRAIT_SHARE: Pixels = px(64.);
+pub const AFFECTED_NAMESPACE_WIDTH: Pixels = px(110.);
+pub const AFFECTED_WORKLOAD_WIDTH: Pixels = px(150.);
+pub const AFFECTED_OBJECT_MIN: Pixels = px(180.);
+pub const AFFECTED_NODE_WIDTH: Pixels = px(130.);
+pub const AFFECTED_TAG_WIDTH: Pixels = px(70.);
+pub const AFFECTED_SINCE_WIDTH: Pixels = px(50.);
+
 pub fn terminal_color(color: vt100::Color, default: Hsla, palette: &Palette) -> Hsla {
     match color {
         vt100::Color::Default => default,
