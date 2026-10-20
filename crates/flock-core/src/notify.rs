@@ -41,7 +41,11 @@ impl Notifier {
             }
             let previous = self.last_seen.insert(problem.target.clone(), now);
             let fresh = previous.is_none_or(|seen| now.duration_since(seen) >= COOLDOWN);
-            if fresh && settings.enabled && self.settled(&problem.target.cluster, now) {
+            if fresh
+                && settings.enabled
+                && !settings.paused
+                && self.settled(&problem.target.cluster, now)
+            {
                 let muted = snapshot
                     .catalog
                     .get(&problem.target.cluster)
@@ -176,20 +180,45 @@ mod tests {
             NONE
         );
         let with_warnings = Notifications {
-            enabled: true,
             warnings: true,
+            ..Notifications::default()
         };
         let shown = notifier.observe(&warning, with_warnings, now);
         assert_eq!(names(&shown), ["db"]);
         let off = Notifications {
             enabled: false,
             warnings: true,
+            paused: false,
         };
         let crashing = with(vec![problem("cart", Status::Err)]);
         assert_eq!(names(&notifier.observe(&crashing, off, now)), NONE);
         assert_eq!(
             names(&notifier.observe(&crashing, Notifications::default(), now)),
             NONE
+        );
+    }
+
+    #[test]
+    fn paused_notifications_stay_silent_and_do_not_replay_on_resume() {
+        let mut notifier = Notifier::default();
+        let now = settled(&mut notifier, Instant::now());
+        let paused = Notifications {
+            paused: true,
+            ..Notifications::default()
+        };
+        let crashing = with(vec![problem("cart", Status::Err)]);
+        assert_eq!(names(&notifier.observe(&crashing, paused, now)), NONE);
+        assert_eq!(
+            names(&notifier.observe(&crashing, Notifications::default(), now)),
+            NONE
+        );
+        let fresh = with(vec![
+            problem("cart", Status::Err),
+            problem("db", Status::Err),
+        ]);
+        assert_eq!(
+            names(&notifier.observe(&fresh, Notifications::default(), now)),
+            ["db"]
         );
     }
 

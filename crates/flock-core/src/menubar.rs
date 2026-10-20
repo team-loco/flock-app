@@ -1,171 +1,177 @@
-use crate::home::Problem;
-use crate::{ResourceRef, Snapshot, Status};
+use crate::{ClusterId, ClusterSummary, Counts, Snapshot, Status};
 
-const PROBLEM_LIMIT: usize = 10;
-const REASON_LIMIT: usize = 80;
-const ELLIPSIS: char = '…';
+const PAUSE: &str = "Pause notifications";
+const RESUME: &str = "Resume notifications";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProblemItem {
-    pub title: String,
-    pub target: ResourceRef,
+pub struct ClusterItem {
+    pub id: ClusterId,
+    pub name: String,
+    pub status: Status,
+    pub meta: String,
+    pub meta_status: Status,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuBar {
-    pub label: String,
-    pub problems: Vec<ProblemItem>,
+    pub badge: String,
+    pub dimmed: bool,
+    pub clusters: Vec<ClusterItem>,
+    pub paused: bool,
 }
 
 impl MenuBar {
-    pub fn from_snapshot(snapshot: &Snapshot) -> Self {
-        let problems = &snapshot.home.problems;
-        let mut sorted: Vec<&Problem> = problems.iter().collect();
-        sorted.sort_by_key(|problem| std::cmp::Reverse(problem.status));
-        let items = sorted
-            .into_iter()
-            .take(PROBLEM_LIMIT)
-            .map(|problem| item(snapshot, problem))
-            .collect();
+    pub fn new(snapshot: &Snapshot, paused: bool) -> Self {
+        let clusters = &snapshot.clusters;
+        let counts = clusters
+            .iter()
+            .map(cluster_counts)
+            .fold(Counts::default(), |sum, c| sum + c);
+        let badge = if counts.err > 0 {
+            format!("{}{}", Status::Err.glyph(), counts.err)
+        } else if counts.warn > 0 {
+            format!("{}{}", Status::Warn.glyph(), counts.warn)
+        } else {
+            String::new()
+        };
         Self {
-            label: label(snapshot),
-            problems: items,
+            badge,
+            dimmed: !clusters.iter().any(ClusterSummary::is_connected),
+            clusters: clusters.iter().map(item).collect(),
+            paused,
         }
     }
+
+    pub const fn pause_title(&self) -> &'static str {
+        if self.paused { RESUME } else { PAUSE }
+    }
 }
 
-fn label(snapshot: &Snapshot) -> String {
-    let problems = &snapshot.home.problems;
-    let counts = crate::home::problems_badge(problems);
-    let clusters = snapshot.clusters.iter().map(|cluster| cluster.status);
-    let statuses = clusters.chain(problems.iter().map(|problem| problem.status));
-    let worst = Status::worst(statuses);
-    let mut parts = Vec::new();
-    if counts.err > 0 {
-        parts.push(format!("{} {}", Status::Err.glyph(), counts.err));
-    }
-    if counts.warn > 0 {
-        parts.push(format!("{} {}", Status::Warn.glyph(), counts.warn));
-    }
-    if worst > counts.status() || parts.is_empty() {
-        parts.insert(0, worst.glyph().to_owned());
-    }
-    parts.join(" ")
+fn cluster_counts(cluster: &ClusterSummary) -> Counts {
+    let problems = cluster.problems;
+    let err = match cluster.status {
+        Status::Err => problems.err.max(1),
+        _ => problems.err,
+    };
+    let warn = match cluster.status {
+        Status::Warn => problems.warn.max(1),
+        _ => problems.warn,
+    };
+    Counts::default().with_err(err).with_warn(warn)
 }
 
-fn item(snapshot: &Snapshot, problem: &Problem) -> ProblemItem {
-    let target = &problem.target;
-    let cluster = snapshot
-        .cluster(&target.cluster)
-        .map_or_else(|| target.cluster.as_str(), |cluster| cluster.name.as_str());
-    let words: Vec<&str> = problem.message.split_whitespace().collect();
-    let reason = words.join(" ");
-    let mut shortened: String = reason.chars().take(REASON_LIMIT).collect();
-    if reason.chars().count() > REASON_LIMIT {
-        shortened.push(ELLIPSIS);
-    }
-    let namespace = target
-        .namespace
-        .as_ref()
-        .map(|namespace| format!(" ({namespace})"))
-        .unwrap_or_default();
-    let title = format!(
-        "{cluster} · {}/{}{namespace} · {shortened}",
-        target.kind, target.name
-    );
-    ProblemItem {
-        title,
-        target: target.clone(),
+fn item(cluster: &ClusterSummary) -> ClusterItem {
+    let badges = cluster.problems.badges();
+    let (meta, meta_status) = if !badges.is_empty() {
+        let parts: Vec<String> = badges
+            .iter()
+            .map(|(status, n)| format!("{}{n}", status.glyph()))
+            .collect();
+        (parts.join(" "), cluster.problems.status())
+    } else if cluster.status == Status::Ok {
+        (String::new(), Status::Ok)
+    } else {
+        (cluster.state.to_lowercase(), cluster.status)
+    };
+    ClusterItem {
+        id: cluster.id.clone(),
+        name: cluster.name.clone(),
+        status: cluster.status,
+        meta,
+        meta_status,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ClusterId;
-    use std::{collections::BTreeMap, time::Duration};
+    use std::collections::BTreeMap;
 
-    fn problem(status: Status, name: &str) -> Problem {
-        Problem {
+    fn cluster(name: &str, status: Status, state: &str, problems: Counts) -> ClusterSummary {
+        ClusterSummary {
+            id: ClusterId::new(name),
+            name: name.into(),
             status,
-            target: ResourceRef {
-                cluster: ClusterId::new("production"),
-                kind: "Pod".into(),
-                namespace: Some("default".into()),
-                name: name.into(),
-            },
-            message: "Back-off\n restarting\tcontainer".into(),
-            age: Duration::ZERO,
-        }
-    }
-
-    #[test]
-    fn healthy_snapshot_has_a_calm_label_and_no_problems() {
-        let menu = MenuBar::from_snapshot(&Snapshot::default());
-        assert_eq!(menu.label, "●");
-        assert_eq!(menu.problems, Vec::<ProblemItem>::new());
-    }
-
-    #[test]
-    fn counts_cover_all_problems_while_menu_is_bounded_and_errors_lead() {
-        let mut snapshot = Snapshot::default();
-        snapshot.home.problems = vec![problem(Status::Warn, "warning"); PROBLEM_LIMIT];
-        let error = problem(Status::Err, "broken");
-        snapshot.home.problems.push(error.clone());
-        let menu = MenuBar::from_snapshot(&snapshot);
-        assert_eq!(menu.label, format!("✕ 1 ▲ {PROBLEM_LIMIT}"));
-        assert_eq!(menu.problems.len(), PROBLEM_LIMIT);
-        assert_eq!(menu.problems[0].target, error.target);
-        assert_eq!(
-            menu.problems[0].title,
-            "production · Pod/broken (default) · Back-off restarting container"
-        );
-        snapshot.home.problems.clear();
-        assert_eq!(MenuBar::from_snapshot(&snapshot).label, "●");
-    }
-
-    #[test]
-    fn cluster_health_and_display_names_come_from_the_same_snapshot() {
-        let mut snapshot = Snapshot::default();
-        snapshot.clusters.push(crate::ClusterSummary {
-            id: ClusterId::new("production"),
-            name: "Production Europe".into(),
-            status: Status::Offline,
-            state: "offline".into(),
+            state: state.into(),
             distro: String::new(),
             region: String::new(),
             version: None,
             nodes: None,
-            problems: crate::Counts::default(),
+            problems,
             nav: BTreeMap::default(),
             metrics: None,
-        });
-        assert_eq!(MenuBar::from_snapshot(&snapshot).label, "○");
-        snapshot
-            .home
-            .problems
-            .push(problem(Status::Warn, "warning"));
-        let menu = MenuBar::from_snapshot(&snapshot);
-        assert_eq!(menu.label, "○ ▲ 1");
-        assert!(
-            menu.problems[0]
-                .title
-                .starts_with("Production Europe · Pod/warning")
-        );
+        }
+    }
+
+    fn design_fleet() -> Snapshot {
+        let none = Counts::default();
+        Snapshot {
+            clusters: vec![
+                cluster(
+                    "prod-us-east",
+                    Status::Err,
+                    "Errors",
+                    none.with_err(2).with_warn(3),
+                ),
+                cluster("prod-eu-west", Status::Ok, "Healthy", none),
+                cluster("staging", Status::Warn, "Warnings", none.with_warn(2)),
+                cluster("qa-gke", Status::Err, "Auth expired", none),
+                cluster("edge-k3s", Status::Offline, "Offline", none),
+            ],
+            ..Snapshot::default()
+        }
+    }
+
+    fn metas(menu: &MenuBar) -> Vec<(&str, &str, Status)> {
+        menu.clusters
+            .iter()
+            .map(|c| (c.name.as_str(), c.meta.as_str(), c.meta_status))
+            .collect()
     }
 
     #[test]
-    fn non_error_states_and_long_unicode_reasons_are_preserved_safely() {
-        let mut snapshot = Snapshot::default();
-        let mut offline = problem(Status::Offline, "offline");
-        offline.message = "界".repeat(REASON_LIMIT + 1);
-        snapshot.home.problems = vec![offline];
-        let menu = MenuBar::from_snapshot(&snapshot);
-        assert_eq!(menu.label, "○");
-        assert!(
-            menu.problems[0]
-                .title
-                .ends_with(&format!("{}…", "界".repeat(REASON_LIMIT)))
+    fn clusters_list_in_order_with_problem_counts_or_their_state() {
+        let menu = MenuBar::new(&design_fleet(), false);
+        assert_eq!(
+            metas(&menu),
+            vec![
+                ("prod-us-east", "✕2 ▲3", Status::Err),
+                ("prod-eu-west", "", Status::Ok),
+                ("staging", "▲2", Status::Warn),
+                ("qa-gke", "auth expired", Status::Err),
+                ("edge-k3s", "offline", Status::Offline),
+            ]
         );
+        assert_eq!(menu.clusters[4].status, Status::Offline);
+        assert_eq!(menu.clusters[0].id, ClusterId::new("prod-us-east"));
+    }
+
+    #[test]
+    fn badge_counts_errors_first_and_a_failing_cluster_counts_once() {
+        let mut snapshot = design_fleet();
+        assert_eq!(MenuBar::new(&snapshot, false).badge, "✕3");
+        snapshot.clusters.retain(|c| c.status != Status::Err);
+        assert_eq!(MenuBar::new(&snapshot, false).badge, "▲2");
+        snapshot.clusters.retain(|c| c.status != Status::Warn);
+        let calm = MenuBar::new(&snapshot, false);
+        assert_eq!(calm.badge, "");
+        assert!(!calm.dimmed);
+    }
+
+    #[test]
+    fn icon_dims_when_no_cluster_is_reachable() {
+        let mut snapshot = design_fleet();
+        snapshot.clusters.retain(|c| c.status == Status::Offline);
+        let menu = MenuBar::new(&snapshot, false);
+        assert!(menu.dimmed);
+        assert_eq!(menu.badge, "");
+        assert!(MenuBar::new(&Snapshot::default(), false).dimmed);
+    }
+
+    #[test]
+    fn pause_item_toggles_to_resume() {
+        let snapshot = Snapshot::default();
+        assert_eq!(MenuBar::new(&snapshot, false).pause_title(), PAUSE);
+        assert_eq!(MenuBar::new(&snapshot, true).pause_title(), RESUME);
     }
 }
