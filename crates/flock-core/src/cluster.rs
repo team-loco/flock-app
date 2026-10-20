@@ -43,7 +43,12 @@ impl Namespace {
     };
 
     pub fn matches(&self, query: &TextFilter) -> bool {
-        Self::FILTER.matches(self, query, Some(&self.name), &[&self.labels])
+        let name_ok = query.matches_namespace(Some(&self.name));
+        let rest = TextFilter {
+            namespace: None,
+            ..query.clone()
+        };
+        name_ok && Self::FILTER.matches(self, &rest, Some(&self.name), &[&self.labels])
     }
 
     pub fn cpu_label(&self) -> String {
@@ -275,6 +280,9 @@ mod tests {
         let ns = namespace("payments", Counts::default());
         assert!(ns.matches(&TextFilter::parse("pay")));
         assert!(!ns.matches(&TextFilter::parse("orders")));
+        assert!(ns.matches(&TextFilter::parse("ns:pay")));
+        assert!(!ns.matches(&TextFilter::parse("ns:orders")));
+        assert!(ns.matches(&TextFilter::parse("ns:pay active")));
         assert_eq!(
             Namespace::FILTER.placeholder(),
             "Filter by name, phase or label"

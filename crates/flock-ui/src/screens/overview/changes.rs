@@ -1,6 +1,6 @@
+use flock_core::Command;
 use flock_core::cluster_changes::{ChangeKind, ClusterChange, within};
 use flock_core::overview::TimeRange;
-use flock_core::{Command, Page};
 use gpui::{AnyElement, Context, Hsla, IntoElement, ParentElement, SharedString, Styled, div};
 
 use super::{OverviewData, OverviewScreen, ScreenEvent, mono, row_link, section, section_head};
@@ -83,8 +83,10 @@ pub(super) fn render(
 ) -> Vec<AnyElement> {
     let recent: Vec<&ClusterChange> = within(&data.changes, range).collect();
     let meta = format!("last {} · {}", range.label(), recent.len());
-    let all = Link::new(ALL_ID, ALL).on_click(cx.listener(|_, _, _, cx| {
-        cx.emit(ScreenEvent::Command(Command::SelectPage(Page::Changes)));
+    let cluster = data.cluster.clone();
+    let all = Link::new(ALL_ID, ALL).on_click(cx.listener(move |_, _, _, cx| {
+        let command = Command::OpenClusterChanges(cluster.clone());
+        cx.emit(ScreenEvent::Command(command));
     }));
     let head = section_head(TITLE, Some(meta), Some(all), palette);
     let rows: Vec<AnyElement> = recent

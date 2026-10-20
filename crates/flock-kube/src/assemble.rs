@@ -269,8 +269,10 @@ fn cluster_detail(
         .watch_state(&WatchKind::EndpointSlices)
         .is_loaded()
         .then(|| handle.objects::<EndpointSlice>());
+    let services = handle.objects::<Service>();
+    let unready_services = network::unready_services(id, &services, slices.as_deref(), now);
     let network = network::facts(
-        &handle.objects::<Service>(),
+        &services,
         slices.as_deref(),
         &handle.objects::<PersistentVolumeClaim>(),
     );
@@ -293,6 +295,7 @@ fn cluster_detail(
             utilization,
             tops: pod_tops(id, pods, now),
             network,
+            unready_services,
             changes: object_changes(id, handle, extras, parts, now),
         },
         nodes,

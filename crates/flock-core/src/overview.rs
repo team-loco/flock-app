@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::cluster_changes::ClusterChange;
+use crate::home::Problem;
 use crate::pod_tops::PodTops;
 use crate::resources::{Resource, ResourceKind};
 use crate::{Page, Status, units};
@@ -212,6 +213,7 @@ pub struct Overview {
     pub utilization: Vec<Utilization>,
     pub tops: PodTops,
     pub network: NetworkFacts,
+    pub unready_services: Vec<Problem>,
     pub changes: Vec<ClusterChange>,
 }
 

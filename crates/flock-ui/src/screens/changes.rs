@@ -120,6 +120,20 @@ impl ChangesScreen {
         self.refresh(cx);
     }
 
+    pub fn cluster(&self) -> Option<&ClusterId> {
+        self.cluster.as_ref()
+    }
+
+    pub fn show_cluster(&mut self, cluster: &ClusterId, cx: &mut Context<Self>) {
+        let Some(lane) = self.log.lanes.iter().position(|l| &l.cluster == cluster) else {
+            return;
+        };
+        self.clusters
+            .update(cx, |select, cx| select.set_selected(lane + 1, cx));
+        self.cluster = Some(cluster.clone());
+        self.refresh(cx);
+    }
+
     pub fn filter_bar(&self) -> &Entity<FilterBar> {
         &self.filter
     }
