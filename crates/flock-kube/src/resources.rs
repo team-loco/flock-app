@@ -143,6 +143,7 @@ watched! {
 pub enum SignalEvent {
     Changed,
     Failed(Error),
+    Dropped,
 }
 
 #[derive(Debug)]
