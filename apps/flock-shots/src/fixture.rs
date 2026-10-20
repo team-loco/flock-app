@@ -1,4 +1,4 @@
-use flock_core::overview::{Overview, UtilizationSource};
+use flock_core::overview::{MetricsServer, Overview, UtilizationSource};
 use flock_core::{Command, Page, Receiver, Sender, Snapshot, Status, Update, WatchState};
 
 const LISTING: &str = "Listing Deployment";
@@ -6,6 +6,7 @@ const CONNECTING_STEP: &str = "Checking the API server and nodes";
 const FORBIDDEN: &str = "deployments.apps is forbidden: User \"dev\" cannot list resource \"deployments\" in API group \"apps\" at the cluster scope";
 const CONNECTING: &str = "Connecting";
 const HISTORY_START: &str = "Oct 14, 16:00";
+const LAST_SAMPLE: &str = "Oct 19, 12:28";
 const RECENT_START: f32 = 0.95;
 const METRICS_SERVER: &str = "metrics-server";
 const PROMETHEUS_DOWN: &str = "Prometheus: service unavailable (503)";
@@ -59,6 +60,8 @@ fn snapshot(fixture: StateFixture) -> Snapshot {
 fn metrics(fixture: StateFixture, overview: &mut Overview) {
     let local = UtilizationSource::Local {
         since: Some(HISTORY_START.to_owned()),
+        last: Some(LAST_SAMPLE.to_owned()),
+        metrics_server: MetricsServer::Answering,
     };
     match fixture {
         StateFixture::MetricsLocal => {

@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use flock::Screen;
 use flock_core::resources::EVENT_LIST;
 use flock_core::{ClusterId, ClusterSummary, Command, Page};
@@ -12,6 +13,7 @@ use gpui::Pixels;
 const EXPECTED_WIDTH: u32 = 2880;
 const EXPECTED_HEIGHT: u32 = 1800;
 const TAB_STRIP_REWIND: f32 = 1000.;
+const CENTRE_TOLERANCE: f32 = 1.;
 
 #[test]
 fn command_k_opens_the_palette_and_enter_runs_the_top_hit() -> anyhow::Result<()> {
@@ -2325,6 +2327,19 @@ fn every_utilization_window_keeps_the_chart_and_local_collection_note() -> anyho
         assert!(ui.bounds("utilization-chart").is_some());
         assert!(ui.bounds("metrics-note").is_some(), "{selector}");
         assert!(ui.bounds("metrics-empty").is_none(), "{selector}");
+        assert!(ui.bounds("chart-y-axis").is_some(), "{selector}");
+        let plot = ui.bounds("chart-plot").context("plot")?;
+        for label in [
+            "chart-x-label-0",
+            "chart-x-label-1",
+            "chart-x-label-2",
+            "chart-x-label-3",
+            "chart-x-label-4",
+        ] {
+            let at = ui.bounds(label).context(label)?;
+            assert!(at.left() >= plot.left(), "{selector} {label}");
+            assert!(at.right() <= plot.right(), "{selector} {label}");
+        }
     }
     Ok(())
 }
@@ -2334,8 +2349,14 @@ fn empty_utilization_opens_the_selected_clusters_metrics_settings() -> anyhow::R
     let mut ui = Ui::with_state(Screen::Cluster, flock_shots::StateFixture::MetricsEmpty)?;
     ui.click("range-1")?;
     assert!(ui.bounds("utilization-chart").is_some());
-    assert!(ui.bounds("metrics-empty").is_some());
+    let empty = ui.bounds("metrics-empty").context("empty state")?;
+    let area = ui.bounds("chart-message").context("chart message")?;
+    assert!((empty.center().x - area.center().x).abs() < gpui::px(CENTRE_TOLERANCE));
+    assert!((empty.center().y - area.center().y).abs() < gpui::px(CENTRE_TOLERANCE));
     assert!(ui.bounds("metrics-note").is_none());
+    assert!(ui.bounds("chart-plot").is_none());
+    assert!(ui.bounds("chart-y-axis").is_none());
+    assert!(ui.bounds("chart-x-axis").is_none());
     let origin = ui.state().location().cluster.clone();
     ui.click("metrics-settings")?;
     assert_eq!(ui.state().location().page, Page::ClusterSettings);

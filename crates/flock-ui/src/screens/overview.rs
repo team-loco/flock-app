@@ -474,6 +474,7 @@ impl OverviewScreen {
                 }));
             let empty = EmptyState::new(UtilizationSource::empty_sentence(self.range))
                 .selector("metrics-empty")
+                .centered()
                 .detail(data.source.empty_reason())
                 .action(settings);
             chart = chart.message(empty);

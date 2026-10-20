@@ -545,7 +545,10 @@ LineChart::new(100.)                                 // y max
     .x_labels(labels_left_to_right)
     .height(px)                                      // default CHART_HEIGHT 170
     .title(SectionLabel::new("Utilization"))         // left of the legend, same row
+    .message(EmptyState::new(..).centered())          // replaces the grid and both axes
 ```
+
+The first x label aligns left, the last right and the rest centre on their ticks, so none is clipped.
 
 Values outside 0..=1 (or 0..=max) are clamped; NaN reads as 0.
 
@@ -606,6 +609,7 @@ a skeleton again (decision 32). The shell renders:
   `theme::SKELETON_SHIMMER` (still under reduced motion)
 - `ConnectionProgress::new(cluster, step)` above the skeleton while the cluster is connecting
 - `EmptyState::new(sentence).detail(text).action(button)`: no icon, one sentence, an optional muted line and buttons.
+  `.centered()` centres it, for a chart's plot area.
   `EmptyState::for_list(&Emptiness, Noun, cluster, &filter, show_all)` builds the list variants below
 - `ErrorState::new(reason, retry)`: status glyph, the backend reason on one line, Retry
 
