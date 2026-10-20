@@ -110,3 +110,4 @@ Spec column points at `design/`.
 | QA22 | v0.2.2 dogfood QA: page shortcuts before focus, ⌘E Edit YAML, Flux events keyboard, Edit YAML drafts across tabs (#268–#271) | claude | fix-keyboard-focus, fix-edit-draft-tabs | done |
 | CRD1 | CRD browser: Custom resources sidebar, printer columns, inspector, Edit YAML; Helm releases from Helm storage (#234) | claude | crd-browser-helm, helm-releases-pr | done (#275, Helm PR) |
 | HIST1 | history entries and saved tabs carry the inspected object, so Back and Forward reopen a list's inspector (#281) | claude | history-keeps-inspector | done |
+| CHART298 | Utilization chart: centred empty state without grid or axes, wording says why the window is empty, unclipped x labels (#298) | claude | utilization-empty-state | done |

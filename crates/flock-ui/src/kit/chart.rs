@@ -14,6 +14,8 @@ use crate::theme::{
 };
 
 const DASH_GAP_SWATCH: f32 = 0.5;
+const EDGE_LABEL_SHARE: f32 = 1.;
+const INNER_LABEL_SHARE: f32 = 2.;
 
 fn share(ix: usize, steps: usize) -> f32 {
     let as_f32 = |n: usize| f32::from(u16::try_from(n).unwrap_or(u16::MAX));
@@ -499,21 +501,28 @@ fn legend_item(label: SharedString, swatch: impl IntoElement) -> impl IntoElemen
         .child(label)
 }
 
-fn plot_area(plot: impl IntoElement, height: Pixels, message: Option<AnyElement>) -> Div {
-    let overlay = message.map(|message| {
-        div()
-            .absolute()
-            .inset_0()
+fn x_axis(labels: Vec<SharedString>) -> impl Iterator<Item = Div> {
+    let last = labels.len().saturating_sub(1);
+    labels.into_iter().enumerate().map(move |(ix, label)| {
+        let cell = div()
             .flex()
-            .items_center()
-            .child(message)
-    });
-    div()
-        .relative()
-        .flex_1()
-        .h(height)
-        .child(plot)
-        .children(overlay)
+            .flex_basis(Pixels::ZERO)
+            .min_w_0()
+            .whitespace_nowrap()
+            .child(
+                div()
+                    .debug_selector(move || format!("chart-x-label-{ix}"))
+                    .flex_none()
+                    .child(label),
+            );
+        if ix == 0 {
+            cell.flex_grow(EDGE_LABEL_SHARE).justify_start()
+        } else if ix == last {
+            cell.flex_grow(EDGE_LABEL_SHARE).justify_end()
+        } else {
+            cell.flex_grow(INNER_LABEL_SHARE).justify_center()
+        }
+    })
 }
 
 impl RenderOnce for LineChart {
@@ -539,6 +548,27 @@ impl RenderOnce for LineChart {
                 .child(div().w(dash / 2.).h(RULE).bg(threshold.color));
             legend.push(legend_item(threshold.label.clone(), swatch).into_any_element());
         }
+        let header = div()
+            .flex()
+            .items_center()
+            .gap(SPACE_7)
+            .text_size(TEXT_CONTROL)
+            .text_color(palette.mute)
+            .children(self.title)
+            .child(div().flex_1())
+            .children(legend);
+        let chart = div().flex().flex_col().gap(SPACE_4).w_full().child(header);
+        if let Some(message) = self.message {
+            return chart.child(
+                div()
+                    .debug_selector(|| "chart-message".to_owned())
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .h(self.height)
+                    .child(message),
+            );
+        }
         let gridlines = self.y_labels.len().max(2);
         let series = self.series;
         let max = self.max;
@@ -559,52 +589,34 @@ impl RenderOnce for LineChart {
             },
         )
         .size_full();
-        let axis_text = |labels: Vec<SharedString>| labels.into_iter().map(|l| div().child(l));
-        div()
+        let y_axis = div()
+            .debug_selector(|| "chart-y-axis".to_owned())
             .flex()
             .flex_col()
-            .gap(SPACE_4)
-            .w_full()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(SPACE_7)
-                    .text_size(TEXT_CONTROL)
-                    .text_color(palette.mute)
-                    .children(self.title)
-                    .child(div().flex_1())
-                    .children(legend),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap(SPACE_4)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .justify_between()
-                            .items_end()
-                            .w(CHART_AXIS)
-                            .h(self.height)
-                            .font_family(FONT_MONO)
-                            .text_size(TEXT_AXIS)
-                            .text_color(palette.mute)
-                            .children(axis_text(self.y_labels)),
-                    )
-                    .child(plot_area(plot, self.height, self.message)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .pl(CHART_AXIS + SPACE_4)
-                    .font_family(FONT_MONO)
-                    .text_size(TEXT_AXIS)
-                    .text_color(palette.mute)
-                    .children(axis_text(self.x_labels)),
-            )
+            .justify_between()
+            .items_end()
+            .w(CHART_AXIS)
+            .h(self.height)
+            .font_family(FONT_MONO)
+            .text_size(TEXT_AXIS)
+            .text_color(palette.mute)
+            .children(self.y_labels.into_iter().map(|l| div().child(l)));
+        let plot = div()
+            .debug_selector(|| "chart-plot".to_owned())
+            .flex_1()
+            .h(self.height)
+            .child(plot);
+        let x_axis = div()
+            .debug_selector(|| "chart-x-axis".to_owned())
+            .flex()
+            .pl(CHART_AXIS + SPACE_4)
+            .font_family(FONT_MONO)
+            .text_size(TEXT_AXIS)
+            .text_color(palette.mute)
+            .children(x_axis(self.x_labels));
+        chart
+            .child(div().flex().gap(SPACE_4).child(y_axis).child(plot))
+            .child(x_axis)
     }
 }
 

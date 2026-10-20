@@ -177,6 +177,10 @@ impl UsageRing {
         self.samples.back().map(|s| s.sample)
     }
 
+    pub fn last_at(&self) -> Option<Timestamp> {
+        self.samples.back().map(|s| s.at)
+    }
+
     #[allow(clippy::cast_precision_loss)]
     pub fn utilization(&self, range: TimeRange, now: Timestamp, cpu_requests: f32) -> Utilization {
         let query = range_query("", range, now);
@@ -412,6 +416,38 @@ mod tests {
                 .len(),
             4
         );
+    }
+
+    #[test]
+    fn history_from_earlier_sessions_leaves_the_last_hour_empty_and_plots_the_rest() {
+        const DAY: i64 = 86_400;
+        const SESSION: i64 = 3 * 3600;
+        let mut ring = UsageRing::default();
+        steady(&mut ring, (0..=SESSION).step_by(15));
+        steady(&mut ring, (3 * DAY..=3 * DAY + SESSION).step_by(15));
+        let reopened = timestamp(3 * DAY + SESSION + 20 * 3600);
+        ring.prune(reopened);
+        assert_eq!(ring.since(), Some(timestamp(0)));
+        assert_eq!(ring.last_at(), Some(timestamp(3 * DAY + SESSION)));
+        let hour = ring.utilization(TimeRange::Hour, reopened, 0.);
+        assert_eq!(hour.cpu, Vec::<f32>::new());
+        let six = ring.utilization(TimeRange::SixHours, reopened, 0.);
+        assert_eq!(six.cpu, Vec::<f32>::new());
+        let day = ring.utilization(TimeRange::Day, reopened, 0.);
+        assert_ne!(day.cpu, Vec::<f32>::new());
+        assert!(day.cpu_positions.iter().all(|at| (0. ..0.2).contains(at)));
+        let week = ring.utilization(TimeRange::Week, reopened, 0.);
+        assert!(week.cpu.len() > day.cpu.len());
+        ring.push(
+            reopened,
+            Sample {
+                cpu: 3.,
+                memory: 4.,
+            },
+        );
+        let hour = ring.utilization(TimeRange::Hour, reopened, 0.);
+        assert_eq!(hour.cpu, [3.]);
+        assert_eq!(hour.cpu_positions, [1.]);
     }
 
     #[test]

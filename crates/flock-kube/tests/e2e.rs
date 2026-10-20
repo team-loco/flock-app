@@ -1,5 +1,5 @@
 use flock_core::filter::TextFilter;
-use flock_core::overview::{TimeRange, UtilizationSource};
+use flock_core::overview::TimeRange;
 use flock_core::resources::{Resource, filter_resources};
 use flock_core::{Backend, ClusterId, Command, ContextRef, NewCluster, Page, ResourceKind, Update};
 use flock_kube::LiveBackend;
@@ -483,10 +483,6 @@ fn live_utilization_has_hour_samples_and_six_hour_local_history() {
             continue;
         }
         assert_eq!(snapshot.clusters.len(), 1);
-        assert!(matches!(
-            detail.overview.utilization_source,
-            UtilizationSource::Local { since: Some(_) }
-        ));
         assert!(
             detail
                 .overview
@@ -498,7 +494,7 @@ fn live_utilization_has_hour_samples_and_six_hour_local_history() {
                 .overview
                 .utilization_source
                 .note()
-                .is_some_and(|note| note.starts_with("Collected by Flock since "))
+                .is_some_and(|note| note.starts_with("Recorded by Flock while it's open, since "))
         );
         break;
     }

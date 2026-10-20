@@ -5,6 +5,7 @@ use flock_core::emptiness::{Emptiness, Noun};
 use gpui::{
     AnimationExt, AnyElement, App, Entity, Hsla, InteractiveElement, IntoElement, ParentElement,
     Pixels, RenderOnce, SharedString, Styled, Window, div, linear_color_stop, linear_gradient,
+    prelude::FluentBuilder,
 };
 
 use super::{Button, FilterBar, StatusText};
@@ -173,6 +174,7 @@ pub struct EmptyState {
     sentence: SharedString,
     detail: Option<SharedString>,
     actions: Vec<Button>,
+    centered: bool,
 }
 
 impl EmptyState {
@@ -182,7 +184,13 @@ impl EmptyState {
             sentence: sentence.into(),
             detail: None,
             actions: Vec::new(),
+            centered: false,
         }
+    }
+
+    pub fn centered(mut self) -> Self {
+        self.centered = true;
+        self
     }
 
     pub fn selector(mut self, selector: &'static str) -> Self {
@@ -250,10 +258,15 @@ impl RenderOnce for EmptyState {
             .debug_selector(|| selector.to_owned())
             .flex()
             .flex_col()
-            .items_start()
             .gap(SPACE_5)
             .px(SPACE_8)
-            .pt(SPACE_8)
+            .map(|state| {
+                if self.centered {
+                    state.items_center().text_center()
+                } else {
+                    state.items_start().pt(SPACE_8)
+                }
+            })
             .text_color(palette.fg2)
             .child(self.sentence)
             .children(

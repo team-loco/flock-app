@@ -105,24 +105,42 @@ pub struct Commitment {
     pub limits: f32,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MetricsServer {
+    #[default]
+    Waiting,
+    Answering,
+    Unavailable,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum UtilizationSource {
     Prometheus,
-    Local { since: Option<String> },
+    Local {
+        since: Option<String>,
+        last: Option<String>,
+        metrics_server: MetricsServer,
+    },
     Error(String),
 }
 
 impl Default for UtilizationSource {
     fn default() -> Self {
-        Self::Local { since: None }
+        Self::Local {
+            since: None,
+            last: None,
+            metrics_server: MetricsServer::default(),
+        }
     }
 }
 
 impl UtilizationSource {
     pub fn note(&self) -> Option<String> {
         match self {
-            Self::Local { since: Some(since) } => Some(format!("Collected by Flock since {since}")),
-            Self::Local { since: None } => None,
+            Self::Local {
+                since: Some(since), ..
+            } => Some(format!("Recorded by Flock while it's open, since {since}")),
+            Self::Local { since: None, .. } => None,
             Self::Prometheus => None,
             Self::Error(_) => None,
         }
@@ -137,16 +155,30 @@ impl UtilizationSource {
     }
 
     pub fn empty_sentence(range: TimeRange) -> String {
-        format!("No history for the last {}", range.label())
+        format!("No usage recorded in the last {}", range.label())
     }
 
     pub fn empty_reason(&self) -> String {
         match self {
-            Self::Local { since: Some(since) } => {
-                format!("This cluster has no Prometheus and Flock has collected since {since}.")
-            }
-            Self::Local { since: None } => {
-                "This cluster has no Prometheus and Flock has not collected any samples yet.".into()
+            Self::Local {
+                last,
+                metrics_server,
+                ..
+            } => {
+                let recording = match metrics_server {
+                    MetricsServer::Waiting => {
+                        "Flock records usage only while it's open and is waiting for metrics-server."
+                    }
+                    MetricsServer::Answering => "Flock records usage only while it's open.",
+                    MetricsServer::Unavailable => {
+                        "metrics-server isn't answering, so Flock can't record usage."
+                    }
+                };
+                let last = last.as_ref().map_or_else(
+                    || "No samples yet.".to_owned(),
+                    |at| format!("Last sample: {at}."),
+                );
+                format!("This cluster has no Prometheus. {recording} {last}")
             }
             Self::Prometheus => "Prometheus returned no samples for this window.".into(),
             Self::Error(reason) => format!("Prometheus failed: {reason}"),
@@ -258,35 +290,48 @@ mod tests {
     use super::*;
     use crate::resources::tests::resource;
 
+    fn local(last: Option<&str>, metrics_server: MetricsServer) -> UtilizationSource {
+        UtilizationSource::Local {
+            since: Some("Oct 16, 08:49".into()),
+            last: last.map(str::to_owned),
+            metrics_server,
+        }
+    }
+
     #[test]
-    fn history_messages_explain_source_window_and_failure() {
-        let since = UtilizationSource::Local {
-            since: Some("Oct 14, 09:05".into()),
-        };
+    fn history_messages_say_why_the_window_is_empty() {
+        let reopened = local(Some("Oct 19, 12:28"), MetricsServer::Waiting);
         assert_eq!(
-            since.note().as_deref(),
-            Some("Collected by Flock since Oct 14, 09:05")
+            reopened.note().as_deref(),
+            Some("Recorded by Flock while it's open, since Oct 16, 08:49")
         );
         assert_eq!(
-            UtilizationSource::empty_sentence(TimeRange::SixHours),
-            "No history for the last 6h"
+            UtilizationSource::empty_sentence(TimeRange::Hour),
+            "No usage recorded in the last 1h"
         );
         assert_eq!(
-            since.empty_reason(),
-            "This cluster has no Prometheus and Flock has collected since Oct 14, 09:05."
+            reopened.empty_reason(),
+            "This cluster has no Prometheus. Flock records usage only while it's open and is waiting for metrics-server. Last sample: Oct 19, 12:28."
         );
-        let fresh = UtilizationSource::Local { since: None };
+        assert_eq!(
+            local(Some("Oct 19, 12:28"), MetricsServer::Answering).empty_reason(),
+            "This cluster has no Prometheus. Flock records usage only while it's open. Last sample: Oct 19, 12:28."
+        );
+        assert_eq!(
+            local(None, MetricsServer::Unavailable).empty_reason(),
+            "This cluster has no Prometheus. metrics-server isn't answering, so Flock can't record usage. No samples yet."
+        );
+        let fresh = UtilizationSource::default();
         assert_eq!(fresh.note(), None);
-        assert!(
-            fresh
-                .empty_reason()
-                .contains("not collected any samples yet")
+        assert_eq!(
+            fresh.empty_reason(),
+            "This cluster has no Prometheus. Flock records usage only while it's open and is waiting for metrics-server. No samples yet."
         );
         let failed = UtilizationSource::Error("forbidden".into());
         assert_eq!(failed.error(), Some("forbidden"));
         assert_eq!(failed.note(), None);
         assert_eq!(UtilizationSource::Prometheus.note(), None);
-        assert_eq!(since.error(), None);
+        assert_eq!(reopened.error(), None);
     }
 
     #[test]
