@@ -502,6 +502,7 @@ impl Shell {
             Command::OpenResource(_) => {}
             Command::InspectResource(_) => {}
             Command::OpenCrd { .. } => {}
+            Command::OpenHelmRelease(_) => {}
             Command::FollowLogs(_) => {}
             Command::Compare(_) => {}
             Command::EditYaml(_) => {}
@@ -619,6 +620,10 @@ impl Shell {
             .flux_object
             .as_ref()
             .and_then(|key| snapshot.flux_page(key));
+        let helm = location.helm.as_ref();
+        screens
+            .helm_release
+            .update(cx, |screen, cx| screen.set(helm, snapshot, cx));
         let compact = self.full_view(ix, cx);
         screens.flux_object.update(cx, |screen, cx| {
             screen.set_page(object, cx);
@@ -704,6 +709,7 @@ impl Shell {
         if location.workload().is_some()
             || location.detail().is_some()
             || location.flux_object.is_some()
+            || location.helm.is_some()
         {
             return None;
         }

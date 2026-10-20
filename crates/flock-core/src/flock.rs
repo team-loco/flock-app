@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::crd::{Crd, CrdKey, CustomObjects};
+use crate::helm::{HelmKey, HelmRelease, HelmReleaseDetail};
 use crate::home::{ClusterMetrics, problems_badge};
 use crate::{
     CLUSTER_NAV, ChangesLog, ClusterCatalog, ClusterDetail, ClusterId, Comparison, Counts,
@@ -49,6 +50,8 @@ pub struct Snapshot {
     pub forwards: Vec<Forward>,
     pub crds: BTreeMap<ClusterId, Vec<Crd>>,
     pub custom: Vec<CustomObjects>,
+    pub helm: Vec<HelmRelease>,
+    pub helm_details: Vec<HelmReleaseDetail>,
 }
 
 impl Snapshot {
@@ -89,6 +92,21 @@ impl Snapshot {
         self.custom
             .iter()
             .find(|objects| &objects.cluster == id && &objects.key == key)
+    }
+
+    pub fn helm_releases(&self, id: &ClusterId) -> Vec<&HelmRelease> {
+        self.helm
+            .iter()
+            .filter(|release| &release.key.cluster == id)
+            .collect()
+    }
+
+    pub fn helm_release(&self, key: &HelmKey) -> Option<&HelmRelease> {
+        self.helm.iter().find(|release| &release.key == key)
+    }
+
+    pub fn helm_detail(&self, key: &HelmKey) -> Option<&HelmReleaseDetail> {
+        self.helm_details.iter().find(|detail| &detail.key == key)
     }
 
     pub fn detail(&self, id: &ClusterId) -> Option<&ClusterDetail> {
@@ -193,6 +211,8 @@ impl Snapshot {
         self.forwards.retain(|f| &f.target.cluster != id);
         self.crds.remove(id);
         self.custom.retain(|objects| &objects.cluster != id);
+        self.helm.retain(|release| &release.key.cluster != id);
+        self.helm_details.retain(|detail| &detail.key.cluster != id);
         let badge = problems_badge(&self.home.problems);
         self.flock_nav.insert(Page::Problems, badge);
     }
@@ -242,6 +262,8 @@ pub(crate) mod tests {
             forwards: Vec::new(),
             crds: BTreeMap::new(),
             custom: Vec::new(),
+            helm: Vec::new(),
+            helm_details: Vec::new(),
         }
     }
 

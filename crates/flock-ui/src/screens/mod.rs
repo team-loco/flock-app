@@ -15,6 +15,7 @@ mod flux_graph;
 mod flux_list;
 pub(crate) mod flux_object;
 pub mod gitops;
+pub(crate) mod helm;
 pub mod logs;
 pub mod multilog;
 mod namespaces;
@@ -151,6 +152,7 @@ pub struct ClusterPages {
     events: Entity<EventsScreen>,
     resources: Entity<ResourcesScreen>,
     custom: Entity<CustomResourcesScreen>,
+    helm: Entity<helm::HelmReleasesScreen>,
     flux: Entity<FluxListScreen>,
     graph: Entity<FluxGraphScreen>,
     _subscriptions: Vec<Subscription>,
@@ -168,6 +170,7 @@ impl ClusterPages {
         let events = cx.new(|cx| EventsScreen::new(window, cx));
         let resources = cx.new(|cx| ResourcesScreen::new(window, cx));
         let custom = cx.new(|cx| CustomResourcesScreen::new(window, cx));
+        let helm = cx.new(|cx| helm::HelmReleasesScreen::new(window, cx));
         let flux = cx.new(|cx| FluxListScreen::new(window, cx));
         let graph = cx.new(FluxGraphScreen::new);
         let subscriptions = vec![
@@ -178,6 +181,7 @@ impl ClusterPages {
             subscribe(&namespaces, on_event.clone(), cx),
             subscribe(&events, on_event.clone(), cx),
             subscribe(&custom, on_event.clone(), cx),
+            subscribe(&helm, on_event.clone(), cx),
             subscribe(&resources, on_event, cx),
         ];
         Self {
@@ -187,6 +191,7 @@ impl ClusterPages {
             events,
             resources,
             custom,
+            helm,
             flux,
             graph,
             _subscriptions: subscriptions,
@@ -206,6 +211,13 @@ impl ClusterPages {
             && page == Page::FluxGraph
         {
             self.graph
+                .update(cx, |screen, cx| screen.set(cluster, snapshot, cx));
+            return;
+        }
+        if let Some(cluster) = cluster
+            && page == Page::Releases
+        {
+            self.helm
                 .update(cx, |screen, cx| screen.set(cluster, snapshot, cx));
             return;
         }
@@ -300,6 +312,9 @@ impl ClusterPages {
         if page == Page::CustomResources {
             return Some(self.custom.clone().into_any_element());
         }
+        if page == Page::Releases {
+            return Some(self.helm.clone().into_any_element());
+        }
         if !has_detail {
             return None;
         }
@@ -322,6 +337,7 @@ impl ClusterPages {
             Page::Namespaces => self.namespaces.read(cx).filter_bar(),
             Page::Events => self.events.read(cx).filter_bar(),
             Page::CustomResources => self.custom.read(cx).filter_bar(),
+            Page::Releases => self.helm.read(cx).filter_bar(),
             other if is_flux_list(other) => self.flux.read(cx).filter_bar(),
             other => {
                 ResourceKind::for_page(other)?;
@@ -371,6 +387,7 @@ impl ClusterPages {
             other if is_flux_list(other) => Some(self.flux.read(cx).list_focus(cx)),
             Page::FluxGraph => Some(gpui::Focusable::focus_handle(&self.graph, cx)),
             Page::CustomResources => self.custom.update(cx, CustomResourcesScreen::list_focus),
+            Page::Releases => Some(self.helm.read(cx).list_focus(cx)),
             other => {
                 ResourceKind::for_page(other)?;
                 Some(self.resources.update(cx, ResourcesScreen::list_focus))
@@ -392,6 +409,9 @@ impl ClusterPages {
         }
         if page == Page::CustomResources {
             return Some(self.custom.read(cx).header_note());
+        }
+        if page == Page::Releases {
+            return Some(self.helm.read(cx).header_note());
         }
         if !has_detail {
             return None;

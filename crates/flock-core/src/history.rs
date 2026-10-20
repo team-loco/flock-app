@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::crd::CrdKey;
+use crate::helm::HelmKey;
 use crate::{ClusterId, Command, FluxKey, LogTarget, Page, ResourceRef, Snapshot, WorkloadKind};
 
 pub const HISTORY_LIMIT: usize = 50;
@@ -19,6 +20,8 @@ pub struct Location {
     pub logs: Option<LogTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crd: Option<CrdKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub helm: Option<HelmKey>,
 }
 
 impl Default for Location {
@@ -37,6 +40,14 @@ impl Location {
             container: None,
             logs: None,
             crd: None,
+            helm: None,
+        }
+    }
+
+    pub fn helm_release(key: HelmKey) -> Self {
+        Self {
+            helm: Some(key.clone()),
+            ..Self::page_on(key.cluster, Page::Releases)
         }
     }
 
@@ -61,6 +72,11 @@ impl Location {
                 None => resource.name.clone(),
             },
             (None, Some(key)) => format!("{}/{}", key.namespace, key.name),
+            (None, None) if self.helm.is_some() => self
+                .helm
+                .as_ref()
+                .map(|key| format!("{}/{}", key.namespace, key.name))
+                .unwrap_or_default(),
             (None, None) => self
                 .crd
                 .as_ref()
@@ -113,6 +129,9 @@ impl Location {
         }
         if let Some(target) = &self.logs {
             return vec![Command::FollowLogs(target.clone())];
+        }
+        if let Some(key) = &self.helm {
+            return vec![Command::OpenHelmRelease(key.clone())];
         }
         match (&self.resource, self.page, &self.container) {
             (Some(pod), Page::Logs, Some(container)) => {

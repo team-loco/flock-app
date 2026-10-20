@@ -14,6 +14,17 @@ const AUTHORITY_END: [char; 3] = ['/', '?', '#'];
 const WORD_END: [char; 5] = ['"', '\'', '<', '>', '`'];
 const PLAIN_SCHEMES: [&str; 2] = ["http", "https"];
 const JSON_START: [char; 2] = ['{', '['];
+const SENSITIVE_KEYS: [&str; 8] = [
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "apikey",
+    "privatekey",
+    "credential",
+    "accesskey",
+];
+const KEY_NOISE: [char; 2] = ['-', '_'];
 
 pub fn object(value: &mut Value) {
     redact(value, None);
@@ -21,6 +32,40 @@ pub fn object(value: &mut Value) {
 
 pub fn object_against(value: &mut Value, previous: &Value) {
     redact(value, Some(previous));
+}
+
+pub fn values(value: &mut Value) {
+    mask_sensitive(value);
+    redact(value, None);
+}
+
+fn sensitive(key: &str) -> bool {
+    let compact: String = key
+        .chars()
+        .filter(|c| !KEY_NOISE.contains(c))
+        .collect::<String>()
+        .to_lowercase();
+    SENSITIVE_KEYS.iter().any(|word| compact.contains(word))
+}
+
+fn mask_sensitive(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map.iter_mut() {
+                let masked = sensitive(key) && !child.is_object() && !child.is_array();
+                if masked && !child.is_null() {
+                    *child = Value::from(MASK);
+                } else {
+                    mask_sensitive(child);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(mask_sensitive),
+        Value::Null => {}
+        Value::Bool(_) => {}
+        Value::Number(_) => {}
+        Value::String(_) => {}
+    }
 }
 
 pub fn manifest(text: &str) -> String {

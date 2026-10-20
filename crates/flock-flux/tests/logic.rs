@@ -552,3 +552,53 @@ fn matrix_excludes_stale_offline_revisions_and_rejects_duplicates() -> TestResul
     assert_eq!(matrix::rows(&[cluster])?.len(), 2);
     Ok(())
 }
+
+#[test]
+fn helm_values_split_user_supplied_from_computed_and_redact_secrets() -> TestResult {
+    let stored = json!({
+        "name": "payments.vault", "namespace": "payments", "version": 1,
+        "info": { "status": "deployed" },
+        "chart": {
+            "metadata": { "name": "payments", "version": "1.2.0" },
+            "values": {
+                "replicas": 1,
+                "image": { "repository": "ghcr.io/acme/payments", "tag": "1.0.0" },
+                "database": { "host": "db", "password": "chart-default" },
+                "debug": true
+            }
+        },
+        "config": {
+            "image": { "tag": "1.2.0" },
+            "database": { "password": "planted-password" },
+            "apiToken": "planted-token",
+            "repo": "https://deploy:planted-url-secret@git.example.com/acme",
+            "debug": null
+        },
+        "manifest": ""
+    });
+    let secret = encoded_secret(&serde_json::to_vec(&stored)?)?;
+    let release = helm_storage::decode_secret(&secret)?;
+    let computed = helm_storage::computed_values(&release);
+    assert_eq!(
+        computed,
+        json!({
+            "replicas": 1,
+            "image": { "repository": "ghcr.io/acme/payments", "tag": "1.2.0" },
+            "database": { "host": "db", "password": "planted-password" },
+            "apiToken": "planted-token",
+            "repo": "https://deploy:planted-url-secret@git.example.com/acme"
+        })
+    );
+    for mut values in [release.config.clone(), computed] {
+        redact::values(&mut values);
+        let text = values.to_string();
+        for planted in ["planted-password", "planted-token", "planted-url-secret"] {
+            assert!(!text.contains(planted), "{text}");
+        }
+        assert_eq!(values.pointer("/image/tag"), Some(&json!("1.2.0")));
+        assert_eq!(values.pointer("/apiToken"), Some(&json!(redact::MASK)));
+    }
+    let bare = helm_storage::decode_secret_json(SECRET_ONE)?;
+    assert!(bare.chart_values.is_object());
+    Ok(())
+}

@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::app_settings::Refresh;
 use crate::crd::CrdKey;
+use crate::helm::HelmKey;
 use crate::history::Location;
 use crate::resource::page_for_kind;
 use crate::tabs::{Panes, SavedWindow, TabId};
@@ -26,6 +27,7 @@ pub enum Command {
         cluster: ClusterId,
         crd: CrdKey,
     },
+    OpenHelmRelease(HelmKey),
     FollowLogs(LogTarget),
     OpenLogs {
         pod: ResourceRef,
@@ -151,6 +153,7 @@ impl AppState {
             }
             Command::OpenResource(_) => Some(vec![command.clone()]),
             Command::OpenCrd { .. } => Some(vec![command.clone()]),
+            Command::OpenHelmRelease(_) => Some(vec![command.clone()]),
             Command::FollowLogs(_) => Some(vec![command.clone()]),
             Command::OpenLogs { .. } => Some(vec![command.clone()]),
             Command::Compare(_) => Some(vec![command.clone()]),
@@ -244,6 +247,7 @@ impl AppState {
             Command::SelectCluster(Some(id)) => has_cluster(id),
             Command::OpenResource(resource) => has_cluster(&resource.cluster),
             Command::OpenCrd { cluster, .. } => has_cluster(cluster),
+            Command::OpenHelmRelease(key) => has_cluster(&key.cluster),
             Command::FollowLogs(target) => has_cluster(target.cluster()),
             Command::OpenLogs { pod, .. } => has_cluster(&pod.cluster),
             Command::Compare(resource) => has_cluster(&resource.cluster),
@@ -311,6 +315,11 @@ fn navigate(location: &mut Location, command: &Command, snapshot: &Snapshot) {
         Command::OpenCrd { cluster, crd } => {
             if has_cluster(cluster) {
                 *location = Location::crd_on(cluster.clone(), crd.clone());
+            }
+        }
+        Command::OpenHelmRelease(key) => {
+            if has_cluster(&key.cluster) {
+                *location = Location::helm_release(key.clone());
             }
         }
         Command::FollowLogs(target) => {
@@ -439,6 +448,9 @@ fn retargeted(location: &Location, cluster: Option<&ClusterId>, snapshot: &Snaps
             logs: Some(moved),
             ..Location::page_on(id.clone(), Page::Logs)
         };
+    }
+    if location.helm.is_some() {
+        return Location::page_on(id.clone(), Page::Releases);
     }
     if let Some(crd) = &location.crd {
         if snapshot.crd(id, crd).is_none() {
@@ -844,6 +856,37 @@ mod tests {
         state.retarget(Some(&ClusterId::new("c")));
         assert_eq!(state.location().page, Page::ClusterOverview);
         assert_eq!(state.location().crd, None);
+    }
+
+    #[test]
+    fn a_helm_release_opens_its_page_restores_and_retargets_to_the_list() {
+        let mut state = loaded();
+        let key = HelmKey::new(ClusterId::new("a"), "payments", "checkout-api");
+        let open = Command::OpenHelmRelease(key.clone());
+        assert!(state.ready_for(&open));
+        assert!(!state.ready_for(&Command::OpenHelmRelease(key.on(&ClusterId::new("x")))));
+        state.apply(&Command::NewTab(Box::new(open.clone())));
+        let location = state.location().clone();
+        assert_eq!(location.page, Page::Releases);
+        assert_eq!(location.helm, Some(key.clone()));
+        assert_eq!(location.commands(), vec![open]);
+        assert!(
+            location
+                .history_label(&state.snapshot)
+                .starts_with("payments/checkout-api")
+        );
+        let title = crate::tabs::title(&location, &state.snapshot);
+        assert_eq!(
+            (title.kind.as_str(), title.label.as_str()),
+            (crate::tabs::HELM_KIND, "checkout-api")
+        );
+        state.retarget(Some(&ClusterId::new("b")));
+        assert_eq!(
+            state.location(),
+            &Location::page_on(ClusterId::new("b"), Page::Releases)
+        );
+        state.apply(&Command::SelectPage(Page::Releases));
+        assert_eq!(state.location().helm, None);
     }
 
     #[test]

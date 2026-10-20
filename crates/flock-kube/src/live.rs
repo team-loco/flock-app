@@ -7,6 +7,7 @@ use std::time::Duration;
 use flock_core::add_cluster::home_relative;
 use flock_core::app_settings::DEFAULT_SNAPSHOTS;
 use flock_core::crd::{Crd, CrdKey, CustomObjects};
+use flock_core::helm::{HelmKey, HelmRelease, HelmReleaseDetail};
 use flock_core::home::problems_badge;
 use flock_core::resource::page_for_kind;
 use flock_core::settings::{Auth, ClusterSettings, Connection, ContextChange};
@@ -154,6 +155,8 @@ struct Navigation {
     page: Page,
     crd: Option<CrdKey>,
     custom: Option<CustomWatch>,
+    helm: Option<HelmKey>,
+    helm_watch: Option<(ClusterId, Subscription)>,
     yaml: Option<(ResourceRef, String)>,
     inspecting: Option<Inspecting>,
     yaml_task: Option<TaskGuard>,
@@ -178,6 +181,8 @@ impl Navigation {
             page: Page::Overview,
             crd: None,
             custom: None,
+            helm: None,
+            helm_watch: None,
             yaml: None,
             inspecting: None,
             yaml_task: None,
@@ -211,6 +216,7 @@ struct Live {
     actions: Actions,
     gitops: GitOpsState,
     fetched: Sender<Fetched>,
+    helm_cache: crate::helm::Decoded,
 }
 
 fn reachable(status: &ConnectionStatus) -> bool {
@@ -353,6 +359,7 @@ impl Live {
     fn page_changed(&mut self) {
         self.poll_page();
         self.sync_custom();
+        self.sync_helm();
         #[cfg(feature = "loco")]
         self.navigation.loco.sync(
             self.clusters.values().map(|c| (&c.id, &c.handle)),
@@ -394,6 +401,75 @@ impl Live {
             crd,
             subscription,
         });
+    }
+
+    fn select_page(&mut self, page: Page) {
+        if page.is_flock() {
+            self.navigation.selected = None;
+        }
+        self.navigation.page = page;
+        self.navigation.helm = None;
+        self.page_changed();
+    }
+
+    fn open_helm(&mut self, key: &HelmKey) {
+        self.navigation.selected = Some(key.cluster.clone());
+        self.navigation.page = Page::Releases;
+        self.navigation.helm = Some(key.clone());
+        self.page_changed();
+    }
+
+    fn sync_helm(&mut self) {
+        let shown = self
+            .navigation
+            .selected
+            .clone()
+            .filter(|_| self.navigation.page == Page::Releases);
+        let Some((cluster, handle)) =
+            shown.and_then(|cluster| Some((cluster.clone(), self.handle(&cluster)?.clone())))
+        else {
+            self.navigation.helm_watch = None;
+            return;
+        };
+        let current = self
+            .navigation
+            .helm_watch
+            .as_ref()
+            .is_some_and(|(known, watch)| known == &cluster && watch.belongs_to(&handle));
+        if !current {
+            let watch = handle.subscribe(WatchKind::HelmStorage);
+            self.navigation.helm_watch = Some((cluster, watch));
+        }
+    }
+
+    fn helm(&self, now: Timestamp) -> (Vec<HelmRelease>, Vec<HelmReleaseDetail>) {
+        let mut releases = Vec::new();
+        let mut details = Vec::new();
+        let mut shown: Vec<ClusterId> = Vec::new();
+        for navigation in self.navigations() {
+            let Some((cluster, _)) = &navigation.helm_watch else {
+                continue;
+            };
+            let Some(handle) = self.handle(cluster) else {
+                continue;
+            };
+            let secrets = handle.objects::<k8s_openapi::api::core::v1::Secret>();
+            let decoded = self.helm_cache.releases(cluster, &secrets);
+            if !shown.contains(cluster) {
+                let flux = handle.custom_objects(&crate::helm::flux_kind());
+                let owners = crate::helm::owners(cluster, &flux);
+                releases.extend(crate::helm::summaries(cluster, &decoded, &owners, now));
+                shown.push(cluster.clone());
+            }
+            let detail = navigation
+                .helm
+                .as_ref()
+                .filter(|key| &key.cluster == cluster)
+                .and_then(|key| crate::helm::detail(key, &decoded, now));
+            details.extend(detail);
+        }
+        self.helm_cache.forget(&shown);
+        (releases, details)
     }
 
     fn edit_yaml(&mut self, resource: &ResourceRef) {
@@ -524,6 +600,7 @@ impl Live {
         if let ClusterEvent::Changed { id, .. } = event {
             self.for_each_window(|live| {
                 live.sync_custom();
+                live.sync_helm();
                 live.refresh_yaml(id);
             });
         }
@@ -794,13 +871,8 @@ impl Live {
                 };
                 self.page_changed();
             }
-            Command::SelectPage(page) => {
-                if page.is_flock() {
-                    self.navigation.selected = None;
-                }
-                self.navigation.page = *page;
-                self.page_changed();
-            }
+            Command::SelectPage(page) => self.select_page(*page),
+            Command::OpenHelmRelease(key) => self.open_helm(key),
             Command::OpenCommit(_) => {
                 self.navigation.selected = None;
                 self.navigation.page = Page::Changes;
@@ -1101,6 +1173,18 @@ impl Live {
                 continue;
             };
             let page = navigation.page;
+            if let Some((_, watch)) = navigation
+                .helm_watch
+                .as_ref()
+                .filter(|_| page == Page::Releases)
+            {
+                let state = cluster.handle.watch_state(watch.kind());
+                pages
+                    .entry(selected.clone())
+                    .or_default()
+                    .insert(page, state);
+                continue;
+            }
             if page == Page::CustomResources {
                 let state = custom_state(navigation, &cluster.handle);
                 pages
@@ -1205,8 +1289,41 @@ impl Live {
         rows
     }
 
+    fn catalog_settings(&self) -> Vec<ClusterSettings> {
+        let connected_settings = self.clusters.values().map(|cluster| {
+            let expired = matches!(cluster.handle.status(), ConnectionStatus::AuthExpired(_));
+            let saved = self.store.get(&cluster.id).map(|c| &c.preferences);
+            let mut settings =
+                cluster_settings(cluster.id.clone(), cluster.handle.context(), expired, saved);
+            settings.prometheus = cluster
+                .extras
+                .prometheus
+                .as_ref()
+                .and_then(|found| found.target.as_ref())
+                .map(|target| format!("{}:{}", target.label(), target.port));
+            settings
+        });
+        let disconnected_settings = self
+            .store
+            .clusters()
+            .iter()
+            .filter(|saved| !self.clusters.contains_key(&saved.context_ref()))
+            .filter_map(|saved| {
+                let context = self.discovery.get(&saved.context_ref())?;
+                let mut settings =
+                    cluster_settings(saved.id(), context, false, Some(&saved.preferences));
+                settings.context_change = context_change(saved, context);
+                Some(settings)
+            });
+        let mut settings: Vec<ClusterSettings> =
+            connected_settings.chain(disconnected_settings).collect();
+        settings.sort_by(|a, b| a.cluster.cmp(&b.cluster));
+        settings
+    }
+
     fn snapshot(&self) -> Snapshot {
         let now = Timestamp::now();
+        let (helm, helm_details) = self.helm(now);
         let mut connected = Vec::new();
         let mut problems = Vec::new();
         let mut details = BTreeMap::new();
@@ -1251,34 +1368,7 @@ impl Live {
         clusters.sort_by(|a, b| a.name.cmp(&b.name));
         #[cfg(feature = "loco")]
         let loco = self.loco_snapshot(&mut clusters);
-        let connected_settings = self.clusters.values().map(|cluster| {
-            let expired = matches!(cluster.handle.status(), ConnectionStatus::AuthExpired(_));
-            let saved = self.store.get(&cluster.id).map(|c| &c.preferences);
-            let mut settings =
-                cluster_settings(cluster.id.clone(), cluster.handle.context(), expired, saved);
-            settings.prometheus = cluster
-                .extras
-                .prometheus
-                .as_ref()
-                .and_then(|found| found.target.as_ref())
-                .map(|target| format!("{}:{}", target.label(), target.port));
-            settings
-        });
-        let disconnected_settings = self
-            .store
-            .clusters()
-            .iter()
-            .filter(|saved| !self.clusters.contains_key(&saved.context_ref()))
-            .filter_map(|saved| {
-                let context = self.discovery.get(&saved.context_ref())?;
-                let mut settings =
-                    cluster_settings(saved.id(), context, false, Some(&saved.preferences));
-                settings.context_change = context_change(saved, context);
-                Some(settings)
-            });
-        let mut settings: Vec<ClusterSettings> =
-            connected_settings.chain(disconnected_settings).collect();
-        settings.sort_by(|a, b| a.cluster.cmp(&b.cluster));
+        let settings = self.catalog_settings();
         let sources: BTreeSet<&Path> = self.clusters.keys().map(|id| id.file.as_path()).collect();
         let mut snapshot = Snapshot {
             clusters,
@@ -1302,6 +1392,8 @@ impl Live {
             forwards: Vec::new(),
             crds: self.crds(),
             custom: self.custom_objects(now),
+            helm,
+            helm_details,
         };
         self.gitops.fill(&mut snapshot);
         self.actions.overlay(&mut snapshot);
@@ -1444,6 +1536,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
         actions,
         gitops,
         fetched,
+        helm_cache: crate::helm::Decoded::default(),
     };
     let gitops_changed = live.gitops.changed();
     live.start();
@@ -1806,6 +1899,7 @@ mod tests {
             actions,
             gitops,
             fetched: async_channel::unbounded().0,
+            helm_cache: crate::helm::Decoded::default(),
         }
     }
 

@@ -71,6 +71,7 @@ pub(super) struct PaneScreens {
     pub(super) flux_events: Entity<crate::screens::FluxEventsScreen>,
     pub(super) pages: ClusterPages,
     pub(super) flux_object: Entity<FluxObjectPage>,
+    pub(super) helm_release: Entity<crate::screens::helm::HelmReleaseScreen>,
     #[cfg(feature = "loco")]
     pub(super) loco: Entity<crate::screens::loco::LocoScreens>,
     pub(super) compare: Entity<CompareScreen>,
@@ -107,12 +108,14 @@ impl PaneScreens {
         let app_settings = cx.new(|cx| AppSettingsScreen::new(window, cx));
         let pods = cx.new(|cx| PodsScreen::new(window, cx));
         let flux_object = cx.new(FluxObjectPage::new);
+        let helm_release = cx.new(crate::screens::helm::HelmReleaseScreen::new);
         let navigation = cx.new(crate::kit::HeaderNavigation::new);
         changes.update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
         compare.update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
         settings.update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
         app_settings.update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
         flux_object.update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
+        helm_release.update(cx, |screen, _| screen.navigation = Some(navigation.clone()));
         #[cfg(feature = "loco")]
         loco.update(cx, |screen, cx| {
             screen.set_navigation(navigation.clone(), cx);
@@ -141,6 +144,7 @@ impl PaneScreens {
             forward(pane, &app_settings, cx),
             forward(pane, &pods, cx),
             forward(pane, &flux_object, cx),
+            forward(pane, &helm_release, cx),
         ];
         #[cfg(feature = "loco")]
         subscriptions.push(forward(pane, &loco, cx));
@@ -154,6 +158,7 @@ impl PaneScreens {
             flux_events,
             pages,
             flux_object,
+            helm_release,
             #[cfg(feature = "loco")]
             loco,
             compare,

@@ -386,3 +386,19 @@ Settled; change only with a new entry that says why.
     What's wrong come from `status.conditions` with decision 37's polarity, and Related comes from
     `ownerReferences` against the built-in facts (owners outside the background stores are named,
     not linked). Opening a Flux kind from this list shows the generic inspector, not the Flux page.
+44. **Helm releases come from Helm storage, watched only while shown** (#234): Helm gains a sidebar
+    section with Releases, every release Helm stores on the cluster, Flux-managed or not. While a
+    pane shows Releases or a release, the backend watches that cluster's Secrets with the field
+    selector `type=helm.sh/release.v1` (full objects, unlike decision 31's metadata-only Secret
+    store) and decodes each one once per resourceVersion (`flock_kube::helm::Decoded`); the cache
+    is dropped with the watch. Decode failures log the secret's name and the error only, never the
+    payload. A row shows the latest revision. It is marked as owned by Flux when a Flux HelmRelease's
+    storage namespace and release name (the same rules the Flux page uses) point at it, and it links
+    to that object. The release page lists every stored revision, newest first, then the values and
+    the manifest of the latest one. User-supplied values are the release's `config`. Computed values
+    are the chart's defaults coalesced with `config` the way Helm does it: maps merge, a null
+    removes the key. Both pass through `flock_flux::redact::values`, which masks scalar values under
+    password, secret, token, API-key, private-key, credential and access-key keys, then applies the
+    usual URL and embedded-Secret redaction. The manifest goes through `redact::manifest`. The list
+    shows every namespace with the filter bar's `ns:` token instead of a namespace picker, because
+    releases are few and often live in their own namespaces.

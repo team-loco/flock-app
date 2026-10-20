@@ -74,6 +74,7 @@ pub enum WatchKind {
     Events,
     PersistentVolumeClaims,
     CustomResourceDefinitions,
+    HelmStorage,
     Custom(CustomKind),
 }
 
@@ -98,6 +99,7 @@ impl WatchKind {
             Self::Events => "Event",
             Self::PersistentVolumeClaims => "PersistentVolumeClaim",
             Self::CustomResourceDefinitions => "CustomResourceDefinition",
+            Self::HelmStorage => "Helm release",
             Self::Custom(kind) => &kind.kind,
         }
     }
@@ -134,6 +136,7 @@ watched! {
     Event => Events,
     PersistentVolumeClaim => PersistentVolumeClaims,
     CustomResourceDefinition => CustomResourceDefinitions,
+    Secret => HelmStorage,
 }
 
 #[derive(Debug)]
@@ -210,14 +213,23 @@ where
     K: Watched + DeserializeOwned + Resource<DynamicType = ()>,
     K::Scope: Send,
 {
+    spawn_selected(runtime, api, watcher::Config::default(), signals, trim)
+}
+
+fn spawn_selected<K>(
+    runtime: &Handle,
+    api: Api<K>,
+    config: watcher::Config,
+    signals: UnboundedSender<Signal>,
+    trim: fn(&mut K),
+) -> RunningWatch
+where
+    K: Watched + DeserializeOwned + Resource<DynamicType = ()>,
+    K::Scope: Send,
+{
     let writer = reflector::store::Writer::<K>::default();
     let store = writer.as_reader();
-    let stream = reflector::reflector(
-        writer,
-        watcher(api, watcher::Config::default())
-            .default_backoff()
-            .modify(trim),
-    );
+    let stream = reflector::reflector(writer, watcher(api, config).default_backoff().modify(trim));
     let _guard = runtime.enter();
     RunningWatch {
         store: Arc::new(store),
@@ -283,6 +295,10 @@ pub fn spawn_builtin(
         }
         WatchKind::CustomResourceDefinitions => {
             spawn_trimmed(runtime, Api::all(client), signals, trim_definition)
+        }
+        WatchKind::HelmStorage => {
+            let config = watcher::Config::default().fields(crate::helm::FIELD_SELECTOR);
+            spawn_selected::<Secret>(runtime, Api::all(client), config, signals, trim_metadata)
         }
         WatchKind::Custom(_) => return None,
     };
