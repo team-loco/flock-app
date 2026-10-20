@@ -207,7 +207,16 @@ impl Shared {
         });
         if remove {
             watches.remove(kind);
+            let dropped = Signal {
+                kind: kind.clone(),
+                event: SignalEvent::Dropped,
+            };
+            self.signals.send(dropped).ok();
         }
+    }
+
+    fn watching(&self, kind: &WatchKind) -> bool {
+        lock(&self.watches).contains_key(kind)
     }
 }
 
@@ -357,6 +366,14 @@ struct Health {
 }
 
 impl Health {
+    fn record(&mut self, kind: WatchKind, failure: Failure) {
+        let page_scoped =
+            matches!(kind, WatchKind::Custom(_)) && failure.kind == FailureKind::Forbidden;
+        if !page_scoped {
+            self.kinds.insert(kind, failure);
+        }
+    }
+
     fn status(&self) -> ConnectionStatus {
         if let Some(failure) = &self.probe {
             if failure.kind.is_auth() {
@@ -491,10 +508,17 @@ async fn supervise(
                         dirty.insert(signal.kind);
                     }
                     SignalEvent::Failed(err) => {
-                        let failure = classify(&err, &shared.context);
-                        shared.failed(&signal.kind, &failure.detail);
-                        dirty.insert(signal.kind.clone());
-                        health.kinds.insert(signal.kind, failure);
+                        if shared.watching(&signal.kind) {
+                            let failure = classify(&err, &shared.context);
+                            shared.failed(&signal.kind, &failure.detail);
+                            dirty.insert(signal.kind.clone());
+                            health.record(signal.kind, failure);
+                        }
+                    }
+                    SignalEvent::Dropped => {
+                        if !shared.watching(&signal.kind) {
+                            health.kinds.remove(&signal.kind);
+                        }
                     }
                 }
             }
@@ -660,7 +684,23 @@ mod tests {
         assert!(matches!(health.status(), ConnectionStatus::Degraded(ref f) if f.len() == 1));
     }
 
+    #[test]
+    fn forbidden_custom_watch_does_not_degrade() {
+        let mut health = Health {
+            connected_once: true,
+            ..Health::default()
+        };
+        let kind = WatchKind::Custom(CustomKind::new("example.com", "v1", "Widget"));
+        health.record(kind.clone(), failure(FailureKind::Forbidden));
+        assert_eq!(health.status(), ConnectionStatus::Connected);
+        health.record(kind, failure(FailureKind::Other));
+        assert!(matches!(health.status(), ConnectionStatus::Degraded(_)));
+        health.record(WatchKind::Secrets, failure(FailureKind::Forbidden));
+        assert!(matches!(health.status(), ConnectionStatus::Degraded(ref f) if f.len() == 2));
+    }
+
     const ROUND_TRIP: Duration = Duration::from_secs(1);
+    const STATUS_DEADLINE: Duration = Duration::from_secs(5);
     const VERSION: &str = r#"{"major":"1","minor":"36","gitVersion":"v1.36.0","gitCommit":"","gitTreeState":"","buildDate":"","goVersion":"","compiler":"","platform":""}"#;
     const NODES: &str = r#"{"kind":"NodeList","apiVersion":"v1","metadata":{},"items":[{"metadata":{"name":"n"},"spec":{"providerID":"kind://docker/n"}}]}"#;
 
@@ -790,6 +830,44 @@ mod tests {
             handle.watch_state(&WatchKind::Jobs),
             WatchState::pending(NOT_STARTED)
         );
+    }
+
+    async fn status_matching(
+        events: &async_channel::Receiver<ClusterEvent>,
+        wanted: impl Fn(&ConnectionStatus) -> bool,
+    ) -> bool {
+        let deadline = Instant::now() + STATUS_DEADLINE;
+        while Instant::now() < deadline {
+            let next = tokio::time::timeout(STATUS_DEADLINE, events.recv()).await;
+            if let Ok(Ok(ClusterEvent::Status { status, .. })) = next
+                && wanted(&status)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn dropping_a_failed_watch_returns_the_cluster_to_connected() {
+        let (client, _) = crate::fake::client(WATCH_ROUND_TRIP, |_, path| {
+            if path.starts_with("/api/v1/secrets") {
+                return Some((http::StatusCode::FORBIDDEN, FORBIDDEN_SECRETS.to_owned()));
+            }
+            None
+        });
+        let (_manager, handle, events) = crate::fake::supervised(&client);
+        let secrets = handle.subscribe(WatchKind::Secrets);
+        let degraded = status_matching(&events, |status| {
+            matches!(status, ConnectionStatus::Degraded(_))
+        })
+        .await;
+        assert!(degraded);
+        drop(secrets);
+        let connected =
+            status_matching(&events, |status| *status == ConnectionStatus::Connected).await;
+        assert!(connected);
+        assert_eq!(handle.status(), ConnectionStatus::Connected);
     }
 
     #[test]
