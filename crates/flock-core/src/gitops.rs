@@ -258,16 +258,6 @@ pub struct GitOps {
     pub installs: Vec<FluxInstall>,
 }
 
-impl GitOps {
-    pub fn flux_version(&self, cluster: &ClusterId) -> Option<&str> {
-        self.installs
-            .iter()
-            .find(|install| &install.cluster == cluster)
-            .map(|install| install.version.as_str())
-            .filter(|version| !version.is_empty())
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FluxReady {
     pub ready: u32,
@@ -475,23 +465,6 @@ mod tests {
         source.ready = 3;
         assert_eq!(source.status(), Status::Warn);
         assert_eq!(source.ready_label(), "▲ 3/4");
-    }
-
-    #[test]
-    fn flux_version_comes_from_the_cluster_install() {
-        let install = |cluster: &str, version: &str| FluxInstall {
-            cluster: ClusterId::new(cluster),
-            version: version.into(),
-            upgrade: None,
-            controllers: Vec::new(),
-        };
-        let gitops = GitOps {
-            installs: vec![install("a", "v2.9.6"), install("b", "")],
-            ..GitOps::default()
-        };
-        assert_eq!(gitops.flux_version(&ClusterId::new("a")), Some("v2.9.6"));
-        assert_eq!(gitops.flux_version(&ClusterId::new("b")), None);
-        assert_eq!(gitops.flux_version(&ClusterId::new("c")), None);
     }
 
     #[test]
