@@ -193,7 +193,11 @@ impl AppState {
         for command in &commands {
             navigate(&mut location, command, &self.snapshot);
         }
-        Some(self.panes.open(location))
+        let tab = match command {
+            Command::EditYaml(_) => self.panes.open_from(self.location().clone(), location),
+            _ => self.panes.open(location),
+        };
+        Some(tab)
     }
 
     pub fn open_split(&mut self, command: &Command) -> bool {
@@ -818,6 +822,19 @@ mod tests {
         });
         assert_eq!(state.location().resource, Some(deployment("b")));
         assert_eq!(state.workload(), None);
+    }
+
+    #[test]
+    fn the_editor_tab_goes_back_to_the_page_it_was_opened_from() {
+        let mut state = loaded();
+        state.apply(&Command::OpenResource(deployment("a")));
+        let origin = state.location().clone();
+        state.open_tab(&Command::EditYaml(deployment("a")));
+        assert_eq!(state.location().page, Page::EditYaml);
+        assert!(state.back());
+        assert_eq!(state.location(), &origin);
+        assert!(state.forward());
+        assert_eq!(state.location().page, Page::EditYaml);
     }
 
     #[test]
