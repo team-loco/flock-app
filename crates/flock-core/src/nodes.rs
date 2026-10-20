@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::diagnosis::{self, Condition, Diagnosis};
-use crate::filter::TextFilter;
+use crate::filter::{FilterSpec, TextFilter};
 use crate::overview::{Commitment, plural};
 use crate::{Status, Uid};
 
@@ -48,18 +48,27 @@ pub struct Node {
 }
 
 impl Node {
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("name", |n, (), out| out.push(n.name.as_str().into())),
+            ("status", |n, (), out| out.push(n.state.as_str().into())),
+            ("instance type", |n, (), out| {
+                out.push(n.instance_type.as_str().into());
+            }),
+            ("zone", |n, (), out| out.push(n.zone.as_str().into())),
+            ("version", |n, (), out| out.push(n.version.as_str().into())),
+            ("IP", |n, (), out| out.push(n.internal_ip.as_str().into())),
+            ("label", |n, (), out| {
+                out.extend(n.labels.iter().map(|l| l.as_str().into()));
+            }),
+        ],
+        namespace: false,
+        labels: true,
+    };
+
     pub fn matches(&self, query: &TextFilter) -> bool {
-        let mut fields = vec![
-            self.name.as_str(),
-            self.state.as_str(),
-            self.instance_type.as_str(),
-            self.zone.as_str(),
-            self.version.as_str(),
-            self.internal_ip.as_str(),
-        ];
-        fields.extend(self.labels.iter().map(String::as_str));
         let labels = self.label_map();
-        query.matches_labeled(None, &labels, &fields)
+        Self::FILTER.matches(self, query, None, &[&labels])
     }
 
     pub fn label_map(&self) -> BTreeMap<String, String> {

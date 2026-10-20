@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use super::{Workspace, short_digest};
-use crate::filter::TextFilter;
+use crate::filter::{FilterSpec, TextFilter};
 use crate::{ResourceRef, Seen, Status, Uid};
 
 const MISSING: &str = "—";
@@ -96,14 +96,28 @@ impl Build {
         Seen::new(self.resource.clone(), self.job_uid.clone())
     }
 
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("build", |b, (), out| out.push(b.id.as_str().into())),
+            ("service", |b, (), out| out.push(b.service.as_str().into())),
+            ("workspace", |b, (), out| {
+                out.push(b.workspace.label().into());
+            }),
+            ("namespace", |b, (), out| {
+                out.push(b.workspace.namespace.as_str().into());
+            }),
+        ],
+        namespace: true,
+        labels: true,
+    };
+
     pub fn matches(&self, query: &TextFilter) -> bool {
-        let fields = [
-            self.id.as_str(),
-            self.service.as_str(),
-            self.workspace.label(),
-            self.workspace.namespace.as_str(),
-        ];
-        query.matches_labeled(Some(&self.workspace.namespace), &self.labels, &fields)
+        Self::FILTER.matches(
+            self,
+            query,
+            Some(&self.workspace.namespace),
+            &[&self.labels],
+        )
     }
 
     pub fn took_label(&self) -> String {

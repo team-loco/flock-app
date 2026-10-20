@@ -47,7 +47,8 @@ impl EventEmitter<LocoEvent> for RoutesScreen {}
 
 impl RoutesScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter = cx.new(|cx| FilterBar::new("loco-route-filter", window, cx));
+        let filter = cx
+            .new(|cx| FilterBar::new("loco-route-filter", Route::FILTER.placeholder(), window, cx));
         let listeners = cx.new(|cx| {
             Table::new("loco-listeners", listener_columns(), cx)
                 .row_height(ROW_TABLE)

@@ -22,7 +22,6 @@ use crate::theme::{
 
 const CLEAR: &str = "Clear";
 const REMOVE_TOKEN: &str = "×";
-pub const FILTER_PLACEHOLDER: &str = "Filter by name, namespace or label";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilterEvent {
@@ -47,6 +46,7 @@ enum SuggestionKey {
 
 pub struct FilterBar {
     id: SharedString,
+    placeholder: SharedString,
     field: Entity<TextFieldState>,
     scope: Option<AnyView>,
     chips: Vec<SharedString>,
@@ -63,8 +63,14 @@ pub struct FilterBar {
 impl EventEmitter<FilterEvent> for FilterBar {}
 
 impl FilterBar {
-    pub fn new(id: impl Into<SharedString>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let field = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
+    pub fn new(
+        id: impl Into<SharedString>,
+        placeholder: impl Into<SharedString>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let placeholder: SharedString = placeholder.into();
+        let field = cx.new(|cx| TextFieldState::new(window, cx).placeholder(placeholder.clone()));
         let subscription =
             cx.subscribe_in(&field, window, |this, _, event: &InputEvent, window, cx| {
                 if let InputEvent::Change = event {
@@ -73,6 +79,7 @@ impl FilterBar {
             });
         Self {
             id: id.into(),
+            placeholder,
             field,
             scope: None,
             chips: Vec::new(),
@@ -128,9 +135,9 @@ impl FilterBar {
     fn refresh_query(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.query = TextFilter::parse(&self.text(cx));
         let placeholder = if self.tokens.is_empty() {
-            FILTER_PLACEHOLDER
+            self.placeholder.clone()
         } else {
-            ""
+            SharedString::default()
         };
         self.field.update(cx, |field, cx| {
             field.set_placeholder(placeholder, window, cx);

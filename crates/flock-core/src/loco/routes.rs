@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::filter::TextFilter;
+use crate::filter::{FilterSpec, TextFilter};
 use crate::{ResourceRef, Status};
 
 const MISSING: &str = "—";
@@ -44,18 +44,25 @@ pub struct Route {
 }
 
 impl Route {
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("name", |r, (), out| out.push(r.name.as_str().into())),
+            ("host", |r, (), out| {
+                out.push(r.host.as_deref().unwrap_or_default().into());
+            }),
+            ("backend", |r, (), out| out.push(r.backend.as_str().into())),
+            ("detail", |r, (), out| out.push(r.detail.as_str().into())),
+        ],
+        namespace: true,
+        labels: true,
+    };
+
     pub fn matches(&self, query: &TextFilter) -> bool {
-        let fields = [
-            self.name.as_str(),
-            self.host.as_deref().unwrap_or_default(),
-            self.backend.as_str(),
-            self.detail.as_str(),
-        ];
         let namespace = self
             .application
             .as_ref()
             .and_then(|a| a.namespace.as_deref());
-        query.matches_labeled(namespace, &self.labels, &fields)
+        Self::FILTER.matches(self, query, namespace, &[&self.labels])
     }
 
     pub fn host_label(&self) -> &str {

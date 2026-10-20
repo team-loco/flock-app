@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::emptiness::Noun;
-use crate::filter::TextFilter;
+use crate::filter::{FilterSpec, TextFilter};
 use crate::flux::FluxKind;
 use crate::resources::Resource;
 use crate::{ClusterId, Command, Page, ResourceRef};
@@ -165,8 +165,18 @@ impl Definition {
         self.page?.section()
     }
 
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("kind", |d, (), out| out.push(d.key.kind.as_str().into())),
+            ("plural", |d, (), out| out.push(d.plural.as_str().into())),
+            ("group", |d, (), out| out.push(d.key.group.as_str().into())),
+        ],
+        namespace: false,
+        labels: false,
+    };
+
     pub fn matches(&self, filter: &TextFilter) -> bool {
-        filter.matches_text(&[&self.key.kind, &self.plural, &self.key.group])
+        Self::FILTER.matches(self, filter, None, &[])
     }
 
     pub fn command(&self, cluster: ClusterId) -> Command {

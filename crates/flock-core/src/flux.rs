@@ -3,6 +3,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::filter::{FilterSpec, TextFilter};
+
 use crate::{
     ClusterId, Condition, Diagnosis, Page, ResourceRef, Snapshot, Status, Uid, time, units,
 };
@@ -446,6 +448,19 @@ pub struct FluxObject {
 }
 
 impl FluxObject {
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("name", |o, (), out| out.push(o.key.name.as_str().into())),
+            ("kind", |o, (), out| out.push(o.key.kind.label().into())),
+        ],
+        namespace: true,
+        labels: true,
+    };
+
+    pub fn matches(&self, query: &TextFilter) -> bool {
+        Self::FILTER.matches(self, query, Some(&self.key.namespace), &[&self.labels])
+    }
+
     pub fn status(&self) -> Status {
         self.phase.status()
     }

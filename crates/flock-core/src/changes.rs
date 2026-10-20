@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::filter::TextFilter;
+use crate::filter::{FilterSpec, TextFilter};
 use crate::overview::plural;
 use crate::time::age;
 use crate::{ClusterId, Status};
@@ -233,19 +233,25 @@ impl Commit {
             .or_else(|| self.views.first())
     }
 
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("commit", |c, (), out| out.push(c.sha.as_str().into())),
+            ("message", |c, (), out| out.push(c.message.as_str().into())),
+            ("author", |c, (), out| out.push(c.author.as_str().into())),
+            ("target", |c, (), out| {
+                out.push(c.target.name.as_str().into());
+            }),
+            ("file", |c, (), out| {
+                let files = c.source().map(|s| s.files.as_slice()).unwrap_or_default();
+                out.extend(files.iter().map(|f| f.path.as_str().into()));
+            }),
+        ],
+        namespace: false,
+        labels: false,
+    };
+
     pub fn matches(&self, query: &TextFilter) -> bool {
-        let files = self
-            .source()
-            .map(|s| s.files.as_slice())
-            .unwrap_or_default();
-        let mut fields = vec![
-            self.sha.as_str(),
-            self.message.as_str(),
-            self.author.as_str(),
-            self.target.name.as_str(),
-        ];
-        fields.extend(files.iter().map(|f| f.path.as_str()));
-        query.matches(None, &fields)
+        Self::FILTER.matches(self, query, None, &[])
     }
 }
 

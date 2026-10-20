@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
@@ -170,6 +171,113 @@ impl StatusFilter {
                 (*filter, count)
             })
             .collect()
+    }
+}
+
+const PLACEHOLDER_PREFIX: &str = "Filter by ";
+const NAMESPACE_NAME: &str = "namespace";
+const LABEL_NAME: &str = "label";
+
+pub type FieldValues<'a> = Vec<Cow<'a, str>>;
+pub type FieldFn<T, C = ()> = for<'a> fn(&'a T, &'a C, &mut FieldValues<'a>);
+
+pub struct FilterSpec<T: 'static, C: 'static = ()> {
+    pub fields: &'static [(&'static str, FieldFn<T, C>)],
+    pub namespace: bool,
+    pub labels: bool,
+}
+
+impl<T> FilterSpec<T> {
+    pub fn matches(
+        &self,
+        row: &T,
+        query: &TextFilter,
+        namespace: Option<&str>,
+        label_sets: &[&BTreeMap<String, String>],
+    ) -> bool {
+        self.matches_in(row, &(), query, namespace, label_sets)
+    }
+}
+
+impl<T, C> FilterSpec<T, C> {
+    pub fn matches_in(
+        &self,
+        row: &T,
+        context: &C,
+        query: &TextFilter,
+        namespace: Option<&str>,
+        label_sets: &[&BTreeMap<String, String>],
+    ) -> bool {
+        let namespace_ok = if self.namespace {
+            query.matches_namespace(namespace)
+        } else {
+            query.namespace.is_none()
+        };
+        let labels_ok = query.labels.is_empty()
+            || (self.labels && label_sets.iter().any(|labels| query.matches_labels(labels)));
+        namespace_ok && labels_ok && self.text_matches(row, context, query)
+    }
+
+    fn text_matches(&self, row: &T, context: &C, query: &TextFilter) -> bool {
+        let mut values = FieldValues::new();
+        for (_, field) in self.fields {
+            field(row, context, &mut values);
+        }
+        let fields: Vec<&str> = values.iter().map(AsRef::as_ref).collect();
+        query.matches_text(&fields)
+    }
+
+    pub fn scope(&self) -> FilterScope {
+        FilterScope {
+            names: self.fields.iter().map(|(name, _)| *name).collect(),
+            namespace: self.namespace,
+            labels: self.labels,
+        }
+    }
+
+    pub fn placeholder(&self) -> String {
+        self.scope().placeholder()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FilterScope {
+    pub names: Vec<&'static str>,
+    pub namespace: bool,
+    pub labels: bool,
+}
+
+impl FilterScope {
+    pub fn union(mut self, other: Self) -> Self {
+        for name in other.names {
+            if !self.names.contains(&name) {
+                self.names.push(name);
+            }
+        }
+        self.namespace |= other.namespace;
+        self.labels |= other.labels;
+        self
+    }
+
+    pub fn words(&self) -> Vec<&'static str> {
+        let mut words = self.names.clone();
+        let tokens = [(self.namespace, NAMESPACE_NAME), (self.labels, LABEL_NAME)];
+        for (enabled, name) in tokens {
+            if enabled && !words.contains(&name) {
+                words.push(name);
+            }
+        }
+        words
+    }
+
+    pub fn placeholder(&self) -> String {
+        let words = self.words();
+        let list = match words.split_last() {
+            None => String::new(),
+            Some((only, [])) => (*only).to_owned(),
+            Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        };
+        format!("{PLACEHOLDER_PREFIX}{list}")
     }
 }
 
@@ -410,6 +518,187 @@ mod tests {
         assert_eq!(
             TextFilter::default().highlights("checkout"),
             Vec::<Range<usize>>::new()
+        );
+    }
+
+    struct Toy {
+        title: String,
+        owner: String,
+        hidden: String,
+        namespace: String,
+        labels: BTreeMap<String, String>,
+    }
+
+    const TOY: FilterSpec<Toy> = FilterSpec {
+        fields: &[
+            ("title", |t, (), out| out.push(t.title.as_str().into())),
+            ("owner", |t, (), out| out.push(t.owner.as_str().into())),
+        ],
+        namespace: false,
+        labels: true,
+    };
+
+    fn toy() -> Toy {
+        Toy {
+            title: "alpha".into(),
+            owner: "beta".into(),
+            hidden: "gamma".into(),
+            namespace: "delta".into(),
+            labels: labels(&[("team", "core")]),
+        }
+    }
+
+    fn toy_matches(query: &str) -> bool {
+        let row = toy();
+        let query = TextFilter::parse(query);
+        TOY.matches(&row, &query, Some(&row.namespace), &[&row.labels])
+    }
+
+    #[test]
+    fn spec_matches_only_the_fields_it_names() {
+        assert!(toy_matches("alpha"));
+        assert!(toy_matches("beta"));
+        assert!(!toy_matches("gamma"));
+        assert!(!toy_matches("delta"));
+        assert_eq!(toy().hidden, "gamma");
+    }
+
+    #[test]
+    fn spec_honours_its_namespace_and_label_flags() {
+        assert!(!toy_matches("ns:delta"));
+        assert!(toy_matches("label:team=core"));
+        assert!(!toy_matches("label:team=other"));
+    }
+
+    #[test]
+    fn placeholder_lists_fields_then_namespace_and_label_without_repeats() {
+        assert_eq!(TOY.placeholder(), "Filter by title, owner or label");
+        let scope = FilterScope {
+            names: vec!["name", "namespace", "label"],
+            namespace: true,
+            labels: true,
+        };
+        assert_eq!(scope.placeholder(), "Filter by name, namespace or label");
+        let single = FilterScope {
+            names: vec!["kind"],
+            namespace: false,
+            labels: false,
+        };
+        assert_eq!(single.placeholder(), "Filter by kind");
+    }
+
+    #[test]
+    fn union_merges_names_and_flags() {
+        let a = FilterScope {
+            names: vec!["name", "url"],
+            namespace: true,
+            labels: false,
+        };
+        let b = FilterScope {
+            names: vec!["name"],
+            namespace: false,
+            labels: true,
+        };
+        assert_eq!(
+            a.union(b).placeholder(),
+            "Filter by name, url, namespace or label"
+        );
+    }
+
+    #[test]
+    fn page_placeholders_name_only_what_each_matcher_uses() {
+        use crate::{
+            changes::Commit,
+            flux::FluxObject,
+            gitops::{Source, SyncRow},
+        };
+        use crate::{
+            cluster::Namespace,
+            crd::Definition,
+            events::{ClusterEvent, Event},
+        };
+        use crate::{helm::HelmRelease, nodes::Node, pods::Pod, resources::Resource};
+        let pages = [
+            (
+                "events",
+                Event::FILTER.placeholder(),
+                "Filter by reason, object, message, namespace or label",
+            ),
+            (
+                "flux events",
+                ClusterEvent::FILTER.placeholder(),
+                "Filter by cluster, kind, reason, name, message, namespace or label",
+            ),
+            (
+                "gitops",
+                Source::page_scope().placeholder(),
+                "Filter by name, namespace, url or label",
+            ),
+            (
+                "changes",
+                Commit::FILTER.placeholder(),
+                "Filter by commit, message, author, target or file",
+            ),
+            (
+                "definitions",
+                Definition::FILTER.placeholder(),
+                "Filter by kind, plural or group",
+            ),
+            (
+                "pods",
+                Pod::FILTER.placeholder(),
+                "Filter by name, namespace, node or label",
+            ),
+            (
+                "helm",
+                HelmRelease::FILTER.placeholder(),
+                "Filter by name, namespace, chart, version or status",
+            ),
+            (
+                "nodes",
+                Node::FILTER.placeholder(),
+                "Filter by name, status, instance type, zone, version, IP or label",
+            ),
+            (
+                "namespaces",
+                Namespace::FILTER.placeholder(),
+                "Filter by name, phase, namespace or label",
+            ),
+            (
+                "resources",
+                Resource::FILTER.placeholder(),
+                "Filter by name, namespace or label",
+            ),
+            (
+                "flux objects",
+                FluxObject::FILTER.placeholder(),
+                "Filter by name, kind, namespace or label",
+            ),
+        ];
+        for (page, actual, expected) in pages {
+            assert_eq!(actual, expected, "{page}");
+        }
+        assert_eq!(
+            [SyncRow::FILTER.labels, Source::FILTER.labels],
+            [true, false]
+        );
+    }
+
+    #[cfg(feature = "loco")]
+    #[test]
+    fn loco_page_placeholders_name_only_what_each_matcher_uses() {
+        use crate::loco::{Application, Build, Route};
+        assert_eq!(
+            Build::FILTER.placeholder(),
+            "Filter by build, service, workspace, namespace or label"
+        );
+        assert_eq!(
+            Application::FILTER.placeholder(),
+            "Filter by name, environment, workspace, namespace, image, hostname or label"
+        );
+        assert_eq!(
+            Route::FILTER.placeholder(),
+            "Filter by name, host, backend, detail, namespace or label"
         );
     }
 }
