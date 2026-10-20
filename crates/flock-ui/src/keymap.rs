@@ -257,7 +257,8 @@ pub const BINDINGS: &[Binding] = &[
     ),
     Binding::new(&["cmd-e"], "Focus the page's list", Group::View, |k, c| {
         KeyBinding::new(k, FocusContent, c)
-    }),
+    })
+    .within(crate::shell::KEY_CONTEXT),
     Binding::built_in(
         &["tab", "shift-tab"],
         "Next or previous focus area",

@@ -6,8 +6,8 @@ use flock_core::resources::{EVENT_LIST, POD_LIST, Resource, ResourceKind};
 use flock_core::settings::NamespaceSelection;
 use flock_core::{Command, LogTarget, Page, Preferences, ResourceRef, Snapshot, Status};
 use gpui::{
-    AnyElement, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
-    Render, StatefulInteractiveElement, Styled, Window, div,
+    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div,
 };
 
 use super::related::{OnPick, Pick, page_sections};
@@ -31,9 +31,16 @@ pub struct DetailScreen {
     related: Option<Related>,
     preferences: Preferences,
     loaded: bool,
+    focus: FocusHandle,
 }
 
 impl EventEmitter<Command> for DetailScreen {}
+
+impl Focusable for DetailScreen {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
 
 fn kind_of(target: &ResourceRef) -> Option<ResourceKind> {
     ResourceKind::ALL
@@ -50,7 +57,7 @@ fn list_key(page: Page) -> Option<&'static str> {
 }
 
 impl DetailScreen {
-    pub fn new(target: ResourceRef) -> Self {
+    pub fn new(target: ResourceRef, cx: &mut Context<Self>) -> Self {
         Self {
             navigation: None,
             target,
@@ -59,6 +66,7 @@ impl DetailScreen {
             related: None,
             preferences: Preferences::default(),
             loaded: false,
+            focus: cx.focus_handle(),
         }
     }
 
@@ -208,6 +216,7 @@ impl Render for DetailScreen {
         let root = div()
             .id("detail")
             .key_context(YAML_CONTEXT)
+            .track_focus(&self.focus)
             .on_action(cx.listener(|this, _: &EditYaml, _, cx| this.edit(cx)))
             .size_full()
             .flex()

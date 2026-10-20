@@ -64,6 +64,10 @@ impl FluxEventsScreen {
         &self.filter
     }
 
+    pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+        gpui::Focusable::focus_handle(&self.table, cx)
+    }
+
     pub fn set_snapshot(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
         if self.events == snapshot.flux_events {
             return;

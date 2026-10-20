@@ -3130,3 +3130,51 @@ fn kustomization_drift_lists_changed_fields_and_opens_the_object() -> anyhow::Re
     );
     Ok(())
 }
+
+#[test]
+fn page_shortcuts_work_on_a_page_opened_from_the_palette() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-k")?;
+    ui.type_text("checkout-api")?;
+    ui.press("enter")?;
+    assert_eq!(
+        ui.state().workload().map(|target| target.name.clone()),
+        Some("checkout-api".to_owned())
+    );
+    ui.press("cmd-y")?;
+    assert!(ui.bounds("workload-edit-yaml").is_some());
+    ui.press("cmd-e")?;
+    assert_eq!(ui.state().location().page, Page::EditYaml);
+    Ok(())
+}
+
+#[test]
+fn command_e_edits_the_yaml_on_detail_and_flux_pages() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Namespace)?;
+    ui.press("cmd-e")?;
+    let edited = ui.state().location().clone();
+    assert_eq!(edited.page, Page::EditYaml);
+    assert_eq!(
+        edited.resource.map(|target| target.name),
+        Some("payments".to_owned())
+    );
+    let mut ui = Ui::open(Screen::Kustomization)?;
+    ui.press("cmd-e")?;
+    assert_ne!(ui.state().location().page, Page::EditYaml);
+    ui.press("cmd-y cmd-e")?;
+    let edited = ui.state().location().clone();
+    assert_eq!(edited.page, Page::EditYaml);
+    assert_eq!(
+        edited.resource.map(|target| target.kind),
+        Some("Kustomization".to_owned())
+    );
+    Ok(())
+}
+
+#[test]
+fn flux_events_are_reachable_from_the_keyboard() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::FluxEvents)?;
+    ui.press("cmd-e down enter")?;
+    assert!(opened_flux(&ui).is_some());
+    Ok(())
+}
