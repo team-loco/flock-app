@@ -938,6 +938,13 @@ impl Live {
             Command::SetRefresh(refresh) => self.settings.apply_refresh(refresh),
             Command::Connect(id) => self.reconnect(id),
             Command::Reauthenticate(id) => self.reconnect(id),
+            Command::Refresh(scope) => {
+                for cluster in self.clusters.values() {
+                    if scope.as_ref().is_none_or(|id| id == &cluster.id) {
+                        cluster.handle.refresh();
+                    }
+                }
+            }
             Command::Disconnect(id) => {
                 self.disconnected.insert(id.clone());
                 self.reconcile();

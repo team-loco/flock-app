@@ -3508,3 +3508,15 @@ fn cluster_problems_group_by_cause_and_rows_open_the_object() -> anyhow::Result<
     assert_eq!(state.location().page, page_for_kind(&opened.kind));
     Ok(())
 }
+
+#[test]
+fn the_status_bar_refresh_button_is_clickable_and_keeps_the_page() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let before = ui.state().location().clone();
+    assert!(ui.bounds("status-refresh").is_some());
+    ui.click("status-refresh")?;
+    ui.press("cmd-shift-r")?;
+    assert_eq!(ui.state().location(), &before);
+    assert!(ui.bounds("status-refresh").is_some());
+    Ok(())
+}

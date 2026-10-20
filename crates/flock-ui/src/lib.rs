@@ -24,6 +24,7 @@ pub mod actions {
             ToggleSidebar,
             ToggleClusterSwitcher,
             ShowAllClusters,
+            RefreshView,
             ToggleCommandPalette,
             FollowLogs,
             CompareAcrossClusters,

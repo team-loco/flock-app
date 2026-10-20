@@ -258,6 +258,11 @@ impl ClusterHandle {
         self.shared.is_closed()
     }
 
+    pub fn refresh(&self) {
+        let client = lock(&self.shared.client).clone();
+        self.shared.set_client(client.as_ref());
+    }
+
     pub async fn until_closed<F: Future>(&self, work: F) -> Option<F::Output> {
         tokio::select! {
             output = work => Some(output),
@@ -664,6 +669,21 @@ mod tests {
         assert_eq!(
             handle.watch_state(&WatchKind::Jobs),
             WatchState::Failed("relist failed".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn refreshing_relists_every_watched_kind() {
+        let (client, _) = crate::fake::client(Duration::ZERO, |_, _| None);
+        let (_manager, handle) = crate::fake::handle(&client);
+        let _jobs = handle.subscribe(WatchKind::Jobs);
+        *lock(&handle.shared.status) = ConnectionStatus::Connected;
+        handle.shared.synced(&WatchKind::Jobs);
+        assert_eq!(handle.watch_state(&WatchKind::Jobs), WatchState::Synced);
+        handle.refresh();
+        assert_eq!(
+            handle.watch_state(&WatchKind::Jobs),
+            WatchState::pending("Listing Job")
         );
     }
 

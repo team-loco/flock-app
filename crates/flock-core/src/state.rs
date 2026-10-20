@@ -94,6 +94,7 @@ pub enum Command {
     Reauthenticate(ClusterId),
     ConfirmContext(ClusterId),
     Disconnect(ClusterId),
+    Refresh(Option<ClusterId>),
     CheckForUpdates,
 }
 
