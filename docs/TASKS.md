@@ -117,3 +117,4 @@ Spec column points at `design/`.
 | COND3 | Workload, Flux object and split panes lead with the raw condition line instead of the prose sentence (design v2, decision 46) | claude | condition-lines | done |
 | WU2 | Pod logs: previous instance (Logs before restart, current/previous segment, banner), parsed JSON/logfmt lines with a raw toggle | claude | logs-v2 | done |
 | WU5 | Cluster Problems page: problems grouped by reason and message template, 6h occurrences with Flux-apply markers, shared traits, affected table | claude | cluster-problems | done |
+| WU6 | Cluster overview v2 part 1: screens/overview/ module per section; problem and Flux header links, Nodes/Pods/CPU/Memory cells, top restarts and longest Pending, sortable Namespaces with requests, design workload copy, CPU and Memory charts; Warnings table removed | claude | overview-v2 | done |

@@ -30,6 +30,7 @@ pub mod nodes;
 pub mod notify;
 pub mod overview;
 pub mod palette;
+pub mod pod_tops;
 pub mod pods;
 pub mod problem_groups;
 pub mod related;

@@ -572,6 +572,19 @@ pub const AFFECTED_NODE_WIDTH: Pixels = px(130.);
 pub const AFFECTED_TAG_WIDTH: Pixels = px(70.);
 pub const AFFECTED_SINCE_WIDTH: Pixels = px(50.);
 
+pub const OVERVIEW_NAMESPACE_MIN: Pixels = px(110.);
+pub const OVERVIEW_COUNT_WIDTH: Pixels = px(64.);
+pub const OVERVIEW_USAGE_MIN: Pixels = px(150.);
+pub const OVERVIEW_USAGE_WEIGHT: f32 = 1.3;
+pub const OVERVIEW_RESTARTS_WIDTH: Pixels = px(80.);
+pub const OVERVIEW_NAMESPACE_ROW: Pixels = px(34.);
+pub const OVERVIEW_USAGE_BAR: Pixels = px(3.);
+pub const OVERVIEW_WORKLOAD_KIND: Pixels = px(120.);
+pub const OVERVIEW_WORKLOAD_OK: Pixels = px(110.);
+pub const OVERVIEW_WORKLOAD_BAD: Pixels = px(120.);
+pub const OVERVIEW_WORKLOAD_ROW: Pixels = px(30.);
+pub const OVERVIEW_CHART_HEIGHT: Pixels = px(110.);
+
 pub fn terminal_color(color: vt100::Color, default: Hsla, palette: &Palette) -> Hsla {
     match color {
         vt100::Color::Default => default,

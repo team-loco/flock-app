@@ -1,7 +1,8 @@
+use crate::pod_tops::PodTops;
 use crate::resources::{Resource, ResourceKind};
 use crate::{Page, Status, units};
 
-const PERCENT: f32 = 100.;
+pub const PERCENT: f32 = 100.;
 const THOUSANDS_GROUP: usize = 3;
 pub const NAMED_LIMIT: usize = 3;
 
@@ -94,7 +95,6 @@ pub struct Utilization {
     pub range: TimeRange,
     pub cpu: Vec<f32>,
     pub memory: Vec<f32>,
-    pub cpu_requests: f32,
     pub cpu_positions: Vec<f32>,
     pub memory_positions: Vec<f32>,
 }
@@ -194,6 +194,7 @@ pub struct Overview {
     pub memory: Commitment,
     pub pods: PodPhases,
     pub utilization: Vec<Utilization>,
+    pub tops: PodTops,
 }
 
 impl Overview {
@@ -205,49 +206,55 @@ impl Overview {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkloadHealth {
     pub page: Page,
-    pub summary: String,
     pub ok: usize,
-    pub mid: usize,
     pub bad: usize,
+    pub ok_label: String,
+    pub bad_label: Option<String>,
+    pub bad_status: Status,
 }
 
 impl WorkloadHealth {
     pub fn of(kind: ResourceKind, rows: &[Resource]) -> Self {
-        let count = |wanted: &[Status]| rows.iter().filter(|r| wanted.contains(&r.status)).count();
-        let ok = count(&[Status::Ok]);
-        let bad = count(&[Status::Err]);
-        let running = count(&[Status::Progress]);
-        let suspended = count(&[Status::Suspended]);
-        let mid = rows.len() - ok - bad;
-        let summary = match kind {
-            ResourceKind::Job => format!("{ok} ok · {running} running · {bad} failed"),
-            ResourceKind::CronJob if suspended > 0 => {
-                format!(
-                    "{} scheduled · {suspended} suspended",
-                    rows.len() - suspended
+        let count = |wanted: Status| rows.iter().filter(|r| r.status == wanted).count();
+        let total = rows.len();
+        let ready = count(Status::Ok);
+        let (ok, bad, ok_word, bad_word, bad_status) = match kind {
+            ResourceKind::Deployment => (
+                ready,
+                total - ready,
+                "available",
+                "unavailable",
+                Status::Err,
+            ),
+            ResourceKind::StatefulSet => (ready, total - ready, "ready", "not ready", Status::Err),
+            ResourceKind::DaemonSet => (ready, total - ready, "ready", "not ready", Status::Err),
+            ResourceKind::Job => (ready, count(Status::Err), "complete", "failed", Status::Err),
+            ResourceKind::CronJob => {
+                let suspended = count(Status::Suspended);
+                (
+                    total - suspended,
+                    suspended,
+                    "scheduled",
+                    "suspended",
+                    Status::Suspended,
                 )
             }
-            ResourceKind::CronJob => format!("{} scheduled", rows.len()),
-            ResourceKind::Deployment => format!("{ok} / {} ready", rows.len()),
-            ResourceKind::StatefulSet => format!("{ok} / {} ready", rows.len()),
-            ResourceKind::DaemonSet => format!("{ok} / {} ready", rows.len()),
-            ResourceKind::Service => rows.len().to_string(),
-            ResourceKind::Ingress => rows.len().to_string(),
-            ResourceKind::ConfigMap => rows.len().to_string(),
-            ResourceKind::Secret => rows.len().to_string(),
-            ResourceKind::PersistentVolumeClaim => rows.len().to_string(),
+            ResourceKind::Service => (total, 0, "", "", Status::Err),
+            ResourceKind::Ingress => (total, 0, "", "", Status::Err),
+            ResourceKind::ConfigMap => (total, 0, "", "", Status::Err),
+            ResourceKind::Secret => (total, 0, "", "", Status::Err),
+            ResourceKind::PersistentVolumeClaim => (total, 0, "", "", Status::Err),
         };
+        let figure = |n: usize| thousands(u32::try_from(n).unwrap_or(u32::MAX));
+        let ok_label = format!("{} {ok_word}", figure(ok)).trim_end().to_owned();
         Self {
             page: kind.page(),
-            summary,
             ok,
-            mid,
             bad,
+            ok_label,
+            bad_label: (bad > 0).then(|| format!("{} {bad_word}", figure(bad))),
+            bad_status,
         }
-    }
-
-    pub fn total(&self) -> usize {
-        self.ok + self.mid + self.bad
     }
 }
 
@@ -358,30 +365,37 @@ mod tests {
     }
 
     #[test]
-    fn workload_summaries_per_kind() {
+    fn workload_rows_read_like_the_design_per_kind() {
         let deployments = [
             resource("a", "1", Status::Ok),
             resource("a", "2", Status::Warn),
             resource("a", "3", Status::Err),
         ];
         let health = WorkloadHealth::of(ResourceKind::Deployment, &deployments);
-        assert_eq!(health.summary, "1 / 3 ready");
-        assert_eq!((health.ok, health.mid, health.bad), (1, 1, 1));
+        assert_eq!(health.ok_label, "1 available");
+        assert_eq!(health.bad_label.as_deref(), Some("2 unavailable"));
+        assert_eq!((health.ok, health.bad), (1, 2));
         let jobs = [
             resource("a", "1", Status::Ok),
             resource("a", "2", Status::Progress),
             resource("a", "3", Status::Err),
         ];
         let health = WorkloadHealth::of(ResourceKind::Job, &jobs);
-        assert_eq!(health.summary, "1 ok · 1 running · 1 failed");
+        assert_eq!(health.ok_label, "1 complete");
+        assert_eq!(health.bad_label.as_deref(), Some("1 failed"));
         assert_eq!(health.page, Page::Jobs);
         let crons = [
             resource("a", "1", Status::Ok),
             resource("a", "2", Status::Suspended),
         ];
         let health = WorkloadHealth::of(ResourceKind::CronJob, &crons);
-        assert_eq!(health.summary, "1 scheduled · 1 suspended");
-        assert_eq!(health.total(), 2);
+        assert_eq!(health.ok_label, "1 scheduled");
+        assert_eq!(health.bad_label.as_deref(), Some("1 suspended"));
+        assert_eq!(health.bad_status, Status::Suspended);
+        let daemons = [resource("a", "1", Status::Ok)];
+        let health = WorkloadHealth::of(ResourceKind::DaemonSet, &daemons);
+        assert_eq!(health.ok_label, "1 ready");
+        assert_eq!(health.bad_label, None);
     }
 
     #[test]

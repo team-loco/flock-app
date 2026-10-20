@@ -1,7 +1,8 @@
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use crate::events::{self, Event, recent_warnings};
+use crate::events::{self, Event};
 use crate::filter::{FilterSpec, TextFilter};
 use crate::nodes::{Node, NodeSummary};
 use crate::overview::{Capacity, Overview, WorkloadHealth};
@@ -24,6 +25,9 @@ pub struct Namespace {
     pub problems: Counts,
     pub cpu: Option<f32>,
     pub memory: Option<f32>,
+    pub cpu_requests: f32,
+    pub memory_requests: f32,
+    pub restarts: u32,
     pub age: Duration,
 }
 
@@ -61,6 +65,90 @@ impl Namespace {
 
     pub fn phase_note(&self) -> Option<&str> {
         (!self.phase.is_empty() && self.phase != ACTIVE_PHASE).then_some(self.phase.as_str())
+    }
+
+    pub fn cpu_share(&self) -> Option<f32> {
+        share(self.cpu, self.cpu_requests)
+    }
+
+    pub fn memory_share(&self) -> Option<f32> {
+        share(self.memory, self.memory_requests)
+    }
+
+    pub fn cpu_against_requests(&self) -> String {
+        against(self.cpu, self.cpu_requests)
+    }
+
+    pub fn memory_against_requests(&self) -> String {
+        against(self.memory, self.memory_requests)
+    }
+}
+
+fn share(used: Option<f32>, requested: f32) -> Option<f32> {
+    used.filter(|_| requested > 0.).map(|used| used / requested)
+}
+
+fn against(used: Option<f32>, requested: f32) -> String {
+    let used = used.map_or_else(|| NOT_MEASURED.to_owned(), |used| format!("{used:.1}"));
+    format!("{used} / {requested:.1}")
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NamespaceSort {
+    Name,
+    Pods,
+    Failing,
+    #[default]
+    Cpu,
+    Memory,
+    Restarts,
+}
+
+impl NamespaceSort {
+    pub const ALL: [Self; 6] = [
+        Self::Name,
+        Self::Pods,
+        Self::Failing,
+        Self::Cpu,
+        Self::Memory,
+        Self::Restarts,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Name => "Namespace",
+            Self::Pods => "Pods",
+            Self::Failing => "Failing",
+            Self::Cpu => "CPU used / req",
+            Self::Memory => "Memory used / req",
+            Self::Restarts => "Restarts",
+        }
+    }
+
+    pub const fn ascending(self) -> bool {
+        matches!(self, Self::Name)
+    }
+
+    fn compare(self, a: &Namespace, b: &Namespace) -> Ordering {
+        let shares = |a: Option<f32>, b: Option<f32>| {
+            let rank = |share: Option<f32>| share.filter(|s| s.is_finite()).unwrap_or(f32::MIN);
+            rank(b).total_cmp(&rank(a))
+        };
+        let ordering = match self {
+            Self::Name => Ordering::Equal,
+            Self::Pods => b.pods.cmp(&a.pods),
+            Self::Failing => b.problems.err.cmp(&a.problems.err),
+            Self::Cpu => shares(a.cpu_share(), b.cpu_share()),
+            Self::Memory => shares(a.memory_share(), b.memory_share()),
+            Self::Restarts => b.restarts.cmp(&a.restarts),
+        };
+        ordering.then_with(|| a.name.cmp(&b.name))
+    }
+
+    pub fn top(self, namespaces: &[Namespace], limit: usize) -> Vec<Namespace> {
+        let mut sorted: Vec<&Namespace> = namespaces.iter().collect();
+        sorted.sort_by(|a, b| self.compare(a, b));
+        sorted.into_iter().take(limit).cloned().collect()
     }
 }
 
@@ -130,10 +218,6 @@ impl ClusterDetail {
     pub fn warnings(&self) -> usize {
         self.events.iter().filter(|e| e.is_warning()).count()
     }
-
-    pub fn recent_warnings(&self, limit: usize) -> Vec<Event> {
-        recent_warnings(&self.events, limit)
-    }
 }
 
 #[cfg(test)]
@@ -196,8 +280,55 @@ mod tests {
             problems,
             cpu: None,
             memory: None,
+            cpu_requests: 0.,
+            memory_requests: 0.,
+            restarts: 0,
             age: Duration::ZERO,
         }
+    }
+
+    fn loaded(name: &str, pods: u32, cpu: (f32, f32), restarts: u32) -> Namespace {
+        Namespace {
+            pods,
+            cpu: Some(cpu.0),
+            cpu_requests: cpu.1,
+            restarts,
+            ..namespace(name, Counts::default().with_err(pods / 10))
+        }
+    }
+
+    #[test]
+    fn namespaces_sort_by_each_column_and_keep_the_top_rows() {
+        let rows = [
+            loaded("web", 410, (30.1, 125.0), 0),
+            loaded("search", 312, (61.2, 43.1), 96),
+            loaded("ml", 188, (88.4, 74.9), 18),
+            loaded("idle", 3, (0.0, 0.0), 0),
+        ];
+        let names = |sort: NamespaceSort, limit: usize| -> Vec<String> {
+            sort.top(&rows, limit).into_iter().map(|n| n.name).collect()
+        };
+        assert_eq!(names(NamespaceSort::default(), 3), ["search", "ml", "web"]);
+        assert_eq!(names(NamespaceSort::Name, 2), ["idle", "ml"]);
+        assert_eq!(names(NamespaceSort::Pods, 1), ["web"]);
+        assert_eq!(names(NamespaceSort::Failing, 2), ["web", "search"]);
+        assert_eq!(names(NamespaceSort::Restarts, 2), ["search", "ml"]);
+        assert_eq!(
+            names(NamespaceSort::Memory, 4),
+            ["idle", "ml", "search", "web"]
+        );
+        assert!(NamespaceSort::Name.ascending());
+        assert!(!NamespaceSort::Cpu.ascending());
+    }
+
+    #[test]
+    fn namespace_usage_reads_against_its_requests() {
+        let search = loaded("search", 312, (61.2, 43.1), 96);
+        assert_eq!(search.cpu_against_requests(), "61.2 / 43.1");
+        assert_eq!(search.cpu_share().map(|s| (s * 100.).round()), Some(142.));
+        let unmeasured = namespace("new", Counts::default());
+        assert_eq!(unmeasured.memory_against_requests(), "— / 0.0");
+        assert_eq!(unmeasured.memory_share(), None);
     }
 
     #[test]
@@ -268,7 +399,7 @@ mod tests {
                 "CronJobs"
             ]
         );
-        assert_eq!(health[0].summary, "1 / 1 ready");
-        assert_eq!(health[1].summary, "0 / 0 ready");
+        assert_eq!(health[0].ok_label, "1 available");
+        assert_eq!(health[1].ok_label, "0 ready");
     }
 }

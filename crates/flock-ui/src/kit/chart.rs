@@ -252,6 +252,7 @@ impl RenderOnce for MiniMeter {
 #[derive(IntoElement)]
 pub struct StackedBar {
     segments: Vec<(Status, f32)>,
+    rest: f32,
     thin: bool,
 }
 
@@ -259,8 +260,14 @@ impl StackedBar {
     pub fn new(segments: Vec<(Status, f32)>) -> Self {
         Self {
             segments,
+            rest: 0.,
             thin: false,
         }
+    }
+
+    pub fn rest(mut self, weight: f32) -> Self {
+        self.rest = weight;
+        self
     }
 
     pub fn thin(mut self) -> Self {
@@ -283,6 +290,8 @@ impl RenderOnce for StackedBar {
                     .flex_basis(Pixels::ZERO)
                     .bg(palette.status(status))
             });
+        let rest = (self.rest.is_finite() && self.rest > 0.)
+            .then(|| div().h_full().flex_grow(self.rest).flex_basis(Pixels::ZERO));
         div()
             .flex()
             .gap(SPACE_1)
@@ -290,6 +299,7 @@ impl RenderOnce for StackedBar {
             .h(if self.thin { METER_MINI } else { METER })
             .bg(palette.line2)
             .children(parts)
+            .children(rest)
     }
 }
 
