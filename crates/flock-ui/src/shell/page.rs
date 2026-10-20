@@ -1,7 +1,8 @@
 use flock_core::history::Location;
 use flock_core::overview::plural;
+use flock_core::tabs::TabId;
 use flock_core::watch::WatchState;
-use flock_core::{Command, Counts, Page};
+use flock_core::{Command, Counts, Page, ResourceRef};
 use gpui::{
     AnyElement, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
     MouseButton, ParentElement, StatefulInteractiveElement, Styled, Window, div,
@@ -296,14 +297,22 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Option<Entity<EditScreen>> {
         let pane = self.screens(ix).pane;
-        let target = location
-            .resource
-            .clone()
-            .filter(|_| location.page == Page::EditYaml);
-        let Some(target) = target else {
-            self.screens_mut(ix).edit = None;
-            return None;
-        };
+        let tabs = self.state.panes().panes()[ix].tabs();
+        let editing: Vec<(TabId, ResourceRef)> = tabs
+            .iter()
+            .filter_map(|tab| {
+                tab.location()
+                    .editing()
+                    .map(|target| (tab.id(), target.clone()))
+            })
+            .collect();
+        let tab = self.state.panes().panes()[ix].active().id();
+        self.screens_mut(ix).edits.retain(|(id, screen, _)| {
+            editing
+                .iter()
+                .any(|(open, target)| open == id && screen.read(cx).target() == target)
+        });
+        let target = location.editing().cloned()?;
         let confirm_apply = self
             .state
             .snapshot
@@ -312,10 +321,10 @@ impl Shell {
             .is_none_or(|settings| settings.preferences.confirm_destructive);
         let current = self
             .screens(ix)
-            .edit
-            .as_ref()
-            .filter(|(screen, _)| screen.read(cx).target() == &target)
-            .map(|(screen, _)| screen.clone());
+            .edits
+            .iter()
+            .find(|(id, _, _)| *id == tab)
+            .map(|(_, screen, _)| screen.clone());
         if let Some(screen) = current {
             screen.update(cx, |screen, _| screen.set_confirm_apply(confirm_apply));
             return Some(screen);
@@ -330,7 +339,9 @@ impl Shell {
             screen.set_confirm_apply(confirm_apply);
             screen.load(cx);
         });
-        self.screens_mut(ix).edit = Some((screen.clone(), subscription));
+        self.screens_mut(ix)
+            .edits
+            .push((tab, screen.clone(), subscription));
         Some(screen)
     }
 

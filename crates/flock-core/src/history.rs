@@ -80,6 +80,12 @@ impl Location {
             .filter(|target| WorkloadKind::from_kind(&target.kind).is_some())
     }
 
+    pub fn editing(&self) -> Option<&ResourceRef> {
+        self.resource
+            .as_ref()
+            .filter(|_| self.page == Page::EditYaml)
+    }
+
     pub fn detail(&self) -> Option<&ResourceRef> {
         self.resource
             .as_ref()
@@ -222,6 +228,27 @@ mod tests {
             cluster: (!page.is_flock()).then(|| ClusterId::new("a")),
             ..Location::flock(page)
         }
+    }
+
+    #[test]
+    fn only_an_edit_yaml_location_is_editing_its_resource() {
+        let target = ResourceRef {
+            cluster: ClusterId::new("a"),
+            kind: "ConfigMap".into(),
+            namespace: Some("web".into()),
+            name: "settings".into(),
+        };
+        let editing = Location {
+            resource: Some(target.clone()),
+            ..page(Page::EditYaml)
+        };
+        assert_eq!(editing.editing(), Some(&target));
+        let listed = Location {
+            resource: Some(target),
+            ..page(Page::ConfigMaps)
+        };
+        assert_eq!(listed.editing(), None);
+        assert_eq!(page(Page::EditYaml).editing(), None);
     }
 
     #[test]

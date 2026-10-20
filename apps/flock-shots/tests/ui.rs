@@ -3178,3 +3178,18 @@ fn flux_events_are_reachable_from_the_keyboard() -> anyhow::Result<()> {
     assert!(opened_flux(&ui).is_some());
     Ok(())
 }
+
+#[test]
+fn an_unsaved_yaml_edit_survives_switching_tabs() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::EditYaml)?;
+    ui.click("edit-editor")?;
+    ui.press("cmd-a")?;
+    ui.type_text("{apiVersion: v1, kind: ConfigMap, metadata: {name: checkout-api-config, namespace: payments}, data: {level: debug}}")?;
+    ui.press("cmd-t")?;
+    assert_eq!(ui.state().location().page, Page::Overview);
+    ui.press("cmd-1")?;
+    assert_eq!(ui.state().location().page, Page::EditYaml);
+    ui.click("edit-review")?;
+    assert!(ui.bounds("edit-review-view").is_some());
+    Ok(())
+}
