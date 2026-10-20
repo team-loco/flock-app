@@ -102,6 +102,7 @@ Spec column points at `design/`.
 | WHY1 | Reason column on every list; inspectors lead with what's wrong, conditions and events; per-kind inspector widths (#239) | claude | list-reasons-inspectors | done |
 | DOG1 | flock-loco kind cluster with real Loco, Flux states and ~30 workspaces; verify and Loco live journeys (#229) | claude | dogfood-loco-cluster | done |
 | MENUBAR | Menu-bar health, problem links and persisted setting (#233) | claude | menu-bar-status | done |
+| MENUBAR2 | Menu bar v2: sheep icon with badge, cluster rows, Pause notifications | claude | menubar-v2 | done |
 | REL1 | detail pages for every kind, Namespace page, Related section in every inspector (#240) | claude | drilldown-detail-pages | done |
 | NS1 | namespace picker lists every namespace from the Namespace watch, with per-kind counts (#241) | claude | ns-picker-fixes | done |
 | FLUX1 | Flux dependency graph with cross-cluster comparison, live Flux events, Kustomization drift (#232) | claude | flux-graph-events-drift, flux-events-stream, kustomization-drift | done (#259, #262, drift PR) |

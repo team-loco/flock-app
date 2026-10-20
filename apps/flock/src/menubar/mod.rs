@@ -1,15 +1,15 @@
 mod native;
 
-use flock_core::{Command, Page, ResourceRef, Sender, Snapshot, Update, menubar::MenuBar};
+use flock_core::{ClusterId, Command, Sender, Snapshot, Update, menubar::MenuBar};
 use flock_ui::{Store, settings};
 use gpui::{App, AppContext as _, Context, Entity, Global, Subscription, Task};
 use objc2_foundation::MainThreadMarker;
 
 #[derive(Clone)]
 enum Action {
-    Problem(ResourceRef),
+    Cluster(ClusterId),
     Open,
-    Settings,
+    TogglePause,
     Quit,
 }
 
@@ -43,8 +43,8 @@ pub(super) fn install(store: Entity<Store>, cx: &mut App) {
                 let Update::Snapshot(snapshot) = update else {
                     continue;
                 };
-                let model = MenuBar::from_snapshot(&snapshot);
-                let result = this.update(cx, |this, _| {
+                let result = this.update(cx, |this, cx| {
+                    let model = MenuBar::new(&snapshot, paused(cx));
                     if this.model != model {
                         this.model = model;
                         this.redraw();
@@ -62,7 +62,7 @@ pub(super) fn install(store: Entity<Store>, cx: &mut App) {
         });
         let mut state = MenuBarState {
             item: None,
-            model: MenuBar::from_snapshot(&Snapshot::default()),
+            model: MenuBar::new(&Snapshot::default(), paused(cx)),
             sender,
             mtm,
             _settings: settings,
@@ -79,14 +79,23 @@ fn run(action: Action, store: Entity<Store>, cx: &mut App) {
     match action {
         Action::Quit => cx.quit(),
         Action::Open => super::bring_to_front(store, None, cx),
-        Action::Settings => {
-            let settings = Command::SelectPage(Page::Settings);
-            super::bring_to_front(store, Some(settings), cx);
+        Action::TogglePause => {
+            let result = settings::update(cx, |s| {
+                s.notifications.paused = !s.notifications.paused;
+            });
+            if let Err(error) = result {
+                tracing::warn!(%error, "saving the notification pause");
+            }
         }
-        Action::Problem(target) => {
-            super::bring_to_front(store, Some(Command::OpenResource(target)), cx);
+        Action::Cluster(id) => {
+            let select = Command::SelectCluster(Some(id));
+            super::bring_to_front(store, Some(select), cx);
         }
     }
+}
+
+fn paused(cx: &App) -> bool {
+    settings::current(cx).notifications.paused
 }
 
 impl MenuBarState {
@@ -98,6 +107,11 @@ impl MenuBarState {
         }
         if !wanted {
             self.item = None;
+        }
+        let paused = paused(cx);
+        if self.model.paused != paused {
+            self.model.paused = paused;
+            self.redraw();
         }
     }
 

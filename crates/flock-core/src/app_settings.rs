@@ -265,6 +265,7 @@ impl SnapshotCap {
 pub struct Notifications {
     pub enabled: bool,
     pub warnings: bool,
+    pub paused: bool,
 }
 
 impl Default for Notifications {
@@ -272,6 +273,7 @@ impl Default for Notifications {
         Self {
             enabled: true,
             warnings: false,
+            paused: false,
         }
     }
 }
@@ -366,6 +368,7 @@ mod tests {
             notifications: Notifications {
                 enabled: false,
                 warnings: true,
+                paused: true,
             },
             inspector_widths: BTreeMap::from([("resource-inspector".to_owned(), 640)]),
             updates: Updates {
