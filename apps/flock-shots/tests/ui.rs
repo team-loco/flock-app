@@ -793,17 +793,20 @@ fn yaml_scrolls_in_both_axes_and_the_gutter_stays_fixed_horizontally() -> anyhow
 
 #[test]
 fn overview_sections_navigate_to_their_lists() -> anyhow::Result<()> {
-    for (selector, page) in [
-        ("overview-pods", Page::Pods),
-        ("overview-nodes", Page::Nodes),
-        ("overview-deployments", Page::Deployments),
-        ("overview-statefulsets", Page::StatefulSets),
-        ("overview-daemonsets", Page::DaemonSets),
-        ("overview-jobs", Page::Jobs),
-        ("overview-cronjobs", Page::CronJobs),
+    for (selector, page, below) in [
+        ("overview-pods", Page::Pods, false),
+        ("overview-nodes", Page::Nodes, false),
+        ("overview-deployments", Page::Deployments, true),
+        ("overview-statefulsets", Page::StatefulSets, true),
+        ("overview-daemonsets", Page::DaemonSets, true),
+        ("overview-jobs", Page::Jobs, true),
+        ("overview-cronjobs", Page::CronJobs, true),
     ] {
         let mut ui = Ui::open(Screen::Cluster)?;
         let cluster = ui.state().location().cluster.clone();
+        if below {
+            scroll_overview_to_the_end(&mut ui)?;
+        }
         ui.click(selector)?;
         assert_eq!(ui.state().location().page, page);
         assert_eq!(ui.state().location().cluster, cluster);
@@ -827,8 +830,8 @@ fn overview_sections_fill_their_cells_between_the_rules() -> anyhow::Result<()> 
         .ok_or_else(|| anyhow::anyhow!("missing memory meter"))?;
     assert_eq!(pods.size.height, nodes.size.height);
     assert_eq!(pods.origin.y, nodes.origin.y);
-    assert_eq!(pods.origin.x + pods.size.width + RULE, nodes.origin.x);
-    assert!(pods.origin.x > memory.origin.x);
+    assert_eq!(nodes.origin.x + nodes.size.width + RULE, pods.origin.x);
+    assert!(memory.origin.x > pods.origin.x);
     Ok(())
 }
 
@@ -838,8 +841,75 @@ fn overview_sections_accept_keyboard_activation() -> anyhow::Result<()> {
         let mut ui = Ui::open(Screen::Cluster)?;
         ui.press("cmd-e")?;
         ui.press(key)?;
-        assert_eq!(ui.state().location().page, Page::Pods);
+        assert_eq!(ui.state().location().page, Page::Nodes);
     }
+    Ok(())
+}
+
+const OVERVIEW_SCROLL_TO_END: f32 = -4000.;
+
+fn scroll_overview_to_the_end(ui: &mut Ui) -> anyhow::Result<()> {
+    let delta = gpui::point(gpui::px(0.), gpui::px(OVERVIEW_SCROLL_TO_END));
+    ui.scroll("overview-scroll", delta)
+}
+
+fn opened(ui: &Ui) -> Option<(String, String)> {
+    ui.state()
+        .location()
+        .resource
+        .as_ref()
+        .map(|target| (target.kind.clone(), target.name.clone()))
+}
+
+#[test]
+fn overview_namespace_headers_resort_the_top_namespaces() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-ns-0")?;
+    assert_eq!(opened(&ui), Some(("Namespace".into(), "search".into())));
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-ns-sort-0")?;
+    ui.click("overview-ns-0")?;
+    assert_eq!(opened(&ui), Some(("Namespace".into(), "analytics".into())));
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-ns-sort-1")?;
+    ui.click("overview-ns-0")?;
+    assert_eq!(
+        opened(&ui),
+        Some(("Namespace".into(), "kube-system".into()))
+    );
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-ns-all")?;
+    assert_eq!(ui.state().location().page, Page::Namespaces);
+    Ok(())
+}
+
+#[test]
+fn overview_pod_tops_open_the_pod_and_link_to_the_pods_list() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-restarts-0")?;
+    assert_eq!(
+        opened(&ui),
+        Some(("Pod".into(), "checkout-api-7f9c6d-x2lqp".into()))
+    );
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-pending-0")?;
+    assert_eq!(opened(&ui).map(|(kind, _)| kind), Some("Pod".into()));
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-pending-all")?;
+    assert_eq!(ui.state().location().page, Page::Pods);
+    Ok(())
+}
+
+#[test]
+fn overview_header_links_to_the_clusters_problems_and_flux() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let cluster = ui.state().location().cluster.clone();
+    ui.click("overview-problems")?;
+    assert_eq!(ui.state().location().page, Page::ClusterProblems);
+    assert_eq!(ui.state().location().cluster, cluster);
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-flux")?;
+    assert_eq!(ui.state().location().page, Page::Kustomizations);
     Ok(())
 }
 
@@ -2395,6 +2465,7 @@ fn empty_utilization_opens_the_selected_clusters_metrics_settings() -> anyhow::R
     assert!(ui.bounds("chart-y-axis").is_none());
     assert!(ui.bounds("chart-x-axis").is_none());
     let origin = ui.state().location().cluster.clone();
+    scroll_overview_to_the_end(&mut ui)?;
     ui.click("metrics-settings")?;
     assert_eq!(ui.state().location().page, Page::ClusterSettings);
     assert!(origin.is_some());
@@ -2469,77 +2540,6 @@ fn every_list_turns_typed_tokens_into_removable_chips() -> anyhow::Result<()> {
             "{screen:?}"
         );
     }
-    Ok(())
-}
-
-fn first_warning(ui: &Ui) -> anyhow::Result<flock_core::events::Event> {
-    let state = ui.state();
-    let cluster = state
-        .location()
-        .cluster
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("cluster"))?;
-    let detail = state
-        .snapshot
-        .detail(&cluster)
-        .ok_or_else(|| anyhow::anyhow!("detail"))?;
-    detail
-        .recent_warnings(1)
-        .into_iter()
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("the demo cluster has no warnings"))
-}
-
-#[test]
-fn overview_warning_message_shows_in_a_tooltip_on_hover() -> anyhow::Result<()> {
-    let mut ui = Ui::open(Screen::Cluster)?;
-    assert!(ui.bounds("tooltip").is_none());
-    ui.hover("overview-warnings-row-0")?;
-    ui.advance_clock(std::time::Duration::from_secs(1))?;
-    assert!(ui.bounds("tooltip").is_some());
-    Ok(())
-}
-
-#[test]
-fn overview_warning_row_opens_the_event_inspector_with_the_full_message() -> anyhow::Result<()> {
-    for appearance in [
-        flock_ui::theme::Appearance::Dark,
-        flock_ui::theme::Appearance::Light,
-    ] {
-        let mut ui = Ui::with(Screen::Cluster, flock::Preset::default(), appearance)?;
-        assert!(ui.bounds("event-inspector-pane").is_none());
-        ui.click("overview-warnings-row-0")?;
-        assert!(ui.bounds("event-inspector-pane").is_some());
-        assert!(ui.bounds("event-message").is_some());
-        assert_eq!(ui.state().location().page, Page::ClusterOverview);
-        ui.press("escape")?;
-        assert!(ui.bounds("event-inspector-pane").is_none());
-        ui.press("down enter")?;
-        assert!(ui.bounds("event-inspector-pane").is_some());
-        ui.click("close-event")?;
-        assert!(ui.bounds("event-inspector-pane").is_none());
-    }
-    Ok(())
-}
-
-#[test]
-fn overview_warning_object_link_opens_the_resource_without_opening_the_inspector()
--> anyhow::Result<()> {
-    let mut ui = Ui::open(Screen::Cluster)?;
-    let object = first_warning(&ui)?.object;
-    let selector = selector(format!("warning-object-{object}"));
-    ui.click(selector)?;
-    assert_ne!(ui.state().location().page, Page::ClusterOverview);
-    Ok(())
-}
-
-#[test]
-fn all_events_opens_the_events_page_on_the_warnings_chip() -> anyhow::Result<()> {
-    let mut ui = Ui::open(Screen::Cluster)?;
-    ui.click("all-events")?;
-    assert_eq!(ui.state().location().page, Page::Events);
-    let chip = ui.read(|shell, cx| shell.filter_bar(cx).map(|bar| bar.read(cx).chip()));
-    assert_eq!(chip, Some(1));
     Ok(())
 }
 

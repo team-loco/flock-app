@@ -179,13 +179,6 @@ pub fn warnings_first(events: &[Event]) -> Vec<Event> {
     sorted
 }
 
-pub fn recent_warnings(events: &[Event], limit: usize) -> Vec<Event> {
-    let mut warnings: Vec<Event> = events.iter().filter(|e| e.is_warning()).cloned().collect();
-    warnings.sort_by_key(|e| e.age);
-    warnings.truncate(limit);
-    warnings
-}
-
 pub fn counts(events: &[Event]) -> Counts {
     let flagged = Counts::of(events.iter().map(|e| e.status));
     Counts {
@@ -406,17 +399,6 @@ mod tests {
             reasons(&warnings_first(&events)),
             ["BackOff", "FailedMount", "Unhealthy", "Scheduled"]
         );
-    }
-
-    #[test]
-    fn recent_warnings_sort_by_age_and_cap() {
-        let events = [
-            event(Status::Warn, "Old", 42),
-            event(Status::Ok, "Pulled", 1),
-            event(Status::Err, "New", 2),
-            event(Status::Warn, "Mid", 6),
-        ];
-        assert_eq!(reasons(&recent_warnings(&events, 2)), ["New", "Mid"]);
     }
 
     #[test]

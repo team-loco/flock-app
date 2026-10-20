@@ -6,6 +6,7 @@ use flock_core::cluster::Namespace;
 use flock_core::events::Event;
 use flock_core::nodes::{CONDITION_TRUE, Node, READY_CONDITION, Usage};
 use flock_core::overview::{Commitment, Overview, PodPhases, TimeRange, Utilization};
+use flock_core::pod_tops::PodTops;
 use flock_core::{ClusterDetail, Counts, Status, Uid};
 
 use crate::lists;
@@ -73,6 +74,7 @@ fn overview() -> Overview {
             failing: 5,
         },
         utilization: utilization(),
+        tops: PodTops::default(),
     }
 }
 
@@ -121,7 +123,6 @@ fn utilization() -> Vec<Utilization> {
             range,
             cpu,
             memory,
-            cpu_requests: 74.0,
             ..Utilization::default()
         })
         .collect()
@@ -343,6 +344,8 @@ struct NamespaceSeed {
     problems: Counts,
     cpu: f32,
     memory: f32,
+    requests: (f32, f32),
+    restarts: u32,
     age_days: u64,
 }
 
@@ -360,6 +363,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 4.1,
         memory: 22.5,
+        requests: (9.5, 40.0),
+        restarts: 1,
         age_days: 214,
     },
     NamespaceSeed {
@@ -368,6 +373,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 1.2,
         memory: 6.4,
+        requests: (2.0, 8.0),
+        restarts: 0,
         age_days: 214,
     },
     NamespaceSeed {
@@ -376,6 +383,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 0.1,
         memory: 0.4,
+        requests: (0.2, 0.5),
+        restarts: 0,
         age_days: 214,
     },
     NamespaceSeed {
@@ -384,6 +393,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 9.8,
         memory: 61.0,
+        requests: (14.0, 72.0),
+        restarts: 2,
         age_days: 180,
     },
     NamespaceSeed {
@@ -392,6 +403,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 0.,
         memory: 0.,
+        requests: (0.0, 0.0),
+        restarts: 0,
         age_days: 214,
     },
     NamespaceSeed {
@@ -400,6 +413,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 0.9,
         memory: 2.1,
+        requests: (1.5, 3.0),
+        restarts: 0,
         age_days: 61,
     },
     NamespaceSeed {
@@ -408,6 +423,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 0.2,
         memory: 0.6,
+        requests: (0.5, 1.0),
+        restarts: 0,
         age_days: 97,
     },
     NamespaceSeed {
@@ -416,6 +433,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: Counts { err: 1, ..NONE },
         cpu: 0.4,
         memory: 1.3,
+        requests: (0.8, 2.0),
+        restarts: 0,
         age_days: 214,
     },
     NamespaceSeed {
@@ -424,6 +443,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 1.1,
         memory: 1.8,
+        requests: (1.5, 2.0),
+        restarts: 1,
         age_days: 214,
     },
     NamespaceSeed {
@@ -432,6 +453,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 3.2,
         memory: 14.0,
+        requests: (4.0, 16.0),
+        restarts: 0,
         age_days: 214,
     },
     NamespaceSeed {
@@ -440,6 +463,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 0.,
         memory: 0.,
+        requests: (0.0, 0.0),
+        restarts: 0,
         age_days: 214,
     },
     NamespaceSeed {
@@ -448,6 +473,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 0.,
         memory: 0.,
+        requests: (0.0, 0.0),
+        restarts: 0,
         age_days: 214,
     },
     NamespaceSeed {
@@ -456,6 +483,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 5.6,
         memory: 18.2,
+        requests: (6.0, 16.0),
+        restarts: 3,
         age_days: 214,
     },
     NamespaceSeed {
@@ -464,6 +493,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 2.7,
         memory: 19.5,
+        requests: (3.0, 24.0),
+        restarts: 0,
         age_days: 214,
     },
     NamespaceSeed {
@@ -472,6 +503,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 1.6,
         memory: 3.0,
+        requests: (2.0, 4.0),
+        restarts: 0,
         age_days: 61,
     },
     NamespaceSeed {
@@ -480,6 +513,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 0.6,
         memory: 1.9,
+        requests: (1.0, 2.0),
+        restarts: 0,
         age_days: 61,
     },
     NamespaceSeed {
@@ -488,6 +523,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: Counts { warn: 1, ..NONE },
         cpu: 8.2,
         memory: 46.0,
+        requests: (7.0, 52.0),
+        restarts: 9,
         age_days: 97,
     },
     NamespaceSeed {
@@ -496,6 +533,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: Counts { warn: 1, ..NONE },
         cpu: 6.4,
         memory: 38.7,
+        requests: (6.0, 36.0),
+        restarts: 2,
         age_days: 214,
     },
     NamespaceSeed {
@@ -504,6 +543,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 1.5,
         memory: 7.2,
+        requests: (2.0, 8.0),
+        restarts: 0,
         age_days: 214,
     },
     NamespaceSeed {
@@ -512,6 +553,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 5.3,
         memory: 21.0,
+        requests: (6.0, 24.0),
+        restarts: 1,
         age_days: 214,
     },
     NamespaceSeed {
@@ -520,6 +563,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: Counts { err: 1, ..NONE },
         cpu: 3.8,
         memory: 15.6,
+        requests: (9.5, 20.0),
+        restarts: 15,
         age_days: 214,
     },
     NamespaceSeed {
@@ -528,6 +573,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: Counts { warn: 1, ..NONE },
         cpu: 4.6,
         memory: 30.2,
+        requests: (3.2, 28.0),
+        restarts: 96,
         age_days: 214,
     },
     NamespaceSeed {
@@ -536,6 +583,8 @@ const NAMESPACES: [NamespaceSeed; 23] = [
         problems: NONE,
         cpu: 4.9,
         memory: 20.1,
+        requests: (12.0, 32.0),
+        restarts: 0,
         age_days: 214,
     },
 ];
@@ -552,6 +601,9 @@ fn namespaces() -> Vec<Namespace> {
             problems: seed.problems,
             cpu: Some(seed.cpu),
             memory: Some(seed.memory),
+            cpu_requests: seed.requests.0,
+            memory_requests: seed.requests.1,
+            restarts: seed.restarts,
             age: days(seed.age_days),
         })
         .collect()
@@ -784,24 +836,5 @@ mod tests {
         assert_eq!(detail.namespaces.len(), 23);
         assert_eq!(detail.warnings(), 7);
         assert_eq!(detail.nodes[9].name, CORDONED);
-    }
-
-    #[test]
-    fn recent_warnings_are_the_designs_five() {
-        let reasons: Vec<String> = prod_us_east()
-            .recent_warnings(5)
-            .into_iter()
-            .map(|e| e.reason)
-            .collect();
-        assert_eq!(
-            reasons,
-            [
-                "BackOff",
-                "FailedScheduling",
-                "Unhealthy",
-                "FailedMount",
-                "NodeNotSchedulable"
-            ]
-        );
     }
 }

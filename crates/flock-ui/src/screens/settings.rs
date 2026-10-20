@@ -683,6 +683,9 @@ mod tests {
             problems: flock_core::Counts::default(),
             cpu: None,
             memory: None,
+            cpu_requests: 0.,
+            memory_requests: 0.,
+            restarts: 0,
             age: std::time::Duration::ZERO,
         };
         flock_core::ClusterDetail {

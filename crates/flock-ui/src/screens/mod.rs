@@ -394,7 +394,6 @@ impl ClusterPages {
         match page {
             Page::Nodes => self.nodes.update(cx, NodesScreen::close_inspector),
             Page::Events => self.events.update(cx, EventsScreen::close_inspector),
-            Page::ClusterOverview => self.overview.update(cx, OverviewScreen::close_inspector),
             Page::CustomResources => self
                 .custom
                 .update(cx, CustomResourcesScreen::close_inspector),

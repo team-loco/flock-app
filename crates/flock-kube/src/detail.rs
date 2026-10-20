@@ -59,11 +59,15 @@ impl Totals {
 struct NamespaceFacts {
     pods: u32,
     problems: Counts,
+    requests: Totals,
+    restarts: u32,
 }
 
 impl NamespaceFacts {
-    fn record(&mut self, health: PodHealth) {
+    fn record(&mut self, health: PodHealth, requests: Totals, restarts: u32) {
         self.pods += 1;
+        self.requests.add(requests);
+        self.restarts += restarts;
         match health {
             PodHealth::Failing => self.problems.err += 1,
             PodHealth::Warning => self.problems.warn += 1,
@@ -89,6 +93,18 @@ fn resources(map: Option<&BTreeMap<String, Quantity>>) -> Totals {
         cpu: get(CPU).and_then(cpu_millicores).unwrap_or_default(),
         memory: get(MEMORY).and_then(parse_quantity).unwrap_or_default(),
     }
+}
+
+fn restart_count(pod: &Pod) -> u32 {
+    let statuses = pod
+        .status
+        .as_ref()
+        .and_then(|s| s.container_statuses.as_ref());
+    statuses
+        .into_iter()
+        .flatten()
+        .map(|c| u32::try_from(c.restart_count).unwrap_or_default())
+        .sum()
 }
 
 fn pod_resources(pod: &Pod) -> (Totals, Totals) {
@@ -118,12 +134,14 @@ impl PodIndex {
             if !is_active(pod) {
                 continue;
             }
+            let (requests, limits) = pod_resources(pod);
+            let restarts = restart_count(pod);
             let namespace = pod.metadata.namespace.as_deref().unwrap_or_default();
             if let Some(facts) = index.namespaces.get_mut(namespace) {
-                facts.record(health);
+                facts.record(health, requests, restarts);
             } else {
                 let mut facts = NamespaceFacts::default();
-                facts.record(health);
+                facts.record(health, requests, restarts);
                 index.namespaces.insert(namespace.to_owned(), facts);
             }
             if let Some(node) = pod.spec.as_ref().and_then(|s| s.node_name.as_deref()) {
@@ -133,7 +151,6 @@ impl PodIndex {
                     index.per_node.insert(node.to_owned(), 1);
                 }
             }
-            let (requests, limits) = pod_resources(pod);
             if let Some(name) = pod.spec.as_ref().and_then(|s| s.node_name.as_ref()) {
                 let totals = index.node_resources.entry(name.clone()).or_default();
                 totals.0.add(requests);
@@ -344,6 +361,9 @@ pub fn namespaces(
                 problems: facts.problems,
                 cpu: usage.map(|_| cores(totals.cpu)),
                 memory: usage.map(|_| gib(totals.memory)),
+                cpu_requests: cores(facts.requests.cpu),
+                memory_requests: gib(facts.requests.memory),
+                restarts: facts.restarts,
                 age: age(&ns.metadata, now),
                 name,
             }

@@ -6,6 +6,7 @@ use flock_core::events::Event;
 use flock_core::home::{ClusterMetrics, Problem, problem_counts};
 use flock_core::nodes::Node;
 use flock_core::overview::{Overview, PodPhases};
+use flock_core::pod_tops::PodTops;
 use flock_core::pods::{Pod, PodEvent, nav_counts};
 use flock_core::resources::{Resource, ResourceKind};
 use flock_core::{
@@ -108,8 +109,17 @@ pub fn cluster(
         .chain(pods.iter().map(|p| p.name.as_str()))
         .collect();
     let events = events(&problems, &template.detail.events, &present);
+    let tops = PodTops::of(&pods);
+    let overview = Overview {
+        tops,
+        ..detail.overview
+    };
     Some(Derived {
-        detail: ClusterDetail { events, ..detail },
+        detail: ClusterDetail {
+            events,
+            overview,
+            ..detail
+        },
         pods,
     })
 }
@@ -244,7 +254,6 @@ fn overview(metrics: &ClusterMetrics, template: &Overview) -> Overview {
         let series_cpu_scale = series.cpu.last().map_or(1., |last| cpu / last);
         series.cpu.iter_mut().for_each(|v| *v *= series_cpu_scale);
         series.memory.iter_mut().for_each(|v| *v *= memory_scale);
-        series.cpu_requests *= cpu_scale;
     }
     overview.cpu.requests *= cpu_scale;
     overview.cpu.limits *= cpu_scale;
@@ -266,6 +275,9 @@ fn namespaces(template: &[Namespace], problems: &[&Problem], share: f32) -> Vec<
                 problems,
                 cpu: ns.cpu.map(|cpu| cpu * share),
                 memory: ns.memory.map(|memory| memory * share),
+                cpu_requests: ns.cpu_requests * share,
+                memory_requests: ns.memory_requests * share,
+                restarts: scaled_count(ns.restarts, share),
                 ..ns.clone()
             }
         })

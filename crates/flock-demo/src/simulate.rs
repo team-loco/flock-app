@@ -137,6 +137,11 @@ pub fn settle(snapshot: &mut Snapshot, settle: &Settle) -> Option<Settle> {
 
 pub fn recount_pods(snapshot: &mut Snapshot, cluster: &ClusterId) {
     let counts = flock_core::pods::nav_counts(&snapshot.pods, cluster);
+    let pods = snapshot.pods.iter().filter(|pod| &pod.cluster == cluster);
+    let tops = flock_core::pod_tops::PodTops::of(pods);
+    if let Some(detail) = snapshot.details.get_mut(cluster) {
+        detail.overview.tops = tops;
+    }
     let summary = snapshot.clusters.iter_mut().find(|c| &c.id == cluster);
     if let Some(summary) = summary {
         summary.nav.insert(Page::Pods, counts);

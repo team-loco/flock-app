@@ -29,6 +29,7 @@ pub mod metrics_history;
 pub mod migrate;
 pub mod ops;
 pub mod paste;
+pub mod pod_tops;
 pub mod pods;
 pub mod probe;
 pub mod problems;

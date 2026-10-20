@@ -182,7 +182,7 @@ impl UsageRing {
     }
 
     #[allow(clippy::cast_precision_loss)]
-    pub fn utilization(&self, range: TimeRange, now: Timestamp, cpu_requests: f32) -> Utilization {
+    pub fn utilization(&self, range: TimeRange, now: Timestamp) -> Utilization {
         let query = range_query("", range, now);
         let points: Vec<_> = self
             .samples
@@ -199,7 +199,6 @@ impl UsageRing {
             memory: points.iter().map(|s| s.sample.memory).collect(),
             cpu_positions: positions.clone(),
             memory_positions: positions,
-            cpu_requests,
         }
     }
 }
@@ -268,7 +267,6 @@ async fn utilization(
         range,
         cpu: values(&cpu),
         memory: values(&memory),
-        cpu_requests: 0.,
         cpu_positions: positions(&cpu, &cpu_query),
         memory_positions: positions(&memory, &memory_query),
     })
@@ -402,16 +400,15 @@ mod tests {
         assert_eq!(ring.latest().map(|s| s.cpu), Some(10.));
         assert_eq!(ring.since(), Some(timestamp(1)));
         for range in TimeRange::ALL {
-            let found = ring.utilization(range, timestamp(4), 74.);
+            let found = ring.utilization(range, timestamp(4));
             assert_eq!(found.cpu.len(), 4);
             assert!(found.cpu_positions.first().is_some_and(|at| *at > 0.99));
             assert_eq!(found.cpu_positions.last(), Some(&1.));
-            assert_eq!(found.cpu_requests, 74.);
         }
-        let later = ring.utilization(TimeRange::Hour, timestamp(7200), 0.);
+        let later = ring.utilization(TimeRange::Hour, timestamp(7200));
         assert_eq!(later.cpu, Vec::<f32>::new());
         assert_eq!(
-            ring.utilization(TimeRange::SixHours, timestamp(7200), 0.)
+            ring.utilization(TimeRange::SixHours, timestamp(7200))
                 .cpu
                 .len(),
             4
@@ -429,14 +426,14 @@ mod tests {
         ring.prune(reopened);
         assert_eq!(ring.since(), Some(timestamp(0)));
         assert_eq!(ring.last_at(), Some(timestamp(3 * DAY + SESSION)));
-        let hour = ring.utilization(TimeRange::Hour, reopened, 0.);
+        let hour = ring.utilization(TimeRange::Hour, reopened);
         assert_eq!(hour.cpu, Vec::<f32>::new());
-        let six = ring.utilization(TimeRange::SixHours, reopened, 0.);
+        let six = ring.utilization(TimeRange::SixHours, reopened);
         assert_eq!(six.cpu, Vec::<f32>::new());
-        let day = ring.utilization(TimeRange::Day, reopened, 0.);
+        let day = ring.utilization(TimeRange::Day, reopened);
         assert_ne!(day.cpu, Vec::<f32>::new());
         assert!(day.cpu_positions.iter().all(|at| (0. ..0.2).contains(at)));
-        let week = ring.utilization(TimeRange::Week, reopened, 0.);
+        let week = ring.utilization(TimeRange::Week, reopened);
         assert!(week.cpu.len() > day.cpu.len());
         ring.push(
             reopened,
@@ -445,7 +442,7 @@ mod tests {
                 memory: 4.,
             },
         );
-        let hour = ring.utilization(TimeRange::Hour, reopened, 0.);
+        let hour = ring.utilization(TimeRange::Hour, reopened);
         assert_eq!(hour.cpu, [3.]);
         assert_eq!(hour.cpu_positions, [1.]);
     }
@@ -465,7 +462,7 @@ mod tests {
                 .zip(old.iter().skip(1))
                 .all(|(a, b)| b.at.duration_since(a.at) >= OLDER_BUCKET)
         );
-        let hour = ring.utilization(TimeRange::Hour, timestamp(7200), 0.);
+        let hour = ring.utilization(TimeRange::Hour, timestamp(7200));
         assert_eq!(hour.cpu.len(), 721);
     }
 
@@ -481,7 +478,7 @@ mod tests {
         assert!(ring.samples.len() <= MAX_SAMPLES);
         assert_eq!(ring.since(), Some(timestamp(0)));
         assert!(ring.valid());
-        let week = ring.utilization(TimeRange::Week, timestamp(604_800), 0.);
+        let week = ring.utilization(TimeRange::Week, timestamp(604_800));
         assert!(week.cpu_positions.first().is_some_and(|at| *at == 0.));
         ring.prune(timestamp(608_400));
         assert!(ring.since().is_some_and(|since| since >= timestamp(3600)));

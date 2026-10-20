@@ -470,7 +470,9 @@ mod tests {
     fn prod_us_east_keeps_the_design_data() {
         let snapshot = snapshot();
         let prod = ClusterId::new(PROD_US_EAST);
-        assert_eq!(snapshot.detail(&prod), Some(&detail::prod_us_east()));
+        let mut expected = detail::prod_us_east();
+        expected.overview.tops = flock_core::pod_tops::PodTops::of(&pods::pods());
+        assert_eq!(snapshot.detail(&prod), Some(&expected));
         let mut summary = snapshot.cluster(&prod).cloned();
         if let Some(summary) = summary.as_mut() {
             summary.nav.remove(&Page::Pods);
