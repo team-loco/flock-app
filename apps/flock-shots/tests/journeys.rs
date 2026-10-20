@@ -278,6 +278,30 @@ fn nav(page: Page) -> &'static str {
     selector(format!("nav-{}", page.label().to_lowercase()))
 }
 
+const NAV_SCROLL_STEPS: usize = 20;
+const NAV_SCROLL: f32 = 60.;
+
+fn reveal(ui: &mut Ui, page: Page) -> anyhow::Result<&'static str> {
+    let row = nav(page);
+    for _ in 0..NAV_SCROLL_STEPS {
+        let list = ui
+            .bounds("sidebar-nav")
+            .context("the sidebar is not painted")?;
+        let bounds = ui
+            .bounds(row)
+            .with_context(|| format!("{page:?} has no nav row"))?;
+        let delta = if bounds.bottom() > list.bottom() {
+            -NAV_SCROLL
+        } else if bounds.top() < list.top() {
+            NAV_SCROLL
+        } else {
+            return Ok(row);
+        };
+        ui.scroll("sidebar-nav", gpui::point(gpui::px(0.), gpui::px(delta)))?;
+    }
+    anyhow::bail!("could not scroll the {page:?} nav row into view")
+}
+
 fn ready_here(state: &AppState) -> bool {
     page_ready(state, state.location())
 }
@@ -295,7 +319,8 @@ fn switch_to(ui: &mut Ui, cluster: &str) -> anyhow::Result<()> {
 }
 
 fn visit(ui: &mut Ui, page: Page) -> anyhow::Result<()> {
-    ui.click(nav(page))
+    let row = reveal(ui, page)?;
+    ui.click(row)
         .with_context(|| format!("visiting {page:?} from {:?}", ui.state().location()))?;
     anyhow::ensure!(
         ui.state().location().page == page,
@@ -472,7 +497,8 @@ fn live_every_sidebar_entry_loads_and_keeps_counts_and_badges() -> anyhow::Resul
 fn skeletons_going_back(ui: &mut Ui) -> anyhow::Result<Vec<Page>> {
     let mut skeletons = Vec::new();
     for page in cluster_pages().skip(1) {
-        ui.click(nav(page))?;
+        let row = reveal(ui, page)?;
+        ui.click(row)?;
         ui.wait_until(PAGE_TIMEOUT, ready_here)?;
         ui.press("cmd-[")?;
         if ui.bounds("loading-skeleton").is_some() {
@@ -485,7 +511,8 @@ fn skeletons_going_back(ui: &mut Ui) -> anyhow::Result<Vec<Page>> {
 
 fn skeletons_switching_tabs(ui: &mut Ui) -> anyhow::Result<Vec<Page>> {
     for page in cluster_pages().skip(1) {
-        ui.cmd_click(nav(page))?;
+        let row = reveal(ui, page)?;
+        ui.cmd_click(row)?;
     }
     let count = ui.state().panes().focused().tabs().len();
     for _ in 0..count {
@@ -563,7 +590,8 @@ fn live_tabs_open_per_page_switch_split_and_close() -> anyhow::Result<()> {
     let (mut ui, before) = opened(&make, Screen::Flock)?;
     switch_to(&mut ui, CLUSTERS[0].0)?;
     for page in cluster_pages().skip(1) {
-        ui.cmd_click(nav(page))?;
+        let row = reveal(&mut ui, page)?;
+        ui.cmd_click(row)?;
     }
     let pages = cluster_pages().count();
     anyhow::ensure!(
