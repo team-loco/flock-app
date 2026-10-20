@@ -234,7 +234,7 @@ impl FluxGraphScreen {
                 let (color, width) = if active {
                     (palette.acc, GRAPH_EDGE_ACTIVE)
                 } else {
-                    (palette.line2, GRAPH_EDGE)
+                    (palette.edge, GRAPH_EDGE)
                 };
                 Some((route, edge.kind, color, width))
             })
@@ -269,7 +269,7 @@ impl FluxGraphScreen {
 
     fn legend(palette: &Palette) -> impl IntoElement {
         let swatch = |dashed: bool| {
-            let piece = || div().w(GRAPH_LEGEND_SWATCH).h(RULE).bg(palette.mute);
+            let piece = || div().w(GRAPH_LEGEND_SWATCH).h(RULE).bg(palette.edge);
             if dashed {
                 div().flex().gap(SPACE_2).child(piece()).child(piece())
             } else {
@@ -277,7 +277,7 @@ impl FluxGraphScreen {
                     div()
                         .w(GRAPH_LEGEND_SWATCH * 2. + SPACE_2)
                         .h(RULE)
-                        .bg(palette.mute),
+                        .bg(palette.edge),
                 )
             }
         };
