@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::cluster_changes::ClusterChange;
+use crate::control_plane::ControlPlane;
 use crate::home::Problem;
 use crate::pod_tops::PodTops;
 use crate::resources::{Resource, ResourceKind};
@@ -59,6 +60,7 @@ pub struct PodPhases {
     pub running: u32,
     pub pending: u32,
     pub failing: u32,
+    pub unschedulable: u32,
 }
 
 impl PodPhases {
@@ -215,6 +217,7 @@ pub struct Overview {
     pub network: NetworkFacts,
     pub unready_services: Vec<Problem>,
     pub changes: Vec<ClusterChange>,
+    pub control_plane: ControlPlane,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

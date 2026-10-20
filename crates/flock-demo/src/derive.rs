@@ -247,6 +247,7 @@ fn overview(metrics: &ClusterMetrics, template: &Overview) -> Overview {
         running: total.saturating_sub(failing),
         pending: 0,
         failing,
+        unschedulable: 0,
     };
     let cpu_scale = template
         .utilization

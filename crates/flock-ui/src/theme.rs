@@ -605,6 +605,10 @@ pub const OVERVIEW_POOL_FIT: Pixels = px(96.);
 pub const OVERVIEW_POOL_ROW: Pixels = px(30.);
 pub const OVERVIEW_FACT_GLYPH: Pixels = px(14.);
 pub const OVERVIEW_FACT_CHEVRON: Pixels = px(10.);
+pub const OVERVIEW_DRILL_LABEL: Pixels = px(72.);
+pub const OVERVIEW_DRILL_BARS: Pixels = px(48.);
+pub const OVERVIEW_DRILL_BAR_GAP: Pixels = px(1.);
+pub const OVERVIEW_DRILL_CODE: Pixels = px(30.);
 
 pub fn terminal_color(color: vt100::Color, default: Hsla, palette: &Palette) -> Hsla {
     match color {

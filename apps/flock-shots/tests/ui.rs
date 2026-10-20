@@ -3617,3 +3617,28 @@ fn the_status_bar_refresh_button_is_clickable_and_keeps_the_page() -> anyhow::Re
     assert!(ui.bounds("status-refresh").is_some());
     Ok(())
 }
+
+#[test]
+fn the_api_server_row_opens_the_5xx_drill_in() -> anyhow::Result<()> {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    for appearance in [
+        flock_ui::theme::Appearance::Dark,
+        flock_ui::theme::Appearance::Light,
+    ] {
+        let mut ui = Ui::with(Screen::Cluster, flock::Preset::default(), appearance)?;
+        assert!(ui.bounds("overview-api-drill-close").is_none());
+        scroll_overview_to_the_end(&mut ui)?;
+        ui.save_png(&dir.join(format!("overview-control-plane-{appearance:?}.png")))?;
+        ui.click("overview-control-api-server")?;
+        assert!(ui.bounds("overview-api-drill-close").is_some());
+        assert!(ui.bounds("overview-api-drill-request-4").is_some());
+        ui.save_png(&dir.join(format!("overview-api-drill-{appearance:?}.png")))?;
+        ui.click("overview-api-drill-codes-1")?;
+        assert!(ui.bounds("overview-api-drill-request-1").is_some());
+        assert!(ui.bounds("overview-api-drill-request-2").is_none());
+        ui.press("escape")?;
+        assert!(ui.bounds("overview-api-drill-close").is_none());
+        assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    }
+    Ok(())
+}

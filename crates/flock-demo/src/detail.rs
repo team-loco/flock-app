@@ -4,6 +4,9 @@ use std::time::Duration;
 use flock_core::Condition;
 use flock_core::cluster::Namespace;
 use flock_core::cluster_changes::{ChangeKind, ClusterChange};
+use flock_core::control_plane::{
+    ApiService, Check, ControlPlane, ETCD_CHECK, FailedRequests, Health, Probe, Traffic, Webhook,
+};
 use flock_core::events::Event;
 use flock_core::home::Problem;
 use flock_core::nodes::{CONDITION_TRUE, Node, READY_CONDITION, Usage};
@@ -35,6 +38,13 @@ const GPU_COMMITMENT: (Commitment, Commitment) = (
 );
 const OS_IMAGE: &str = "Amazon Linux 2023.5.20240916";
 const EVENT_FIRST_AGE: Duration = Duration::from_secs(3600);
+const BAR_SEED: u64 = 11;
+const BAR_MULTIPLIER: u64 = 9301;
+const BAR_INCREMENT: u64 = 49297;
+const BAR_MODULUS: u64 = 233_280;
+const BAR_MINUTES: u64 = 60;
+const INCIDENT_MINUTES: std::ops::RangeInclusive<u64> = 14..=22;
+const ROLLOUT_MINUTES: std::ops::RangeInclusive<u64> = 33..=35;
 const EVENT_NOW: jiff::Timestamp = jiff::Timestamp::constant(1_791_873_360, 0);
 
 const DEMO_CLUSTER: &str = "prod-us-east";
@@ -87,6 +97,7 @@ fn overview() -> Overview {
             running: 398,
             pending: 9,
             failing: 5,
+            unschedulable: 6,
         },
         utilization: utilization(),
         tops: PodTops::default(),
@@ -97,6 +108,95 @@ fn overview() -> Overview {
         },
         unready_services: unready_services(),
         changes: changes(),
+        control_plane: control_plane(),
+    }
+}
+
+fn errors_per_minute() -> Vec<u64> {
+    let mut seed = BAR_SEED;
+    (0..BAR_MINUTES)
+        .map(|minute| {
+            seed = (seed * BAR_MULTIPLIER + BAR_INCREMENT) % BAR_MODULUS;
+            let jitter = seed * 3 / BAR_MODULUS;
+            let mut count = 1 + jitter;
+            if INCIDENT_MINUTES.contains(&minute) {
+                count += 9 + seed * 10 / BAR_MODULUS;
+            }
+            if ROLLOUT_MINUTES.contains(&minute) {
+                count += 6;
+            }
+            count
+        })
+        .collect()
+}
+
+fn failed(code: &str, verb: &str, resource: &str, count: u64) -> FailedRequests {
+    FailedRequests {
+        code: code.into(),
+        verb: verb.into(),
+        resource: resource.into(),
+        count,
+    }
+}
+
+fn webhook(name: &str, configuration: &str, timeout: u64) -> Webhook {
+    Webhook {
+        name: name.into(),
+        configuration: configuration.into(),
+        timeout: Duration::from_secs(timeout),
+    }
+}
+
+fn control_plane() -> ControlPlane {
+    let checks = ["ping", "log", ETCD_CHECK, "informer-sync", "shutdown"]
+        .into_iter()
+        .map(|name| Check {
+            name: name.into(),
+            passed: true,
+        })
+        .collect();
+    let traffic = Traffic {
+        since: "09:58".into(),
+        until: "10:57".into(),
+        window: Duration::from_hours(1),
+        requests: 1_071_382,
+        errors: 214,
+        p99: Some(Duration::from_millis(182)),
+        etcd_p99: Some(Duration::from_millis(24)),
+        errors_per_minute: errors_per_minute(),
+        failures: vec![
+            failed("503", "GET", "pods.metrics.k8s.io", 148),
+            failed("504", "LIST", "pods", 41),
+            failed("503", "GET", "nodes.metrics.k8s.io", 10),
+            failed("500", "CREATE", "pods", 9),
+            failed("500", "PATCH", "deployments.apps", 6),
+        ],
+        webhook_p99: vec![
+            (
+                "validate.kyverno.svc-fail".into(),
+                Duration::from_millis(2800),
+            ),
+            ("mutate.kyverno.svc-fail".into(), Duration::from_millis(410)),
+            ("webhook.cert-manager.io".into(), Duration::from_millis(12)),
+        ],
+    };
+    let kyverno = "kyverno-resource-validating";
+    let webhooks = vec![
+        webhook("validate.kyverno.svc-fail", kyverno, 10),
+        webhook("mutate.kyverno.svc-fail", "kyverno-resource-mutating", 10),
+        webhook("webhook.cert-manager.io", "cert-manager-webhook", 30),
+        webhook("vpod.kb.io", "aws-load-balancer-webhook", 10),
+        webhook("mpod.kb.io", "aws-load-balancer-webhook", 10),
+        webhook("validation.gatekeeper.sh", "gatekeeper-validating", 3),
+    ];
+    ControlPlane {
+        health: Probe::Ready(Health { checks }),
+        traffic: Probe::Ready(traffic),
+        webhooks: Probe::Ready(webhooks),
+        unavailable_services: vec![ApiService {
+            name: "v1beta1.metrics.k8s.io".into(),
+            reason: "FailedDiscoveryCheck".into(),
+        }],
     }
 }
 
