@@ -165,6 +165,7 @@ pub enum Screen {
     Namespaces,
     Namespace,
     Events,
+    Problems,
     Resources,
     ResourceInspector,
     Jobs,
@@ -222,6 +223,7 @@ impl Screen {
             Self::Nodes => vec![sample, Command::SelectPage(Page::Nodes)],
             Self::Namespaces => vec![sample, Command::SelectPage(Page::Namespaces)],
             Self::Events => vec![sample, Command::SelectPage(Page::Events)],
+            Self::Problems => vec![sample, Command::SelectPage(Page::ClusterProblems)],
             Self::Resources => vec![sample, Command::SelectPage(Page::Deployments)],
             Self::Namespace => {
                 let target = preset.cluster_object(NAMESPACE, SAMPLE_NAMESPACE);
@@ -278,10 +280,7 @@ impl Screen {
             Self::Split => vec![sample, Command::OpenResource(preset.deployment())],
             Self::Pods => vec![sample, Command::SelectPage(Page::Pods)],
             Self::PodsShell => vec![sample, Command::SelectPage(Page::Pods)],
-            Self::Logs => vec![
-                sample,
-                Command::FollowLogs(LogTarget::Workload(preset.deployment())),
-            ],
+            Self::Logs => vec![sample, follow_logs(preset)],
             Self::Kustomization => flux_screen(preset.flux(
                 SAMPLE_CLUSTER,
                 FluxKind::Kustomization,
@@ -310,6 +309,10 @@ impl Screen {
             Self::LocoRoutes => vec![sample, Command::SelectPage(Page::LocoRoutes)],
         }
     }
+}
+
+fn follow_logs(preset: &Preset) -> Command {
+    Command::FollowLogs(LogTarget::Workload(preset.deployment()))
 }
 
 fn open_certificates(cluster: &ClusterId) -> Command {
@@ -459,6 +462,7 @@ pub fn root_view(
         Screen::Nodes => shell_view(store, screen, preset, window, cx),
         Screen::Namespaces => shell_view(store, screen, preset, window, cx),
         Screen::Events => shell_view(store, screen, preset, window, cx),
+        Screen::Problems => shell_view(store, screen, preset, window, cx),
         Screen::Resources => shell_view(store, screen, preset, window, cx),
         Screen::ResourceInspector => shell_view(store, screen, preset, window, cx),
         Screen::Jobs => shell_view(store, screen, preset, window, cx),
