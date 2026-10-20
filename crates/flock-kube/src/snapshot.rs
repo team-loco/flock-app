@@ -149,7 +149,7 @@ pub fn page_kind(page: Page) -> Option<WatchKind> {
     }
 }
 
-pub const BACKGROUND_KINDS: [WatchKind; 15] = [
+pub const BACKGROUND_KINDS: [WatchKind; 16] = [
     WatchKind::Nodes,
     WatchKind::Namespaces,
     WatchKind::Events,
@@ -160,6 +160,7 @@ pub const BACKGROUND_KINDS: [WatchKind; 15] = [
     WatchKind::Jobs,
     WatchKind::CronJobs,
     WatchKind::Services,
+    WatchKind::EndpointSlices,
     WatchKind::Ingresses,
     WatchKind::ConfigMaps,
     WatchKind::Secrets,

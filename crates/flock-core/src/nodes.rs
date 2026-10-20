@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use crate::diagnosis::{self, Condition, Diagnosis};
@@ -89,17 +89,47 @@ impl Node {
     }
 
     pub fn is_ready(&self) -> bool {
+        self.has_condition(READY_CONDITION)
+    }
+
+    pub fn has_disk_pressure(&self) -> bool {
+        self.has_condition(DISK_PRESSURE_CONDITION)
+    }
+
+    fn has_condition(&self, kind: &str) -> bool {
         self.conditions
             .iter()
-            .any(|c| c.kind == READY_CONDITION && c.value == CONDITION_TRUE)
+            .any(|c| c.kind == kind && c.value == CONDITION_TRUE)
+    }
+
+    pub fn label(&self, key: &str) -> Option<&str> {
+        self.labels.iter().find_map(|label| {
+            let (name, value) = label.split_once('=')?;
+            (name == key).then_some(value)
+        })
+    }
+
+    pub fn pool(&self) -> &str {
+        POOL_LABELS
+            .iter()
+            .find_map(|key| self.label(key))
+            .filter(|pool| !pool.is_empty())
+            .unwrap_or(&self.instance_type)
     }
 }
 
 pub const READY_CONDITION: &str = "Ready";
 pub const CONDITION_TRUE: &str = "True";
+const DISK_PRESSURE_CONDITION: &str = "DiskPressure";
+const POOL_LABELS: [&str; 5] = [
+    "eks.amazonaws.com/nodegroup",
+    "cloud.google.com/gke-nodepool",
+    "kubernetes.azure.com/agentpool",
+    "agentpool",
+    "karpenter.sh/nodepool",
+];
 const SCHEDULING_DISABLED: &str = "SchedulingDisabled";
 const CORDONED_MESSAGE: &str = "Cordoned: no new pods are scheduled here.";
-const INSTANCE_SIZE_SEPARATOR: char = '.';
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NodeSummary {
@@ -107,6 +137,8 @@ pub struct NodeSummary {
     pub ready: usize,
     pub cordoned: usize,
     pub not_ready: usize,
+    pub disk_pressure: usize,
+    pub pools: usize,
     pub instance_types: Vec<(String, usize)>,
     pub pod_capacity: u32,
 }
@@ -129,11 +161,14 @@ impl NodeSummary {
             .iter()
             .filter(|n| n.schedulable && n.is_ready())
             .count();
+        let pools: BTreeSet<&str> = nodes.iter().map(Node::pool).collect();
         Self {
             total: nodes.len(),
             ready,
             cordoned,
             not_ready,
+            disk_pressure: nodes.iter().filter(|n| n.has_disk_pressure()).count(),
+            pools: pools.len(),
             instance_types,
             pod_capacity: nodes.iter().map(|n| n.pod_capacity).sum(),
         }
@@ -154,24 +189,6 @@ impl NodeSummary {
             .instance_types
             .iter()
             .map(|(name, count)| format!("{count} × {name}"))
-            .collect();
-        parts.join(" · ")
-    }
-
-    pub fn compact_instance_label(&self) -> String {
-        let mut types = self.instance_types.clone();
-        types.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
-        let parts: Vec<String> = types
-            .iter()
-            .enumerate()
-            .map(|(ix, (name, count))| {
-                let shown = if ix == 0 {
-                    name.as_str()
-                } else {
-                    name.split(INSTANCE_SIZE_SEPARATOR).next().unwrap_or(name)
-                };
-                format!("{count} × {shown}")
-            })
             .collect();
         parts.join(" · ")
     }
@@ -268,7 +285,45 @@ pub(crate) mod tests {
         assert_eq!(summary.not_ready, 1);
         assert_eq!(summary.pod_capacity, 440);
         assert_eq!(summary.instance_label(), "3 × m6i.4xlarge · 1 × g5.2xlarge");
-        assert_eq!(summary.compact_instance_label(), "3 × m6i.4xlarge · 1 × g5");
+        assert_eq!(summary.pools, 2);
+        assert_eq!(summary.disk_pressure, 0);
+    }
+
+    #[test]
+    fn pools_come_from_provider_labels_before_the_instance_type() {
+        let mut eks = node("a", "m7g.4xlarge", true, true);
+        eks.labels = vec!["eks.amazonaws.com/nodegroup=general-arm".into()];
+        let mut gke = node("b", "e2-standard-8", true, true);
+        gke.labels = vec!["cloud.google.com/gke-nodepool=default-pool".into()];
+        let mut aks = node("c", "Standard_D4s_v5", true, true);
+        aks.labels = vec!["kubernetes.azure.com/agentpool=nodepool1".into()];
+        let mut karpenter = node("d", "c7g.2xlarge", true, true);
+        karpenter.labels = vec!["karpenter.sh/nodepool=builds".into()];
+        let mut blank = node("e", "g5.2xlarge", true, true);
+        blank.labels = vec!["eks.amazonaws.com/nodegroup=".into()];
+        let pools: Vec<&str> = [&eks, &gke, &aks, &karpenter, &blank]
+            .map(Node::pool)
+            .into();
+        assert_eq!(
+            pools,
+            [
+                "general-arm",
+                "default-pool",
+                "nodepool1",
+                "builds",
+                "g5.2xlarge"
+            ]
+        );
+    }
+
+    #[test]
+    fn summary_counts_disk_pressure() {
+        let mut full = node("a", "m6i", true, true);
+        full.conditions
+            .push(Condition::new(DISK_PRESSURE_CONDITION, CONDITION_TRUE));
+        let summary = NodeSummary::of(&[full, node("b", "m6i", true, true)]);
+        assert_eq!(summary.disk_pressure, 1);
+        assert_eq!(summary.pools, 1);
     }
 
     #[test]

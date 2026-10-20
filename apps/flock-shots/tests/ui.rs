@@ -796,6 +796,15 @@ fn overview_sections_navigate_to_their_lists() -> anyhow::Result<()> {
     for (selector, page, below) in [
         ("overview-pods", Page::Pods, false),
         ("overview-nodes", Page::Nodes, false),
+        ("overview-pool-0", Page::Nodes, false),
+        ("overview-fact-kubelet-skew", Page::Nodes, true),
+        (
+            "overview-fact-services-without-endpoints",
+            Page::Services,
+            true,
+        ),
+        ("overview-fact-load-balancers-pending", Page::Services, true),
+        ("overview-fact-pvcs-pending", Page::Pvcs, true),
         ("overview-deployments", Page::Deployments, true),
         ("overview-statefulsets", Page::StatefulSets, true),
         ("overview-daemonsets", Page::DaemonSets, true),

@@ -195,6 +195,14 @@ pub struct Overview {
     pub pods: PodPhases,
     pub utilization: Vec<Utilization>,
     pub tops: PodTops,
+    pub network: NetworkFacts,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NetworkFacts {
+    pub services_without_endpoints: Option<usize>,
+    pub load_balancers_pending: usize,
+    pub pvcs_pending: usize,
 }
 
 impl Overview {
