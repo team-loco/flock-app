@@ -13,7 +13,8 @@ use flock_core::related::Related;
 use flock_core::resources::{NamespaceCount, POD_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
 use flock_core::{
-    ClusterId, Command, Counts, LogTarget, Page, Preferences, ResourceRef, Seen, Snapshot, Status,
+    ClusterId, Command, Counts, LogInstance, LogTarget, Page, Preferences, ResourceRef, Seen,
+    Snapshot, Status,
 };
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
@@ -37,8 +38,8 @@ use crate::screens::{
     set_namespace_options,
 };
 use crate::theme::{
-    ActiveTheme, FONT_MONO, INSPECTOR_POD, LINE_PROSE, Palette, RULE, SPACE_2, SPACE_3, SPACE_4,
-    SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI, WHATS_WRONG_BAR,
+    ActiveTheme, FONT_MONO, FONT_SANS, INSPECTOR_POD, LINE_PROSE, Palette, RULE, SPACE_2, SPACE_3,
+    SPACE_4, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI, WHATS_WRONG_BAR,
 };
 
 const INSPECTOR_ID: &str = "pod-inspector";
@@ -64,6 +65,7 @@ const SEPARATOR: &str = " · ";
 const MISSING: &str = "—";
 const NO_RESOURCES: &str = "none";
 const LAST_TERMINATION: &str = "Last termination";
+const LOGS_BEFORE_RESTART: &str = "Logs before restart →";
 const LOGS_FOR: &str = "Logs for";
 const LOGS_FOR_SELECTED: &str = "Logs for selected pods";
 const SELECTED_PODS: &str = "selected pods";
@@ -81,6 +83,7 @@ pub struct PodsScreen {
     selected: Option<ResourceRef>,
     related: Vec<Related>,
     container: Option<String>,
+    instance: LogInstance,
     log: Option<LogSession>,
     shell: Option<ShellSession>,
     table: Entity<Table<Pod>>,
@@ -136,7 +139,7 @@ impl PodsScreen {
                 .mono()
                 .width(CONTAINER_SELECT)
         });
-        let logs = cx.new(|_| LogView::new("pod-logs"));
+        let logs = cx.new(|_| LogView::new("pod-logs").parsed());
         let terminal = cx.new(|cx| Terminal::new(TERMINAL_ID, cx));
         let dock = cx.new(|_| DockState::new());
         let subscriptions = vec![
@@ -195,6 +198,7 @@ impl PodsScreen {
             selected: None,
             related: Vec::new(),
             container: None,
+            instance: LogInstance::Current,
             log: None,
             shell: None,
             table,
@@ -483,6 +487,7 @@ impl PodsScreen {
             cx.emit(Command::InspectResource(pod));
         }
         self.pick_container(None);
+        self.instance = LogInstance::Current;
         self.sync_selection(cx);
     }
 
@@ -713,10 +718,18 @@ impl PodsScreen {
             palette.mute
         };
         let fields = container_fields(container, ports, palette);
+        let name = container.name.clone();
+        let before_restart = Link::new(
+            gpui::ElementId::NamedInteger("pod-logs-before-restart".into(), ix as u64),
+            LOGS_BEFORE_RESTART,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.show_previous_logs(name.clone(), cx);
+        }));
         let last = container
             .last_termination
             .as_ref()
-            .map(|last| last_termination(last, palette));
+            .map(|last| last_termination(last, before_restart, palette));
         div()
             .flex()
             .flex_col()
@@ -799,7 +812,7 @@ fn value(text: impl Into<SharedString>, color: gpui::Hsla) -> AnyElement {
         .into_any_element()
 }
 
-fn last_termination(last: &Termination, palette: &Palette) -> AnyElement {
+fn last_termination(last: &Termination, logs: Link, palette: &Palette) -> AnyElement {
     let reason = Some(last.reason.clone()).filter(|reason| !reason.is_empty());
     let summary = div()
         .flex()
@@ -827,6 +840,7 @@ fn last_termination(last: &Termination, palette: &Palette) -> AnyElement {
         .child(SectionLabel::new(LAST_TERMINATION))
         .child(summary)
         .children(span)
+        .child(div().font_family(FONT_SANS).text_size(TEXT_UI).child(logs))
         .into_any_element()
 }
 

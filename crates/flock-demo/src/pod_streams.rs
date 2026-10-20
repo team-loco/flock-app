@@ -347,6 +347,7 @@ mod tests {
         LogRequest {
             pod: pod.resource(),
             container: container.into(),
+            instance: flock_core::LogInstance::Current,
             sink,
         }
     }

@@ -1,4 +1,4 @@
-use flock_core::{LogLevel, LogLine, Status};
+use flock_core::{LogInstance, LogLevel, LogLine, Status};
 
 use super::data::API;
 
@@ -31,6 +31,26 @@ pub fn crash_waiting() -> Vec<LogLine> {
     vec![LogLine::marker(
         "── container api is waiting to start: CrashLoopBackOff (back-off 5m0s) ──",
     )]
+}
+
+pub fn crashed_api() -> Vec<LogLine> {
+    vec![
+        LogLine::new(
+            "14:08:51.118",
+            LogLevel::Info,
+            r#"{"level":"info","ts":"2026-10-20T14:08:51.118Z","msg":"GET /api/info","status":200,"duration":"1.2ms"}"#,
+        ),
+        LogLine::new(
+            "14:09:04.902",
+            LogLevel::Error,
+            r#"{"level":"error","ts":"2026-10-20T14:09:04.902Z","msg":"failed to load config","path":"/data/config.yaml","err":"open /data/config.yaml: no such file or directory"}"#,
+        ),
+        LogLine::new(
+            "14:09:04.903",
+            LogLevel::Fatal,
+            r#"{"level":"fatal","ts":"2026-10-20T14:09:04.903Z","msg":"exiting","code":1,"caller":"checkout/main.go:131"}"#,
+        ),
+    ]
 }
 
 pub fn healthy_api() -> Vec<LogLine> {
@@ -70,8 +90,15 @@ pub struct Script {
     pub streams: bool,
 }
 
-pub fn script(pod_status: Status, container: &str) -> Script {
+pub fn script(pod_status: Status, container: &str, instance: LogInstance) -> Script {
     let api = container == API;
+    if instance == LogInstance::Previous {
+        let initial = if api { crashed_api() } else { Vec::new() };
+        return Script {
+            initial,
+            streams: false,
+        };
+    }
     let crashing = pod_status == Status::Err;
     let initial = if api && crashing {
         crash_waiting()
@@ -148,17 +175,20 @@ mod tests {
 
     #[test]
     fn crashing_api_explains_waiting_and_does_not_stream() {
-        let current = script(Status::Err, API);
+        let current = script(Status::Err, API, LogInstance::Current);
         assert!(!current.streams);
         assert_eq!(current.initial, crash_waiting());
+        let previous = script(Status::Err, API, LogInstance::Previous);
+        assert!(!previous.streams);
+        assert_eq!(previous.initial, crashed_api());
     }
 
     #[test]
     fn healthy_containers_stream() {
-        let api = script(Status::Ok, API);
+        let api = script(Status::Ok, API, LogInstance::Current);
         assert!(api.streams);
         assert_eq!(api.initial, healthy_api());
-        let envoy = script(Status::Err, "envoy");
+        let envoy = script(Status::Err, "envoy", LogInstance::Current);
         assert!(envoy.streams);
     }
 }

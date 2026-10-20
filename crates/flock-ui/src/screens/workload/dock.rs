@@ -139,6 +139,7 @@ impl WorkloadScreen {
         cx.emit(Command::StreamLogs(LogRequest {
             pod: pod_ref(&self.target, &pod.name),
             container,
+            instance: flock_core::LogInstance::Current,
             sink,
         }));
         self.log_task = Some(cx.spawn(async move |this, cx| {

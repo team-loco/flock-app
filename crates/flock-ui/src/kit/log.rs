@@ -7,6 +7,9 @@ use gpui::{
     UniformListScrollHandle, Window, div, list, prelude::FluentBuilder, px, uniform_list,
 };
 
+use flock_core::LogLevel;
+use flock_core::logparse::{self, ParsedLine};
+
 use super::selectable::SelectableText;
 use crate::highlight::{SOURCE_COLORS, source_colors};
 use crate::theme::{
@@ -24,6 +27,7 @@ const TIMESTAMP_DATE_DASH: usize = 4;
 const TIMESTAMP_MIN_LEN: usize = 20;
 const WRAP_OVERDRAW: Pixels = px(200.);
 const LINE_ID: &str = "log-line";
+const FIELDS_GAP: &str = "  ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
@@ -63,6 +67,49 @@ impl Level {
     }
 }
 
+impl From<LogLevel> for Level {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Debug => Self::Debug,
+            LogLevel::Info => Self::Info,
+            LogLevel::Warn => Self::Warn,
+            LogLevel::Error => Self::Error,
+            LogLevel::Fatal => Self::Fatal,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedText {
+    pub text: SharedString,
+    pub message_len: usize,
+    pub level: Option<Level>,
+    pub time: Option<SharedString>,
+}
+
+impl ParsedText {
+    fn new(parsed: ParsedLine) -> Self {
+        let message = parsed.message.clone().unwrap_or_default();
+        let fields = parsed.fields_text();
+        let message_len = message.len();
+        let text = match (message.is_empty(), fields.is_empty()) {
+            (_, true) => message,
+            (true, false) => fields,
+            (false, false) => format!("{message}{FIELDS_GAP}{fields}"),
+        };
+        Self {
+            text: text.into(),
+            message_len,
+            level: parsed.level.map(Level::from),
+            time: parsed.time.map(SharedString::from),
+        }
+    }
+
+    fn fields(&self) -> Range<usize> {
+        self.message_len..self.text.len()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LineSource {
     pub label: SharedString,
@@ -75,6 +122,7 @@ pub struct LogLine {
     pub level: Option<Level>,
     pub message: SharedString,
     pub source: Option<LineSource>,
+    pub parsed: Option<ParsedText>,
 }
 
 impl LogLine {
@@ -88,7 +136,13 @@ impl LogLine {
             level,
             message: message.into(),
             source: None,
+            parsed: None,
         }
+    }
+
+    pub fn with_fields(mut self) -> Self {
+        self.parsed = logparse::parse(&self.message).map(ParsedText::new);
+        self
     }
 
     pub fn with_source(mut self, label: impl Into<SharedString>, slot: usize) -> Self {
@@ -133,6 +187,7 @@ impl LogLine {
             level,
             message: SharedString::from(message.to_owned()),
             source: None,
+            parsed: None,
         }
     }
 }
@@ -233,6 +288,28 @@ impl LogBuffer {
     }
 }
 
+pub fn field_runs(
+    fields: Range<usize>,
+    hits: &[Range<usize>],
+    muted: HighlightStyle,
+    hit: HighlightStyle,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let mut runs = Vec::new();
+    let mut cursor = fields.start;
+    for found in hits {
+        let gap_end = found.start.min(fields.end);
+        if cursor < gap_end {
+            runs.push((cursor..gap_end, muted));
+        }
+        runs.push((found.clone(), hit));
+        cursor = cursor.max(found.end);
+    }
+    if cursor < fields.end {
+        runs.push((cursor..fields.end, muted));
+    }
+    runs
+}
+
 pub fn find_matches(text: &str, query: &str) -> Vec<Range<usize>> {
     if query.is_empty() {
         return Vec::new();
@@ -298,6 +375,13 @@ pub struct LogView {
     wrap: bool,
     wrapped: ListState,
     sources: Option<(Palette, [Hsla; SOURCE_COLORS])>,
+    format: LineFormat,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LineFormat {
+    Raw,
+    Parsed,
 }
 
 impl LogView {
@@ -315,7 +399,31 @@ impl LogView {
             wrap: false,
             wrapped: ListState::new(0, ListAlignment::Top, WRAP_OVERDRAW),
             sources: None,
+            format: LineFormat::Raw,
         }
+    }
+
+    pub fn parsed(mut self) -> Self {
+        self.format = LineFormat::Parsed;
+        self
+    }
+
+    pub fn raw(&self) -> bool {
+        self.format == LineFormat::Raw
+    }
+
+    pub fn set_raw(&mut self, raw: bool, cx: &mut Context<Self>) {
+        self.format = if raw {
+            LineFormat::Raw
+        } else {
+            LineFormat::Parsed
+        };
+        self.sync_wrapped();
+        cx.notify();
+    }
+
+    fn shown<'a>(&self, line: &'a LogLine) -> Option<&'a ParsedText> {
+        line.parsed.as_ref().filter(|_| !self.raw())
     }
 
     pub fn set_lines(&mut self, lines: impl IntoIterator<Item = LogLine>, cx: &mut Context<Self>) {
@@ -450,9 +558,12 @@ impl LogView {
             return None;
         }
         (0..self.buffer.len()).find(|&ix| {
-            self.buffer
-                .get(ix)
-                .is_some_and(|line| !find_matches(&line.message, &self.query).is_empty())
+            self.buffer.get(ix).is_some_and(|line| {
+                let text = self
+                    .shown(line)
+                    .map_or(&line.message, |parsed| &parsed.text);
+                !find_matches(text, &self.query).is_empty()
+            })
         })
     }
 
@@ -488,7 +599,13 @@ impl LogView {
         palette: &Palette,
         sources: &[Hsla; SOURCE_COLORS],
     ) -> AnyElement {
-        let colors = line_colors(line.level, self.levels, palette);
+        let parsed = self.shown(line);
+        let level = line.level.or(parsed.and_then(|parsed| parsed.level));
+        let timestamp = line
+            .timestamp
+            .clone()
+            .or_else(|| parsed.and_then(|parsed| parsed.time.clone()));
+        let colors = line_colors(level, self.levels, palette);
         let source = line.source.as_ref().map(|source| {
             let color = sources
                 .get(source.slot % SOURCE_COLORS)
@@ -506,11 +623,23 @@ impl LogView {
             color: Some(palette.fg),
             ..HighlightStyle::default()
         };
-        let matches = find_matches(&line.message, &self.query);
         let id = ElementId::NamedInteger(LINE_ID.into(), ix as u64);
-        let message = SelectableText::new(line.message.clone())
-            .id(id)
-            .highlights(matches.into_iter().map(|range| (range, highlight)));
+        let message = if let Some(parsed) = parsed {
+            let matches = find_matches(&parsed.text, &self.query);
+            let muted = HighlightStyle {
+                color: Some(palette.mute),
+                ..HighlightStyle::default()
+            };
+            let runs = field_runs(parsed.fields(), &matches, muted, highlight);
+            SelectableText::new(parsed.text.clone())
+                .id(id)
+                .highlights(runs)
+        } else {
+            let matches = find_matches(&line.message, &self.query);
+            SelectableText::new(line.message.clone())
+                .id(id)
+                .highlights(matches.into_iter().map(|range| (range, highlight)))
+        };
         div()
             .flex()
             .gap(SPACE_6)
@@ -526,7 +655,7 @@ impl LogView {
                         .flex_none()
                         .min_w(self.timestamp_width)
                         .text_color(palette.mute)
-                        .children(line.timestamp.clone()),
+                        .children(timestamp),
                 )
             })
             .children(source)
@@ -536,7 +665,7 @@ impl LogView {
                         .w(LOG_LEVEL)
                         .flex_none()
                         .text_color(colors.level)
-                        .children(line.level.map(Level::label)),
+                        .children(level.map(Level::label)),
                 )
             })
             .child(
@@ -690,6 +819,53 @@ mod tests {
             line_colors(None, Levels::Tint, &palette).message,
             palette.fg
         );
+    }
+
+    #[test]
+    fn structured_lines_split_message_from_fields() {
+        let json = LogLine::new(
+            Some("02:37:04.902"),
+            None,
+            r#"{"level":"error","ts":"2026-10-20T02:37:04.902Z","msg":"failed to load config","path":"/data/config.yaml"}"#,
+        )
+        .with_fields();
+        let parsed = json.parsed.as_ref();
+        assert_eq!(
+            parsed.map(|p| p.text.as_ref()),
+            Some("failed to load config  path=/data/config.yaml")
+        );
+        assert_eq!(parsed.map(ParsedText::fields), Some(21..45));
+        assert_eq!(parsed.and_then(|p| p.level), Some(Level::Error));
+        assert_eq!(
+            parsed.and_then(|p| p.time.clone()).as_deref(),
+            Some("2026-10-20T02:37:04.902Z")
+        );
+        let bare = LogLine::new(None, None, r#"{"level":"info","code":1}"#).with_fields();
+        assert_eq!(bare.parsed.map(|p| p.text), Some("code=1".into()));
+        let plain = LogLine::new(None, None, "GET /healthz 200 0.4ms").with_fields();
+        assert_eq!(plain.parsed, None);
+    }
+
+    #[test]
+    fn field_runs_mute_fields_around_search_matches() {
+        let muted = HighlightStyle {
+            fade_out: Some(1.),
+            ..HighlightStyle::default()
+        };
+        let matched = HighlightStyle::default();
+        assert_eq!(
+            field_runs(10..30, &[2..4, 12..15, 28..33], muted, matched),
+            [
+                (2..4, matched),
+                (10..12, muted),
+                (12..15, matched),
+                (15..28, muted),
+                (28..33, matched),
+            ]
+        );
+        assert_eq!(field_runs(5..9, &[], muted, matched), [(5..9, muted)]);
+        let before = std::slice::from_ref(&(1..2));
+        assert_eq!(field_runs(5..5, before, muted, matched), [(1..2, matched)]);
     }
 
     #[test]

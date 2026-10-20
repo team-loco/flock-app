@@ -130,7 +130,7 @@ impl Workloads {
 
     fn follow_logs(&self, request: &LogRequest) {
         let status = self.lock().pod_status(&request.pod).unwrap_or(Status::Ok);
-        let script = logs::script(status, &request.container);
+        let script = logs::script(status, &request.container, request.instance);
         let request = request.clone();
         spawn("flock-demo-logs", move || {
             for line in script.initial {
@@ -282,6 +282,7 @@ mod tests {
         workloads.handle(&Command::StreamLogs(LogRequest {
             pod: pod("checkout-api-7f9c6d-x2lqp"),
             container: data::API.into(),
+            instance: flock_core::LogInstance::Current,
             sink,
         }));
         let lines: Vec<LogLine> = std::iter::from_fn(|| rx.recv_blocking().ok()).collect();
@@ -295,6 +296,7 @@ mod tests {
         workloads.handle(&Command::StreamLogs(LogRequest {
             pod: pod("checkout-api-7f9c6d-m8vtn"),
             container: data::API.into(),
+            instance: flock_core::LogInstance::Current,
             sink,
         }));
         let initial = logs::healthy_api().len();

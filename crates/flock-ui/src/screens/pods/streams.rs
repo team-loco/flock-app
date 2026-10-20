@@ -1,21 +1,22 @@
-use flock_core::pods::{ContainerState, Pod};
+use flock_core::pods::{ContainerState, Pod, Termination};
 use flock_core::{
-    Command, ExecEvent, ExecRequest, ExecTarget, LogRequest, ResourceRef, Sender, Sink, Source,
-    Status, TermSize,
+    Command, ExecEvent, ExecRequest, ExecTarget, LogInstance, LogRequest, ResourceRef, Sender,
+    Sink, Source, Status, TermSize, time,
 };
 use gpui::{
-    Context, Focusable, IntoElement, ParentElement, Styled, Subscription, Task, Window, div,
+    AnyElement, Context, Focusable, InteractiveElement, IntoElement, ParentElement, Styled,
+    Subscription, Task, Window, div,
 };
 
 use super::PodsScreen;
 use crate::assets::DOWNLOAD;
 use crate::kit::{
-    Button, Dock, DockTab, EmptyState, IconButton, LogView, Terminal, TerminalEvent, TextField,
-    Toast, confirm, toast,
+    Button, Dock, DockTab, EmptyState, IconButton, LogView, Segmented, Terminal, TerminalEvent,
+    TextField, Toast, confirm, toast,
 };
 use crate::screens::no_shell::{DEBUG_IMAGE, confirm_debug, no_shell_state, start_debug_button};
 use crate::screens::workload::kit_line;
-use crate::theme::SPACE_3;
+use crate::theme::{ActiveTheme, FONT_MONO, RULE, SPACE_2, SPACE_3, SPACE_6, TEXT_SMALL};
 
 pub const TERMINAL_ID: &str = "pod-terminal";
 const LOGS_TAB: usize = 0;
@@ -24,6 +25,10 @@ const LOGS_LABEL: &str = "Logs";
 const TERMINAL_LABEL: &str = "Terminal";
 const FOLLOW: &str = "follow";
 const WRAP: &str = "wrap";
+const RAW: &str = "raw";
+const SEPARATOR: &str = " · ";
+const PREVIOUS_INSTANCE: &str = "previous instance";
+const PREVIOUS_BANNER: &str = "pod-logs-previous-banner";
 const TIMESTAMPS: &str = "timestamps";
 const SELECT_FOR_LOGS: &str = "Select a pod to see its logs.";
 const SELECT_FOR_SHELL: &str = "Select a pod to open a shell.";
@@ -40,6 +45,7 @@ const START_DEBUG_ID: &str = "pod-start-debug";
 pub struct LogKey {
     pod: ResourceRef,
     container: String,
+    instance: LogInstance,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,6 +89,20 @@ pub fn log_file_name(pod: &str, container: &str) -> String {
     format!("{pod}-{container}.log")
 }
 
+pub fn previous_banner(last: &Termination) -> String {
+    let terminated = last
+        .ago
+        .map(|ago| format!("terminated {} ago", time::age(ago)));
+    let reason = Some(last.reason.clone()).filter(|reason| !reason.is_empty());
+    let exit = format!("exit {}", last.exit_code);
+    std::iter::once(PREVIOUS_INSTANCE.to_owned())
+        .chain(terminated)
+        .chain(reason)
+        .chain(std::iter::once(exit))
+        .collect::<Vec<_>>()
+        .join(SEPARATOR)
+}
+
 pub fn exit_note(code: Option<i32>) -> String {
     match code {
         Some(code) => format!("Session ended (exit {code})."),
@@ -95,13 +115,40 @@ impl PodsScreen {
         self.selected_container().map(|c| c.name.clone())
     }
 
+    fn previous_termination(&self) -> Option<&Termination> {
+        self.selected_container()?.last_termination.as_ref()
+    }
+
+    fn log_instance(&self) -> LogInstance {
+        match self.previous_termination() {
+            Some(_) => self.instance,
+            None => LogInstance::Current,
+        }
+    }
+
+    pub(super) fn show_previous_logs(&mut self, container: String, cx: &mut Context<Self>) {
+        self.pick_container(Some(container));
+        self.instance = LogInstance::Previous;
+        self.sync_selection(cx);
+        self.show_logs(cx);
+    }
+
+    fn set_instance(&mut self, instance: LogInstance, cx: &mut Context<Self>) {
+        self.instance = instance;
+        self.sync_streams(cx);
+        cx.notify();
+    }
+
     pub(super) fn sync_streams(&mut self, cx: &mut Context<Self>) {
         let pod = self.selected_pod().map(Pod::resource);
         let container = self.container_name();
         let target = pod.zip(container);
-        let log_key = target
-            .clone()
-            .map(|(pod, container)| LogKey { pod, container });
+        let instance = self.log_instance();
+        let log_key = target.clone().map(|(pod, container)| LogKey {
+            pod,
+            container,
+            instance,
+        });
         if self.log.as_ref().map(|s| &s.key) != log_key.as_ref() {
             self.log = None;
             self.logs.update(cx, LogView::clear);
@@ -129,12 +176,13 @@ impl PodsScreen {
         cx.emit(Command::StreamLogs(LogRequest {
             pod: key.pod.clone(),
             container: key.container.clone(),
+            instance: key.instance,
             sink,
         }));
         let task = cx.spawn(async move |this, cx| {
             while let Ok(line) = lines.recv().await {
                 let pushed = this.update(cx, |screen, cx| {
-                    let line = kit_line(line);
+                    let line = kit_line(line).with_fields();
                     screen.logs.update(cx, |logs, cx| logs.push(line, cx));
                 });
                 if pushed.is_err() {
@@ -330,11 +378,33 @@ impl PodsScreen {
         let follow = self.logs.read(cx).follow();
         let wrap = self.logs.read(cx).wrap();
         let timestamps = self.logs.read(cx).timestamps();
+        let raw = self.logs.read(cx).raw();
+        let instance = self.log_instance();
+        let instances = self.previous_termination().map(|_| {
+            let selected = LogInstance::ALL
+                .iter()
+                .position(|option| *option == instance)
+                .unwrap_or_default();
+            LogInstance::ALL
+                .iter()
+                .fold(Segmented::new("pod-logs-instance"), |group, option| {
+                    group.option(option.label())
+                })
+                .small()
+                .mono()
+                .selected(selected)
+                .on_select(cx.listener(|this, ix: &usize, _, cx| {
+                    if let Some(instance) = LogInstance::ALL.get(*ix).copied() {
+                        this.set_instance(instance, cx);
+                    }
+                }))
+        });
         div()
             .flex()
             .items_center()
             .gap(SPACE_3)
             .child(self.containers.clone())
+            .children(instances)
             .child(TextField::search(&self.search))
             .child(
                 Button::new("pod-logs-follow", FOLLOW)
@@ -362,6 +432,15 @@ impl PodsScreen {
                     .selected(wrap)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.logs.update(cx, |logs, cx| logs.set_wrap(!wrap, cx));
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("pod-logs-raw", RAW)
+                    .small()
+                    .selected(raw)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.logs.update(cx, |logs, cx| logs.set_raw(!raw, cx));
                         cx.notify();
                     })),
             )
@@ -423,7 +502,7 @@ impl PodsScreen {
                 DockTab::new(LOGS_LABEL)
                     .detail(detail.clone())
                     .tools(self.log_tools(cx))
-                    .content(self.logs.clone()),
+                    .content(self.log_content(cx)),
             )
             .tab(
                 DockTab::new(TERMINAL_LABEL)
@@ -433,7 +512,38 @@ impl PodsScreen {
             )
     }
 
-    fn terminal_content(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn log_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        let banner = self
+            .previous_termination()
+            .filter(|_| self.log_instance() == LogInstance::Previous)
+            .map(previous_banner);
+        let Some(banner) = banner else {
+            return self.logs.clone().into_any_element();
+        };
+        let palette = *cx.palette();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .debug_selector(|| PREVIOUS_BANNER.to_owned())
+                    .flex_none()
+                    .px(SPACE_6)
+                    .py(SPACE_2)
+                    .border_b(RULE)
+                    .border_color(palette.line)
+                    .bg(palette.warnbg)
+                    .text_color(palette.warn)
+                    .font_family(FONT_MONO)
+                    .text_size(TEXT_SMALL)
+                    .child(banner),
+            )
+            .child(div().flex_1().min_h_0().child(self.logs.clone()))
+            .into_any_element()
+    }
+
+    fn terminal_content(&self, cx: &mut Context<Self>) -> AnyElement {
         if !self.shell.as_ref().is_some_and(|s| s.no_shell) {
             return self.terminal.clone().into_any_element();
         }
@@ -484,6 +594,25 @@ mod tests {
             log_file_name("checkout-api-7f9c6d-x2lqp", "api"),
             "checkout-api-7f9c6d-x2lqp-api.log"
         );
+    }
+
+    #[test]
+    fn previous_banners_say_when_and_how_the_instance_ended() {
+        let last = Termination {
+            reason: "Error".into(),
+            exit_code: 1,
+            ago: Some(std::time::Duration::from_hours(15)),
+            ..Termination::default()
+        };
+        assert_eq!(
+            previous_banner(&last),
+            "previous instance · terminated 15h ago · Error · exit 1"
+        );
+        let unknown = Termination {
+            exit_code: 137,
+            ..Termination::default()
+        };
+        assert_eq!(previous_banner(&unknown), "previous instance · exit 137");
     }
 
     #[test]

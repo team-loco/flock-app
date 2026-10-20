@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use flock_core::{LogLevel, LogLine, LogRequest};
+use flock_core::{LogInstance, LogLevel, LogLine, LogRequest};
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use k8s_openapi::api::core::v1::{ContainerState, Pod};
@@ -23,27 +23,6 @@ const LEVEL_KEYS: [&str; 6] = [
     "severity=",
 ];
 const KLOG_DIGITS: usize = 4;
-
-fn level_word(word: &str) -> Option<LogLevel> {
-    match word {
-        "trace" => Some(LogLevel::Debug),
-        "debug" => Some(LogLevel::Debug),
-        "dbg" => Some(LogLevel::Debug),
-        "info" => Some(LogLevel::Info),
-        "inf" => Some(LogLevel::Info),
-        "notice" => Some(LogLevel::Info),
-        "warn" => Some(LogLevel::Warn),
-        "warning" => Some(LogLevel::Warn),
-        "wrn" => Some(LogLevel::Warn),
-        "error" => Some(LogLevel::Error),
-        "err" => Some(LogLevel::Error),
-        "fatal" => Some(LogLevel::Fatal),
-        "panic" => Some(LogLevel::Fatal),
-        "critical" => Some(LogLevel::Fatal),
-        "crit" => Some(LogLevel::Fatal),
-        _ => None,
-    }
-}
 
 fn klog_level(token: &str) -> Option<LogLevel> {
     let mut chars = token.chars();
@@ -68,7 +47,7 @@ pub fn detect_level(message: &str) -> Option<LogLevel> {
                 .chars()
                 .take_while(char::is_ascii_alphabetic)
                 .collect();
-            if let Some(level) = level_word(&word) {
+            if let Some(level) = LogLevel::from_word(&word) {
                 return Some(level);
             }
         }
@@ -80,7 +59,7 @@ pub fn detect_level(message: &str) -> Option<LogLevel> {
     let word = first
         .trim_matches(|c: char| !c.is_ascii_alphabetic())
         .to_ascii_lowercase();
-    level_word(&word)
+    LogLevel::from_word(&word)
 }
 
 pub fn parse_stamped(raw: &str, zone: &TimeZone) -> (Option<Timestamp>, LogLine) {
@@ -136,14 +115,16 @@ fn ops_request(request: &LogRequest) -> Result<ops::LogRequest> {
         .namespace
         .clone()
         .ok_or(Error::MissingField("metadata.namespace"))?;
+    let previous = request.instance == LogInstance::Previous;
     Ok(ops::LogRequest {
         namespace,
         pod: request.pod.name.clone(),
         container: Some(request.container.clone()),
-        follow: true,
+        follow: !previous,
         tail_lines: Some(TAIL_LINES),
         timestamps: true,
         since_seconds: None,
+        previous,
     })
 }
 
@@ -167,6 +148,9 @@ async fn pump(handle: &ClusterHandle, request: &LogRequest) -> Result<()> {
                 }
             }
         }
+    }
+    if params.previous {
+        return Ok(());
     }
     let pods: Api<Pod> = Api::namespaced(handle.client()?, &params.namespace);
     let pod = pods.get(&params.pod).await?;
@@ -275,14 +259,21 @@ mod tests {
                 name: "checkout-api-1".into(),
             },
             container: "api".into(),
+            instance: LogInstance::Current,
             sink: flock_core::Sink::channel().0,
         };
         let live = ops_request(&request).ok();
         assert_eq!(
-            live.as_ref().map(|r| (r.follow, r.timestamps)),
-            Some((true, true))
+            live.as_ref().map(|r| (r.follow, r.timestamps, r.previous)),
+            Some((true, true, false))
         );
         assert_eq!(live.and_then(|r| r.container).as_deref(), Some("api"));
+        request.instance = LogInstance::Previous;
+        let previous = ops_request(&request).ok();
+        assert_eq!(
+            previous.map(|r| (r.follow, r.previous)),
+            Some((false, true))
+        );
         request.pod.namespace = None;
         assert!(ops_request(&request).is_err());
     }
