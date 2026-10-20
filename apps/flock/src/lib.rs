@@ -1,4 +1,5 @@
 use clap::ValueEnum;
+use flock_core::crd::CrdKey;
 use flock_core::history::Location;
 use flock_core::tabs::{SavedPane, SavedWindow};
 use flock_core::{
@@ -32,6 +33,10 @@ const SAMPLE_CONTAINER: &str = "api";
 const SAMPLE_KUSTOMIZATION: &str = "apps-payments";
 const SAMPLE_JOB_NAMESPACE: &str = "data-pipeline";
 const SAMPLE_JOB: &str = "backfill-orders-28770412";
+const SAMPLE_CRD_GROUP: &str = "cert-manager.io";
+const SAMPLE_CRD_KIND: &str = "Certificate";
+const SAMPLE_CRD_NAMESPACE: &str = "web";
+const SAMPLE_CRD_OBJECT: &str = "web-frontend-tls";
 const FLUX_NAMESPACE: &str = "flux-system";
 
 pub const APP_ID: &str = "dev.flock.app";
@@ -164,6 +169,8 @@ pub enum Screen {
     Kustomizations,
     FluxGraph,
     FluxEvents,
+    CustomResources,
+    CustomResourceInspector,
     Job,
     Node,
     Gitops,
@@ -234,6 +241,14 @@ impl Screen {
             Self::Kustomizations => vec![sample, Command::SelectPage(Page::Kustomizations)],
             Self::FluxGraph => vec![sample, Command::SelectPage(Page::FluxGraph)],
             Self::FluxEvents => vec![Command::SelectPage(Page::FluxEvents)],
+            Self::CustomResources => vec![sample, open_certificates(&cluster)],
+            Self::CustomResourceInspector => {
+                vec![
+                    sample,
+                    open_certificates(&cluster),
+                    inspect_certificate(&cluster),
+                ]
+            }
             Self::Node => {
                 let target = preset.cluster_object(NODE, SAMPLE_NODE);
                 vec![sample, Command::OpenResource(target)]
@@ -287,6 +302,20 @@ impl Screen {
             Self::LocoRoutes => vec![sample, Command::SelectPage(Page::LocoRoutes)],
         }
     }
+}
+
+fn open_certificates(cluster: &ClusterId) -> Command {
+    Command::OpenCrd {
+        cluster: cluster.clone(),
+        crd: CrdKey::new(SAMPLE_CRD_GROUP, SAMPLE_CRD_KIND),
+    }
+}
+
+fn inspect_certificate(cluster: &ClusterId) -> Command {
+    let certificates = CrdKey::new(SAMPLE_CRD_GROUP, SAMPLE_CRD_KIND);
+    let namespace = Some(SAMPLE_CRD_NAMESPACE.into());
+    let target = certificates.object(cluster.clone(), namespace, SAMPLE_CRD_OBJECT.into());
+    Command::InspectResource(target)
 }
 
 impl Screen {
@@ -424,6 +453,8 @@ pub fn root_view(
         Screen::Kustomizations => shell_view(store, screen, preset, window, cx),
         Screen::FluxGraph => shell_view(store, screen, preset, window, cx),
         Screen::FluxEvents => shell_view(store, screen, preset, window, cx),
+        Screen::CustomResources => shell_view(store, screen, preset, window, cx),
+        Screen::CustomResourceInspector => shell_view(store, screen, preset, window, cx),
         Screen::Namespace => shell_view(store, screen, preset, window, cx),
         Screen::Job => shell_view(store, screen, preset, window, cx),
         Screen::Node => shell_view(store, screen, preset, window, cx),

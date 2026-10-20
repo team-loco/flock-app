@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::crd::CrdKey;
 use crate::{ClusterId, Command, FluxKey, LogTarget, Page, ResourceRef, Snapshot, WorkloadKind};
 
 pub const HISTORY_LIMIT: usize = 50;
@@ -16,6 +17,8 @@ pub struct Location {
     pub container: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub logs: Option<LogTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crd: Option<CrdKey>,
 }
 
 impl Default for Location {
@@ -33,6 +36,14 @@ impl Location {
             flux_object: None,
             container: None,
             logs: None,
+            crd: None,
+        }
+    }
+
+    pub fn crd_on(cluster: ClusterId, crd: CrdKey) -> Self {
+        Self {
+            crd: Some(crd),
+            ..Self::page_on(cluster, Page::CustomResources)
         }
     }
 
@@ -50,7 +61,10 @@ impl Location {
                 None => resource.name.clone(),
             },
             (None, Some(key)) => format!("{}/{}", key.namespace, key.name),
-            (None, None) => self.page.label().to_owned(),
+            (None, None) => self
+                .crd
+                .as_ref()
+                .map_or_else(|| self.page.label().to_owned(), |crd| crd.kind.clone()),
         };
         let subject = if let Some(target) = &self.logs {
             format!("Logs · {}", target.label())
@@ -115,6 +129,12 @@ impl Location {
             }
             (Some(resource), _, _) => return vec![Command::OpenResource(resource.clone())],
             (None, _, _) => {}
+        }
+        if let (Some(cluster), Some(crd)) = (&self.cluster, &self.crd) {
+            return vec![Command::OpenCrd {
+                cluster: cluster.clone(),
+                crd: crd.clone(),
+            }];
         }
         match &self.cluster {
             Some(cluster) if !self.page.is_flock() => {

@@ -59,6 +59,8 @@ pub struct Shell {
     add_cluster: Option<(Entity<AddClusterDialog>, Subscription)>,
     switcher: Entity<ClusterSwitcher>,
     tab_menu: Entity<crate::kit::ActionMenu>,
+    crd_filter: Entity<crate::kit::TextFieldState>,
+    _crd_filter_events: Subscription,
     _switcher_events: Subscription,
     _updates: Task<()>,
     _store: Entity<Store>,
@@ -104,6 +106,7 @@ impl Shell {
         let (palette, palette_events) = Self::new_palette(window, cx);
         let (switcher, switcher_events) = Self::new_switcher(window, cx);
         let tab_menu = cx.new(|cx| crate::kit::ActionMenu::context(tabs::TAB_MENU, cx));
+        let (crd_filter, crd_filter_events) = sidebar::crd_filter(window, cx);
         let state = AppState::default();
         let first = PaneScreens::new(state.panes().focused().id(), commands.clone(), window, cx);
         Self {
@@ -123,6 +126,8 @@ impl Shell {
             add_cluster: None,
             switcher,
             tab_menu,
+            crd_filter,
+            _crd_filter_events: crd_filter_events,
             _switcher_events: switcher_events,
             _updates: listen,
             _store: store,
@@ -496,6 +501,7 @@ impl Shell {
             Command::SelectPage(_) => {}
             Command::OpenResource(_) => {}
             Command::InspectResource(_) => {}
+            Command::OpenCrd { .. } => {}
             Command::FollowLogs(_) => {}
             Command::Compare(_) => {}
             Command::EditYaml(_) => {}
@@ -603,6 +609,12 @@ impl Shell {
             &preferences,
             cx,
         );
+        if page == Page::CustomResources {
+            let crd = location.crd.as_ref();
+            screens
+                .pages
+                .sync_custom(cluster, crd, snapshot, &preferences, cx);
+        }
         let object = location
             .flux_object
             .as_ref()

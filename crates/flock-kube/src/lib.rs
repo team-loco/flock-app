@@ -7,6 +7,7 @@ pub mod client;
 pub mod clock;
 pub mod compare;
 pub mod conditions;
+pub mod crd;
 pub mod detail;
 pub mod discovery;
 pub mod error;
@@ -16,6 +17,7 @@ mod fake;
 pub mod flux;
 pub mod gitops;
 pub mod inspect;
+pub mod jsonpath;
 pub mod lists;
 pub mod live;
 #[cfg(feature = "loco")]

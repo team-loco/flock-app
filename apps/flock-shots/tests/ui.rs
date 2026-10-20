@@ -3193,3 +3193,54 @@ fn an_unsaved_yaml_edit_survives_switching_tabs() -> anyhow::Result<()> {
     assert!(ui.bounds("edit-review-view").is_some());
     Ok(())
 }
+
+#[test]
+fn the_sidebar_lists_crds_by_group_filters_them_and_opens_their_objects() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    assert!(ui.bounds("nav-crd-certificates.cert-manager.io").is_some());
+    ui.scroll("sidebar-nav", gpui::point(gpui::px(0.), gpui::px(-2000.)))?;
+    ui.click("crd-filter")?;
+    ui.type_text("issuer")?;
+    assert!(ui.bounds("nav-crd-certificates.cert-manager.io").is_none());
+    assert!(
+        ui.bounds("nav-crd-gateways.gateway.networking.k8s.io")
+            .is_none()
+    );
+    ui.click("nav-crd-clusterissuers.cert-manager.io")?;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, Page::CustomResources);
+    assert_eq!(
+        location.crd,
+        Some(flock_core::crd::CrdKey::new(
+            "cert-manager.io",
+            "ClusterIssuer"
+        ))
+    );
+    assert!(
+        ui.bounds("custom-clusterissuers.cert-manager.io-row-0")
+            .is_some()
+    );
+    assert!(ui.bounds("custom-namespace").is_none());
+    Ok(())
+}
+
+#[test]
+fn a_custom_object_opens_the_inspector_and_edits_its_yaml() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::CustomResources)?;
+    assert!(ui.bounds("custom-namespace").is_some());
+    assert!(ui.bounds("custom-inspector-pane").is_none());
+    ui.click("custom-certificates.cert-manager.io-row-1")?;
+    assert!(ui.bounds("custom-inspector-pane").is_some());
+    ui.click("edit-custom")?;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, Page::EditYaml);
+    let target = location.resource.map(|target| (target.kind, target.name));
+    assert_eq!(
+        target,
+        Some((
+            "Certificate.cert-manager.io".into(),
+            "payments-db-tls".into()
+        ))
+    );
+    Ok(())
+}

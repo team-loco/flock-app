@@ -220,6 +220,10 @@ impl Subscription {
     pub fn kind(&self) -> &WatchKind {
         &self.kind
     }
+
+    pub fn belongs_to(&self, handle: &ClusterHandle) -> bool {
+        std::ptr::eq(self.shared.as_ptr(), Arc::as_ptr(&handle.shared))
+    }
 }
 
 impl Drop for Subscription {
@@ -288,6 +292,15 @@ impl ClusterHandle {
             shared: Arc::downgrade(&self.shared),
             kind,
         })
+    }
+
+    pub fn subscribe_resource(&self, kind: CustomKind, resource: ApiResource) -> Subscription {
+        let kind = WatchKind::Custom(kind);
+        self.shared.subscribe(&kind, Some(resource));
+        Subscription {
+            shared: Arc::downgrade(&self.shared),
+            kind,
+        }
     }
 
     pub fn objects<K: Watched>(&self) -> Vec<Arc<K>>

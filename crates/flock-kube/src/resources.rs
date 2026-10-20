@@ -11,6 +11,7 @@ use k8s_openapi::api::core::v1::{
     ConfigMap, Event, Namespace, Node, PersistentVolumeClaim, Pod, Secret, Service, ServiceAccount,
 };
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
+use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{FieldsV1, ManagedFieldsEntry};
 use kube::api::{DynamicObject, PartialObjectMeta};
 use kube::core::{ApiResource, GroupVersionKind};
@@ -72,6 +73,7 @@ pub enum WatchKind {
     NetworkPolicies,
     Events,
     PersistentVolumeClaims,
+    CustomResourceDefinitions,
     Custom(CustomKind),
 }
 
@@ -95,6 +97,7 @@ impl WatchKind {
             Self::NetworkPolicies => "NetworkPolicy",
             Self::Events => "Event",
             Self::PersistentVolumeClaims => "PersistentVolumeClaim",
+            Self::CustomResourceDefinitions => "CustomResourceDefinition",
             Self::Custom(kind) => &kind.kind,
         }
     }
@@ -130,6 +133,7 @@ watched! {
     PartialObjectMeta<NetworkPolicy> => NetworkPolicies,
     Event => Events,
     PersistentVolumeClaim => PersistentVolumeClaims,
+    CustomResourceDefinition => CustomResourceDefinitions,
 }
 
 #[derive(Debug)]
@@ -193,13 +197,26 @@ where
     K: Watched + DeserializeOwned + Resource<DynamicType = ()>,
     K::Scope: Send,
 {
+    spawn_trimmed(runtime, api, signals, trim_metadata)
+}
+
+fn spawn_trimmed<K>(
+    runtime: &Handle,
+    api: Api<K>,
+    signals: UnboundedSender<Signal>,
+    trim: fn(&mut K),
+) -> RunningWatch
+where
+    K: Watched + DeserializeOwned + Resource<DynamicType = ()>,
+    K::Scope: Send,
+{
     let writer = reflector::store::Writer::<K>::default();
     let store = writer.as_reader();
     let stream = reflector::reflector(
         writer,
         watcher(api, watcher::Config::default())
             .default_backoff()
-            .modify(trim_metadata),
+            .modify(trim),
     );
     let _guard = runtime.enter();
     RunningWatch {
@@ -263,6 +280,9 @@ pub fn spawn_builtin(
         WatchKind::Events => spawn_events(runtime, client, event_window, signals),
         WatchKind::PersistentVolumeClaims => {
             spawn_full::<PersistentVolumeClaim>(runtime, client, signals)
+        }
+        WatchKind::CustomResourceDefinitions => {
+            spawn_trimmed(runtime, Api::all(client), signals, trim_definition)
         }
         WatchKind::Custom(_) => return None,
     };
@@ -412,6 +432,13 @@ fn trim_metadata<K: Resource>(object: &mut K) {
     metadata.managed_fields = (!suspenders.is_empty()).then_some(suspenders);
     if let Some(annotations) = &mut metadata.annotations {
         annotations.remove(LAST_APPLIED);
+    }
+}
+
+fn trim_definition(definition: &mut CustomResourceDefinition) {
+    trim_metadata(definition);
+    for version in &mut definition.spec.versions {
+        version.schema = None;
     }
 }
 

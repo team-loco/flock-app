@@ -1,6 +1,7 @@
 mod add_cluster;
 mod changes;
 mod compare;
+mod crds;
 mod derive;
 mod detail;
 mod edit;
@@ -220,6 +221,8 @@ pub fn snapshot() -> Snapshot {
         catalog: settings::catalog(),
         pods: pods::pods(),
         forwards: Vec::new(),
+        crds: BTreeMap::from([(ClusterId::new(PROD_US_EAST), crds::definitions())]),
+        custom: crds::objects(&ClusterId::new(PROD_US_EAST)),
     };
     simulate::recount_pods(&mut snapshot, &ClusterId::new(PROD_US_EAST));
     derive_clusters(&mut snapshot);

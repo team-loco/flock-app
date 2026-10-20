@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use flock_core::add_cluster::home_relative;
 use flock_core::app_settings::DEFAULT_SNAPSHOTS;
+use flock_core::crd::{Crd, CrdKey, CustomObjects};
 use flock_core::home::problems_badge;
 use flock_core::resource::page_for_kind;
 use flock_core::settings::{Auth, ClusterSettings, Connection, ContextChange};
@@ -36,6 +37,7 @@ use crate::paste;
 use crate::probe::find_prometheus;
 use crate::problems::order;
 use crate::provider::AuthKind;
+use crate::resources::WatchKind;
 use crate::settings::KubeSettings;
 use crate::shell_env::{ShellEnv, capture, user_shell};
 use crate::snapshot::{BACKGROUND_KINDS, page_kinds};
@@ -130,9 +132,16 @@ impl Connected {
 }
 
 fn has_rows(target: &ResourceRef) -> bool {
-    flock_core::ResourceKind::ALL
-        .into_iter()
-        .any(|kind| kind.name() == target.kind)
+    CrdKey::parse(&target.kind).is_some()
+        || flock_core::ResourceKind::ALL
+            .into_iter()
+            .any(|kind| kind.name() == target.kind)
+}
+
+struct CustomWatch {
+    cluster: ClusterId,
+    crd: Crd,
+    subscription: Subscription,
 }
 
 struct Inspecting {
@@ -143,6 +152,8 @@ struct Inspecting {
 struct Navigation {
     selected: Option<ClusterId>,
     page: Page,
+    crd: Option<CrdKey>,
+    custom: Option<CustomWatch>,
     yaml: Option<(ResourceRef, String)>,
     inspecting: Option<Inspecting>,
     yaml_task: Option<TaskGuard>,
@@ -165,6 +176,8 @@ impl Navigation {
         Self {
             selected: None,
             page: Page::Overview,
+            crd: None,
+            custom: None,
             yaml: None,
             inspecting: None,
             yaml_task: None,
@@ -339,12 +352,61 @@ impl Live {
 
     fn page_changed(&mut self) {
         self.poll_page();
+        self.sync_custom();
         #[cfg(feature = "loco")]
         self.navigation.loco.sync(
             self.clusters.values().map(|c| (&c.id, &c.handle)),
             self.navigation.selected.as_ref(),
             self.navigation.page,
         );
+    }
+
+    fn sync_custom(&mut self) {
+        let shown = (self.navigation.page == Page::CustomResources)
+            .then(|| {
+                self.navigation
+                    .selected
+                    .clone()
+                    .zip(self.navigation.crd.clone())
+            })
+            .flatten();
+        let found = shown.and_then(|(cluster, key)| {
+            let handle = self.handle(&cluster)?.clone();
+            let crd = crate::crd::find(&handle, &key)?;
+            Some((cluster, crd, handle))
+        });
+        let Some((cluster, crd, handle)) = found else {
+            self.navigation.custom = None;
+            return;
+        };
+        let current = self.navigation.custom.as_ref().is_some_and(|watch| {
+            watch.cluster == cluster && watch.crd == crd && watch.subscription.belongs_to(&handle)
+        });
+        if current {
+            return;
+        }
+        let subscription = handle.subscribe_resource(
+            crate::crd::custom_kind(&crd),
+            crate::crd::api_resource(&crd),
+        );
+        self.navigation.custom = Some(CustomWatch {
+            cluster,
+            crd,
+            subscription,
+        });
+    }
+
+    fn edit_yaml(&mut self, resource: &ResourceRef) {
+        self.navigation.selected = Some(resource.cluster.clone());
+        self.navigation.page = Page::EditYaml;
+        self.page_changed();
+    }
+
+    fn open_crd(&mut self, cluster: &ClusterId, crd: &CrdKey) {
+        self.navigation.selected = Some(cluster.clone());
+        self.navigation.page = Page::CustomResources;
+        self.navigation.crd = Some(crd.clone());
+        self.page_changed();
     }
 
     fn poll_page(&mut self) {
@@ -460,7 +522,10 @@ impl Live {
 
     fn cluster_event(&mut self, event: &ClusterEvent) {
         if let ClusterEvent::Changed { id, .. } = event {
-            self.for_each_window(|live| live.refresh_yaml(id));
+            self.for_each_window(|live| {
+                live.sync_custom();
+                live.refresh_yaml(id);
+            });
         }
     }
 
@@ -750,16 +815,13 @@ impl Live {
             Command::ToggleSidebar => {}
             Command::OpenResource(resource) => self.open(resource),
             Command::InspectResource(resource) => self.open(resource),
+            Command::OpenCrd { cluster, crd } => self.open_crd(cluster, crd),
             Command::FollowLogs(_) => {}
             Command::OpenLogs { pod, .. } => self.open(pod),
             Command::NewTab(command) => return self.apply_current(command),
             Command::Compare(target) => self.compare(target, None),
             Command::CompareWith { base, other } => self.compare(base, Some(other)),
-            Command::EditYaml(resource) => {
-                self.navigation.selected = Some(resource.cluster.clone());
-                self.navigation.page = Page::EditYaml;
-                self.page_changed();
-            }
+            Command::EditYaml(resource) => self.edit_yaml(resource),
             Command::Edit(_) => self.act(command),
             Command::PortForward { .. } => self.act(command),
             Command::StopPortForward { .. } => self.act(command),
@@ -980,10 +1042,13 @@ impl Live {
 
     fn open(&mut self, resource: &ResourceRef) {
         let page = page_for_kind(&resource.kind);
+        let crd = CrdKey::parse(&resource.kind);
         let moved = self.navigation.selected.as_ref() != Some(&resource.cluster)
-            || self.navigation.page != page;
+            || self.navigation.page != page
+            || self.navigation.crd != crd;
         self.navigation.selected = Some(resource.cluster.clone());
         self.navigation.page = page;
+        self.navigation.crd = crd;
         if moved {
             self.page_changed();
         }
@@ -1036,6 +1101,14 @@ impl Live {
                 continue;
             };
             let page = navigation.page;
+            if page == Page::CustomResources {
+                let state = custom_state(navigation, &cluster.handle);
+                pages
+                    .entry(selected.clone())
+                    .or_default()
+                    .insert(page, state);
+                continue;
+            }
             let state = self.gitops.page_state(selected, page).or_else(|| {
                 let kinds = page_kinds(page);
                 let states = kinds.iter().map(|kind| cluster.handle.watch_state(kind));
@@ -1063,6 +1136,48 @@ impl Live {
             .filter_map(|navigation| navigation.inspecting.as_ref())
             .map(|inspecting| &inspecting.target)
             .filter(|target| &target.cluster == cluster)
+            .collect()
+    }
+
+    fn custom_objects(&self, now: Timestamp) -> Vec<CustomObjects> {
+        let mut built: Vec<CustomObjects> = Vec::new();
+        for watch in self.navigations().filter_map(|n| n.custom.as_ref()) {
+            let shown = built
+                .iter()
+                .any(|objects| objects.cluster == watch.cluster && objects.key == watch.crd.key);
+            let Some(handle) = self.handle(&watch.cluster).filter(|_| !shown) else {
+                continue;
+            };
+            built.push(CustomObjects {
+                cluster: watch.cluster.clone(),
+                key: watch.crd.key.clone(),
+                rows: crate::crd::rows(handle, &watch.crd, now),
+            });
+        }
+        let yaml = self.navigations().filter_map(|n| n.yaml.as_ref());
+        for (target, text) in yaml {
+            let row = built
+                .iter_mut()
+                .filter(|objects| {
+                    objects.cluster == target.cluster && objects.key.qualified() == target.kind
+                })
+                .flat_map(|objects| objects.rows.iter_mut())
+                .find(|row| {
+                    row.name == target.name
+                        && target.namespace.as_deref().unwrap_or_default() == row.namespace
+                });
+            if let Some(row) = row {
+                row.yaml.clone_from(text);
+            }
+        }
+        built
+    }
+
+    fn crds(&self) -> BTreeMap<ClusterId, Vec<Crd>> {
+        self.clusters
+            .values()
+            .map(|cluster| (cluster.id.clone(), crate::crd::definitions(&cluster.handle)))
+            .filter(|(_, crds)| !crds.is_empty())
             .collect()
     }
 
@@ -1185,11 +1300,29 @@ impl Live {
             },
             pods,
             forwards: Vec::new(),
+            crds: self.crds(),
+            custom: self.custom_objects(now),
         };
         self.gitops.fill(&mut snapshot);
         self.actions.overlay(&mut snapshot);
         snapshot
     }
+}
+
+fn custom_state(navigation: &Navigation, handle: &ClusterHandle) -> WatchState {
+    if let Some(watch) = &navigation.custom {
+        return handle.watch_state(watch.subscription.kind());
+    }
+    let definitions = handle.watch_state(&WatchKind::CustomResourceDefinitions);
+    if !definitions.is_loaded() {
+        return definitions;
+    }
+    let name = navigation
+        .crd
+        .as_ref()
+        .map(CrdKey::qualified)
+        .unwrap_or_default();
+    WatchState::Failed(format!("{name} is not installed on this cluster"))
 }
 
 pub fn cluster_settings(

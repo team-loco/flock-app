@@ -195,6 +195,11 @@ impl FilterBar {
         self
     }
 
+    pub fn set_scope(&mut self, picker: Option<AnyView>, cx: &mut Context<Self>) {
+        self.scope = picker;
+        cx.notify();
+    }
+
     pub fn query(&self) -> &TextFilter {
         &self.query
     }
