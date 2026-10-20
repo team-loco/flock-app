@@ -25,7 +25,19 @@ pub enum FluxKind {
     OciRepository,
 }
 
+const KUSTOMIZE_GROUP: &str = "kustomize.toolkit.fluxcd.io";
+const HELM_GROUP: &str = "helm.toolkit.fluxcd.io";
+const SOURCE_GROUP: &str = "source.toolkit.fluxcd.io";
+
 impl FluxKind {
+    pub const ALL: [Self; 5] = [
+        Self::Kustomization,
+        Self::HelmRelease,
+        Self::GitRepository,
+        Self::HelmRepository,
+        Self::OciRepository,
+    ];
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Kustomization => "Kustomization",
@@ -46,6 +58,16 @@ impl FluxKind {
         }
     }
 
+    pub const fn group(self) -> &'static str {
+        match self {
+            Self::Kustomization => KUSTOMIZE_GROUP,
+            Self::HelmRelease => HELM_GROUP,
+            Self::GitRepository => SOURCE_GROUP,
+            Self::HelmRepository => SOURCE_GROUP,
+            Self::OciRepository => SOURCE_GROUP,
+        }
+    }
+
     pub const fn is_source(self) -> bool {
         matches!(
             self,
@@ -54,14 +76,7 @@ impl FluxKind {
     }
 
     pub fn from_label(label: &str) -> Option<Self> {
-        let all = [
-            Self::Kustomization,
-            Self::HelmRelease,
-            Self::GitRepository,
-            Self::HelmRepository,
-            Self::OciRepository,
-        ];
-        all.into_iter().find(|kind| kind.label() == label)
+        Self::ALL.into_iter().find(|kind| kind.label() == label)
     }
 }
 

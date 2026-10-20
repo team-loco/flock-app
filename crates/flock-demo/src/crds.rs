@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use flock_core::crd::{Crd, CrdKey, CustomObjects, PrinterColumn};
 use flock_core::diagnosis::{self, Condition};
+use flock_core::flux::FluxKind;
 use flock_core::resources::Resource;
 use flock_core::{ClusterId, Status, Uid};
 
@@ -13,6 +14,9 @@ pub const CERT_MANAGER: &str = "cert-manager.io";
 pub const CERTIFICATE: &str = "Certificate";
 const GATEWAY_API: &str = "gateway.networking.k8s.io";
 const MONITORING: &str = "monitoring.coreos.com";
+const NOTIFICATION: &str = "notification.toolkit.fluxcd.io";
+const HELM_RELEASE_VERSION: &str = "v2";
+const ALERT_VERSION: &str = "v1beta3";
 const READY: &str = "Ready";
 const ACCEPTED: &str = "Accepted";
 const PROGRAMMED: &str = "Programmed";
@@ -50,7 +54,63 @@ fn crd(
     }
 }
 
+fn flux(kind: FluxKind, plural: &str) -> Crd {
+    crd(kind.group(), kind.label(), plural, true, Vec::new())
+}
+
+fn versioned(crd: Crd, version: &str) -> Crd {
+    Crd {
+        version: version.into(),
+        ..crd
+    }
+}
+
+fn flux_definitions() -> Vec<Crd> {
+    vec![
+        flux(FluxKind::Kustomization, "kustomizations"),
+        versioned(
+            flux(FluxKind::HelmRelease, "helmreleases"),
+            HELM_RELEASE_VERSION,
+        ),
+        flux(FluxKind::GitRepository, "gitrepositories"),
+        flux(FluxKind::HelmRepository, "helmrepositories"),
+        flux(FluxKind::OciRepository, "ocirepositories"),
+        crd(
+            FluxKind::GitRepository.group(),
+            "HelmChart",
+            "helmcharts",
+            true,
+            Vec::new(),
+        ),
+        versioned(
+            crd(NOTIFICATION, "Alert", "alerts", true, Vec::new()),
+            ALERT_VERSION,
+        ),
+    ]
+}
+
+#[cfg(feature = "loco")]
+fn loco_definitions() -> Vec<Crd> {
+    let group = flock_core::loco::GROUP;
+    vec![
+        crd(group, "Application", "applications", true, Vec::new()),
+        crd(group, "Build", "builds", true, Vec::new()),
+    ]
+}
+
+#[cfg(not(feature = "loco"))]
+const fn loco_definitions() -> Vec<Crd> {
+    Vec::new()
+}
+
 pub fn definitions() -> Vec<Crd> {
+    let mut definitions = third_party_definitions();
+    definitions.extend(flux_definitions());
+    definitions.extend(loco_definitions());
+    definitions
+}
+
+fn third_party_definitions() -> Vec<Crd> {
     vec![
         crd(
             CERT_MANAGER,
@@ -279,6 +339,7 @@ fn seeds(key: &CrdKey) -> Vec<Seed> {
 pub fn objects(cluster: &ClusterId) -> Vec<CustomObjects> {
     definitions()
         .into_iter()
+        .filter(|crd| crd.key.page().is_none())
         .map(|crd| CustomObjects {
             cluster: cluster.clone(),
             rows: seeds(&crd.key)

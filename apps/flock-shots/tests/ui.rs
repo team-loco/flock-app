@@ -3285,21 +3285,49 @@ fn an_unsaved_yaml_edit_survives_switching_tabs() -> anyhow::Result<()> {
     Ok(())
 }
 
+const CUSTOM_RESOURCES_ROW: &str = "nav-custom resources";
+
 #[test]
-fn the_sidebar_lists_crds_by_group_filters_them_and_opens_their_objects() -> anyhow::Result<()> {
+fn the_sidebar_row_opens_the_definitions_page_and_back_returns_to_it() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
-    assert!(ui.bounds("nav-crd-certificates.cert-manager.io").is_some());
+    let definitions = ui.state().snapshot.definitions(&ClusterId::new(SAMPLE));
+    assert_ne!(definitions.len(), 0);
+    assert!(ui.bounds("nav-custom resources-total").is_some());
     ui.scroll("sidebar-nav", gpui::point(gpui::px(0.), gpui::px(-2000.)))?;
-    ui.click("crd-filter")?;
-    ui.type_text("issuer")?;
-    assert!(ui.bounds("nav-crd-certificates.cert-manager.io").is_none());
-    assert!(
-        ui.bounds("nav-crd-gateways.gateway.networking.k8s.io")
-            .is_none()
-    );
-    ui.click("nav-crd-clusterissuers.cert-manager.io")?;
+    ui.click(CUSTOM_RESOURCES_ROW)?;
     let location = ui.state().location().clone();
     assert_eq!(location.page, Page::CustomResources);
+    assert_eq!(location.crd, None);
+    assert!(ui.bounds("crds-row-0").is_some());
+    ui.press("/")?;
+    ui.type_text("issuer")?;
+    assert!(ui.bounds("crds-row-1").is_some());
+    assert!(ui.bounds("crds-row-2").is_none());
+    ui.click("crds-row-1")?;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, Page::CustomResources);
+    assert_eq!(
+        location.crd,
+        Some(flock_core::crd::CrdKey::new("cert-manager.io", "Issuer"))
+    );
+    assert!(ui.bounds("empty-state-cluster").is_some());
+    let sentence = ui.read(Shell::custom_empty_sentence).unwrap_or_default();
+    assert!(sentence.starts_with("No Issuers in "), "{sentence}");
+    ui.press("cmd-[")?;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, Page::CustomResources);
+    assert_eq!(location.crd, None);
+    assert!(ui.bounds("crds-row-0").is_some());
+    Ok(())
+}
+
+#[test]
+fn the_keyboard_opens_a_definition_from_the_definitions_page() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::CustomResourceDefinitions)?;
+    ui.press("/")?;
+    ui.type_text("clusterissuer")?;
+    ui.press("cmd-e down enter")?;
+    let location = ui.state().location().clone();
     assert_eq!(
         location.crd,
         Some(flock_core::crd::CrdKey::new(
@@ -3316,14 +3344,15 @@ fn the_sidebar_lists_crds_by_group_filters_them_and_opens_their_objects() -> any
 }
 
 #[test]
-fn an_empty_custom_resource_list_names_its_kind() -> anyhow::Result<()> {
-    let mut ui = Ui::open(Screen::Cluster)?;
-    ui.scroll("sidebar-nav", gpui::point(gpui::px(0.), gpui::px(-2000.)))?;
-    ui.click("nav-crd-issuers.cert-manager.io")?;
-    assert!(ui.bounds("empty-state-cluster").is_some());
-    let sentence = ui.read(Shell::custom_empty_sentence);
-    let sentence = sentence.unwrap_or_default();
-    assert!(sentence.starts_with("No Issuers in "), "{sentence}");
+fn a_flux_definition_opens_its_flux_page() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::CustomResourceDefinitions)?;
+    ui.press("/")?;
+    ui.type_text("gitrepositories")?;
+    assert!(ui.bounds("crds-row-1").is_none());
+    ui.click("crds-row-0")?;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, Page::Sources);
+    assert_eq!(location.crd, None);
     Ok(())
 }
 

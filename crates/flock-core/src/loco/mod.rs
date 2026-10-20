@@ -16,6 +16,7 @@ pub use routes::{Listener, Route, RouteFilter, Routes};
 
 use crate::Seen;
 
+pub const GROUP: &str = "infra.loco.io";
 const DIGEST_PREFIX: &str = "sha256:";
 const DIGEST_KEEP: usize = 4;
 const ELLIPSIS: char = '…';

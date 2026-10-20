@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use flock_core::crd::{Crd, CrdKey, CustomObjects};
+use flock_core::crd::{Crd, CrdKey, CustomObjects, Definition};
 use flock_core::diagnosis;
 use flock_core::emptiness::Noun;
 use flock_core::events::Event;
@@ -22,6 +22,7 @@ use gpui::{
 };
 
 use super::ScreenEvent;
+use super::definitions::DefinitionsScreen;
 use crate::kit::{
     Button, CONDITIONS, CodeView, Column, ConditionTable, EVENTS, EmptyState, EventList, FilterBar,
     FilterEvent, IconButton, Inspector, MenuItem, Presence, Select, SelectEvent, ShowAll, Skeleton,
@@ -66,6 +67,7 @@ pub struct CustomResourcesScreen {
     tables: HashMap<CrdKey, Entity<Table<Resource>>>,
     namespaces: Entity<Select>,
     filter: Entity<FilterBar>,
+    definitions: Entity<DefinitionsScreen>,
     subscriptions: Vec<Subscription>,
     presence: Presence<Resource>,
 }
@@ -85,7 +87,11 @@ impl CustomResourcesScreen {
         });
         let filter =
             cx.new(|cx| FilterBar::new("custom-filter", window, cx).scope(namespaces.clone()));
+        let definitions = cx.new(|cx| DefinitionsScreen::new(window, cx));
         let subscriptions = vec![
+            cx.subscribe(&definitions, |_, _, event: &ScreenEvent, cx| {
+                cx.emit(event.clone());
+            }),
             cx.subscribe(&namespaces, |this, select, _: &SelectEvent, cx| {
                 let choice = chosen_namespace(select.read(cx));
                 this.choose_namespace(choice, cx);
@@ -111,6 +117,7 @@ impl CustomResourcesScreen {
             tables: HashMap::new(),
             namespaces,
             filter,
+            definitions,
             subscriptions,
             presence: Presence::default(),
         }
@@ -128,16 +135,25 @@ impl CustomResourcesScreen {
         true
     }
 
-    pub fn filter_bar(&self) -> &Entity<FilterBar> {
-        &self.filter
+    pub fn filter_bar(&self, cx: &App) -> Entity<FilterBar> {
+        match self.crd {
+            Some(_) => self.filter.clone(),
+            None => self.definitions.read(cx).filter_bar().clone(),
+        }
     }
 
     pub fn list_focus(&mut self, cx: &mut Context<Self>) -> Option<gpui::FocusHandle> {
+        if self.crd.is_none() {
+            return Some(self.definitions.read(cx).list_focus(cx));
+        }
         let table = self.table(cx)?;
         Some(gpui::Focusable::focus_handle(&table, cx))
     }
 
-    pub fn header_note(&self) -> (Counts, String) {
+    pub fn header_note(&self, cx: &App) -> (Counts, String) {
+        if self.crd.is_none() {
+            return self.definitions.read(cx).header_note();
+        }
         let shown: Vec<&Resource> = self
             .rows
             .iter()
@@ -157,6 +173,20 @@ impl CustomResourcesScreen {
         self.namespace
             .as_ref()
             .is_none_or(|namespace| &row.namespace == namespace)
+    }
+
+    pub fn show_definitions(
+        &mut self,
+        cluster: &ClusterSummary,
+        definitions: Vec<Definition>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.crd.take().is_some() {
+            self.selected = None;
+            cx.notify();
+        }
+        self.definitions
+            .update(cx, |screen, cx| screen.set(cluster, definitions, cx));
     }
 
     pub fn set(
@@ -521,6 +551,9 @@ fn object_ref(cluster: ClusterId, crd: &Crd, row: &Resource) -> ResourceRef {
 
 impl Render for CustomResourcesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.crd.is_none() {
+            return div().size_full().child(self.definitions.clone());
+        }
         let body: AnyElement = match (self.empty_state(cx), self.table(cx)) {
             (Some(empty), _) => empty.into_any_element(),
             (None, Some(table)) => table.into_any_element(),

@@ -4,6 +4,7 @@ pub mod changes;
 pub mod command;
 pub mod compare;
 pub(crate) mod custom;
+mod definitions;
 pub mod detail;
 pub mod edit;
 mod event_inspector;
@@ -264,7 +265,14 @@ impl ClusterPages {
         preferences: &flock_core::Preferences,
         cx: &mut App,
     ) {
-        let Some((cluster, key)) = cluster.zip(crd) else {
+        let Some(cluster) = cluster else {
+            return;
+        };
+        let Some(key) = crd else {
+            let definitions = snapshot.definitions(&cluster.id);
+            self.custom.update(cx, |screen, cx| {
+                screen.show_definitions(cluster, definitions, cx);
+            });
             return;
         };
         let Some(definition) = snapshot.crd(&cluster.id, key) else {
@@ -332,11 +340,13 @@ impl ClusterPages {
     }
 
     pub fn filter_bar(&self, page: Page, cx: &App) -> Option<Entity<FilterBar>> {
+        if page == Page::CustomResources {
+            return Some(self.custom.read(cx).filter_bar(cx));
+        }
         let bar = match page {
             Page::Nodes => self.nodes.read(cx).filter_bar(),
             Page::Namespaces => self.namespaces.read(cx).filter_bar(),
             Page::Events => self.events.read(cx).filter_bar(),
-            Page::CustomResources => self.custom.read(cx).filter_bar(),
             Page::Releases => self.helm.read(cx).filter_bar(),
             other if is_flux_list(other) => self.flux.read(cx).filter_bar(),
             other => {
@@ -412,7 +422,7 @@ impl ClusterPages {
             return Some(self.flux.read(cx).header_note());
         }
         if page == Page::CustomResources {
-            return Some(self.custom.read(cx).header_note());
+            return Some(self.custom.read(cx).header_note(cx));
         }
         if page == Page::Releases {
             return Some(self.helm.read(cx).header_note());
