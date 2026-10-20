@@ -1,8 +1,11 @@
 use std::time::Duration;
 
+use crate::condition_line::ConditionLine;
+use crate::diagnosis::Condition;
 use crate::{ResourceRef, Status, Uid, time, units};
 
 const CRASH_LOOP: &str = "CrashLoopBackOff";
+pub const PROGRESS_DEADLINE: &str = "ProgressDeadlineExceeded";
 const NONE: &str = "—";
 const FIELD_SEPARATOR: &str = " · ";
 const LIMIT_SEPARATOR: &str = " / ";
@@ -74,7 +77,7 @@ pub struct Workload {
     pub uid: Uid,
     pub kind: WorkloadKind,
     pub desired: u32,
-    pub stalled: bool,
+    pub conditions: Vec<Condition>,
     pub pending: Option<Pending>,
     pub managed_by: Option<ResourceRef>,
     pub pods: Vec<Pod>,
@@ -88,6 +91,19 @@ impl Workload {
     pub fn ready(&self) -> u32 {
         let ready = self.pods.iter().filter(|pod| pod.is_ready()).count();
         u32::try_from(ready).unwrap_or(u32::MAX)
+    }
+
+    pub fn stalled(&self) -> bool {
+        self.conditions
+            .iter()
+            .any(|condition| condition.reason == PROGRESS_DEADLINE)
+    }
+
+    pub fn condition_line(&self) -> Option<ConditionLine> {
+        if self.pending.is_some() {
+            return None;
+        }
+        ConditionLine::pick(&self.conditions)
     }
 
     pub fn ready_label(&self) -> String {
@@ -122,7 +138,7 @@ impl Workload {
             return Status::Ok;
         }
         let failing = self.pods.iter().any(|pod| pod.status == Status::Err);
-        match (failing, self.stalled) {
+        match (failing, self.stalled()) {
             (true, _) => Status::Err,
             (false, true) => Status::Warn,
             (false, false) => Status::Progress,
@@ -203,7 +219,7 @@ impl Workload {
                 problem(&failing)
             )
         };
-        let tail = match (self.stalled, revision) {
+        let tail = match (self.stalled(), revision) {
             (true, Some(number)) => format!(", so the rollout to revision {number} is stuck."),
             (false, Some(number)) if failing.is_empty() => {
                 format!("; the rollout to revision {number} is in progress.")
@@ -600,6 +616,8 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn workload(pods: Vec<Pod>, stalled: bool) -> Workload {
+        let stuck = Condition::new("Progressing", "False").reason(PROGRESS_DEADLINE);
+        let conditions = if stalled { vec![stuck] } else { Vec::new() };
         Workload {
             uid: Uid::default(),
             target: ResourceRef {
@@ -610,7 +628,7 @@ pub(crate) mod tests {
             },
             kind: WorkloadKind::Deployment,
             desired: 3,
-            stalled,
+            conditions,
             pending: None,
             managed_by: None,
             pods,
@@ -881,5 +899,18 @@ pub(crate) mod tests {
             env: Vec::new(),
         });
         assert_eq!(w.image(), Some("checkout-api:2.14.0"));
+    }
+
+    #[test]
+    fn the_status_line_is_the_condition_unless_an_action_is_pending() {
+        let mut w = workload(vec![crashing("a")], true);
+        assert!(w.stalled());
+        assert_eq!(
+            w.condition_line().map(|line| line.compact()).as_deref(),
+            Some("Progressing=False · ProgressDeadlineExceeded")
+        );
+        w.pending = Some(Pending::Restarting);
+        assert_eq!(w.condition_line(), None);
+        assert!(!workload(Vec::new(), false).stalled());
     }
 }

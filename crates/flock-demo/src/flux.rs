@@ -48,6 +48,7 @@ const UNKNOWN: &str = "Unknown";
 const SUCCEEDED: &str = "ReconciliationSucceeded";
 const PROGRESSING: &str = "Progressing";
 const HEALTH_CHECK_FAILED: &str = "HealthCheckFailed";
+const RECONCILIATION_IN_PROGRESS: &str = "Reconciliation in progress";
 const UPGRADE_FAILED: &str = "UpgradeFailed";
 const PAYMENTS_HEALTH_MESSAGE: &str = "health check failed after 5m0s: timeout waiting for: [Deployment/payments/checkout-api status: 'InProgress']";
 const PROMETHEUS_UPGRADE_MESSAGE: &str = "Helm upgrade failed for release monitoring/kube-prometheus-stack with chart kube-prometheus-stack@62.7.0: context deadline exceeded";
@@ -243,10 +244,11 @@ fn settled_conditions(phase: Phase, sentence: &Sentence) -> Vec<Condition> {
         .age(Some(ago(3 * HOUR)));
     let waiting = Condition::new(READY, UNKNOWN)
         .reason(PROGRESSING)
-        .message("Reconciliation in progress")
+        .message(RECONCILIATION_IN_PROGRESS)
         .age(Some(ago(MINUTE)));
     let reconciling = Condition::new(RECONCILING, TRUE)
         .reason(PROGRESSING)
+        .message(RECONCILIATION_IN_PROGRESS)
         .age(Some(ago(MINUTE)));
     match phase {
         Phase::Ready => vec![ready],

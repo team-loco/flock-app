@@ -1,8 +1,9 @@
+use flock_core::condition_line::{ConditionLine, LineText};
 use flock_core::pods::PodEvent;
 use flock_core::{Condition, Diagnosis, Status};
 use gpui::{
-    AnyElement, App, FontWeight, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    SharedString, Styled, Window, div, prelude::FluentBuilder, relative,
+    AnyElement, App, FontWeight, HighlightStyle, InteractiveElement, IntoElement, ParentElement,
+    RenderOnce, SharedString, Styled, Window, div, prelude::FluentBuilder, relative,
 };
 
 use super::selectable::SelectableText;
@@ -19,6 +20,42 @@ const NO_CONDITIONS: &str = "No conditions reported.";
 const NO_EVENTS: &str = "No recent events.";
 const MISSING: &str = "—";
 const HEADERS: [&str; 3] = ["Type", "Status", "Age"];
+
+#[derive(IntoElement)]
+pub struct ConditionText {
+    line: ConditionLine,
+}
+
+impl ConditionText {
+    pub fn new(line: ConditionLine) -> Self {
+        Self { line }
+    }
+}
+
+impl RenderOnce for ConditionText {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let palette = cx.palette();
+        let LineText {
+            text,
+            head,
+            separator,
+        } = self.line.full();
+        let head_style = HighlightStyle {
+            color: Some(palette.status(self.line.status)),
+            ..HighlightStyle::default()
+        };
+        let separator_style = HighlightStyle {
+            color: Some(palette.mute),
+            ..HighlightStyle::default()
+        };
+        let highlights = std::iter::once((head, head_style))
+            .chain(separator.map(|range| (range, separator_style)));
+        div()
+            .font_family(FONT_MONO)
+            .text_size(TEXT_MONO)
+            .child(SelectableText::new(text).highlights(highlights))
+    }
+}
 
 #[derive(IntoElement)]
 pub struct WhatsWrong {

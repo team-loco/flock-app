@@ -253,7 +253,7 @@ mod tests {
                     target,
                     kind: WorkloadKind::Deployment,
                     desired: 1,
-                    stalled: false,
+                    conditions: Vec::new(),
                     pending: None,
                     managed_by: None,
                     pods: Vec::new(),

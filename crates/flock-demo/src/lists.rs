@@ -5,6 +5,7 @@ use std::time::Duration;
 use flock_core::diagnosis::from_conditions;
 use flock_core::resources::{Resource, ResourceKind};
 use flock_core::time::age;
+use flock_core::workload::PROGRESS_DEADLINE;
 use flock_core::{Condition, Diagnosis, Status, Uid};
 
 use crate::detail::{days, hours, minutes};
@@ -966,7 +967,7 @@ const CHECKOUT_CONFIG: &str = "  app.yaml: |\n    server:\n      port: 8080\n   
 const ROOT_CA_KEYS: &[&str] = &["ca.crt"];
 const CHECKOUT: &str = "checkout-api";
 
-fn deployment_conditions(available: bool, progressing: Condition) -> Vec<Condition> {
+pub(crate) fn deployment_conditions(available: bool, progressing: Condition) -> Vec<Condition> {
     let available = if available {
         Condition::new("Available", TRUE)
             .reason("MinimumReplicasAvailable")
@@ -982,11 +983,19 @@ fn deployment_conditions(available: bool, progressing: Condition) -> Vec<Conditi
     ]
 }
 
-fn rolled_out(name: &str) -> Condition {
+pub(crate) fn rolled_out(name: &str) -> Condition {
     Condition::new("Progressing", TRUE)
         .reason("NewReplicaSetAvailable")
         .message(format!(
             "ReplicaSet \"{name}\" has successfully progressed."
+        ))
+}
+
+pub(crate) fn timed_out(replica_set: &str) -> Condition {
+    Condition::new("Progressing", FALSE)
+        .reason(PROGRESS_DEADLINE)
+        .message(format!(
+            "ReplicaSet \"{replica_set}\" has timed out progressing."
         ))
 }
 
@@ -998,9 +1007,7 @@ struct Trouble {
 }
 
 fn troubles() -> Vec<Trouble> {
-    let stalled = Condition::new("Progressing", FALSE)
-        .reason("ProgressDeadlineExceeded")
-        .message("ReplicaSet \"checkout-api-7f9c6d\" has timed out progressing.");
+    let stalled = timed_out("checkout-api-7f9c6d");
     let deadline = Condition::new("Failed", TRUE)
         .reason("DeadlineExceeded")
         .message(DEADLINE_MESSAGE)

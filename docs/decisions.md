@@ -96,8 +96,9 @@ Settled; change only with a new entry that says why.
     product owner; supersedes HANDOFF's "one plain sentence first" for list pages (Cluster overview,
     Nodes, Namespaces, Events, Pods and every resource list), which now open on the FilterBar. The
     overview and Nodes keep their mono meta line (`kit::MetaLine`). Object pages keep their
-    sentence where it says something nothing else does: the Flux object status, the workload
-    rollout, the pod inspector's container state, Compare. Object actions move off inspector
+    sentence where it says something nothing else does: the pod inspector's container state,
+    Compare. (The Flux object status and the workload rollout sentences were replaced by the
+    raw condition line in 46.) Object actions move off inspector
     headers onto the rows themselves: every row with actions shows a ⋯ on hover and opens the same
     menu on right-click (`Table::row_actions`), with one-line descriptions and the usual in-app
     confirm for destructive items (decision 15). Inspectors keep only their primary action (Cordon
@@ -423,3 +424,18 @@ Settled; change only with a new entry that says why.
     the editor focused through their second bindings, ⌃- and ⌃⇧-, which the editor does not use.
     Esc in the editor moves focus to the page, where ⌘[ and ⌘] navigate again. An Edit YAML tab
     opens with the page it was opened from as its Back entry, so Back returns to that page.
+46. **Workload and Flux object pages lead with the raw condition** (design v2 `Workload`,
+    `Kustomization` and `Split`; product owner; amends 22): the v2 design replaced the plain-English
+    status sentence under the header with the condition Kubernetes or Flux reported, because the
+    raw `Type=Status Reason · message` is what people search for, paste into tickets and match
+    against controller docs, and the prose only paraphrased it. `flock_core::condition_line`
+    picks the condition: a progressing one (`Reconciling=True`) first, then failing, then
+    unknown, breaking ties by `Stalled`, `ReplicaFailure`, `Released`, `Progressing`, `Ready`,
+    `Available`, then list order; a healthy object shows `Ready` or `Available`. The message is
+    folded to one line and cut at `MESSAGE_LIMIT` characters (the Conditions table keeps the full
+    text). Full pages draw it in mono with `Type=Status` in the status colour; split compact panes
+    show `Type=Status · Reason`. A suspended Flux object shows `spec.suspend=true · last applied
+    <revision>`. Workloads now carry their Deployment, StatefulSet or DaemonSet conditions, and
+    `stalled` is derived from `ProgressDeadlineExceeded` among them. The prose sentence stays as
+    the fallback while a Restart, Scale or Rollback is pending and for objects that report no
+    conditions; Flux list rows, pods and Compare keep their sentences.

@@ -6,6 +6,8 @@ use flock_core::workload::{
 };
 use flock_core::{ClusterId, ResourceRef, Status, Uid, Workload, WorkloadKind};
 
+use crate::lists::{deployment_conditions, timed_out};
+
 pub const CLUSTER: &str = "prod-us-east";
 pub const NAMESPACE: &str = "ws-0192c3e7";
 pub const NAME: &str = "checkout";
@@ -41,7 +43,7 @@ pub fn checkout() -> Workload {
         target: target(),
         kind: WorkloadKind::Deployment,
         desired: DESIRED,
-        stalled: true,
+        conditions: deployment_conditions(false, timed_out(POD_PREFIX)),
         pending: None,
         managed_by: None,
         pods: POD_SUFFIXES
