@@ -254,7 +254,7 @@ impl<R: 'static> Column<R> {
         };
         let tooltip = self.tooltip.as_ref().map(|text| text(row));
         match tooltip.filter(|tooltip| !tooltip.is_empty()) {
-            Some(tooltip) => div()
+            Some(tooltip) => justify(div().flex().items_center(), self.align)
                 .id(self.title.clone())
                 .w_full()
                 .min_w_0()
@@ -324,6 +324,10 @@ fn cell_frame(width: Width, align: Align) -> Div {
         Width::Flex { weight, min } => cell.flex_grow(weight).flex_basis(Pixels::ZERO).min_w(min),
         Width::Auto { min, .. } => cell.w(min).flex_none(),
     };
+    justify(cell, align)
+}
+
+fn justify(cell: Div, align: Align) -> Div {
     match align {
         Align::Start => cell,
         Align::Center => cell.justify_center(),
