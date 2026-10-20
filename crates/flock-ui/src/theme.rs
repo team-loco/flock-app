@@ -274,6 +274,7 @@ pub struct Palette {
     pub fg: Hsla,
     pub fg2: Hsla,
     pub mute: Hsla,
+    pub edge: Hsla,
     pub sel: Hsla,
     pub selfg: Hsla,
     pub selline: Hsla,
@@ -312,6 +313,7 @@ impl Palette {
             fg: rgb(0x00DC_DFE4).into(),
             fg2: rgb(0x00B3_B9C3).into(),
             mute: rgb(0x008E_96A3).into(),
+            edge: rgb(0x0060_6876).into(),
             sel: rgb(0x001F_2C40).into(),
             selfg: rgb(0x00F2_F6FC).into(),
             selline: rgb(0x003A_5A8C).into(),
@@ -350,6 +352,7 @@ impl Palette {
             fg: rgb(0x001D_2027).into(),
             fg2: rgb(0x003B_414B).into(),
             mute: rgb(0x005F_6774).into(),
+            edge: rgb(0x0086_8E9B).into(),
             sel: rgb(0x00DC_E7FA).into(),
             selfg: rgb(0x000D_2850).into(),
             selline: rgb(0x008D_B0EA).into(),
@@ -611,6 +614,34 @@ mod tests {
             assert_eq!(color(vt100::Color::Idx(232)), gray);
             let custom: Hsla = rgb(0x0012_3456).into();
             assert_eq!(color(vt100::Color::Rgb(0x12, 0x34, 0x56)), custom);
+        }
+    }
+
+    fn linear(channel: f32) -> f32 {
+        if channel <= 0.03928 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    fn luminance(color: Hsla) -> f32 {
+        let rgba = color.to_rgb();
+        0.2126 * linear(rgba.r) + 0.7152 * linear(rgba.g) + 0.0722 * linear(rgba.b)
+    }
+
+    fn contrast(a: Hsla, b: Hsla) -> f32 {
+        let (la, lb) = (luminance(a), luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    #[test]
+    fn graph_edges_reach_non_text_contrast_in_both_themes() {
+        const MIN_GRAPHIC_CONTRAST: f32 = 3.0;
+        for palette in [Palette::dark(), Palette::light()] {
+            let ratio = contrast(palette.edge, palette.editor);
+            assert!(ratio >= MIN_GRAPHIC_CONTRAST, "edge contrast {ratio}");
+            assert!(ratio < contrast(palette.fg, palette.editor));
         }
     }
 
