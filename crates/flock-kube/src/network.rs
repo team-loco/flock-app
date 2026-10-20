@@ -1,7 +1,10 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use flock_core::home::Problem;
 use flock_core::overview::NetworkFacts;
+use flock_core::{ClusterId, ResourceRef, Status};
+use jiff::Timestamp;
 use k8s_openapi::api::core::v1::{PersistentVolumeClaim, Service};
 use k8s_openapi::api::discovery::v1::{Endpoint, EndpointSlice};
 
@@ -9,6 +12,8 @@ const SERVICE_NAME_LABEL: &str = "kubernetes.io/service-name";
 const EXTERNAL_NAME: &str = "ExternalName";
 const LOAD_BALANCER: &str = "LoadBalancer";
 const PENDING: &str = "Pending";
+const SERVICE_KIND: &str = "Service";
+const NO_ENDPOINTS: &str = "no ready endpoints";
 
 pub fn facts(
     services: &[Arc<Service>],
@@ -22,25 +27,99 @@ pub fn facts(
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct Tally {
+    ready: usize,
+    total: usize,
+}
+
+fn tallies(slices: &[Arc<EndpointSlice>]) -> BTreeMap<(&str, &str), Tally> {
+    let mut tallies: BTreeMap<(&str, &str), Tally> = BTreeMap::new();
+    for slice in slices {
+        let namespace = slice.metadata.namespace.as_deref();
+        let service = slice
+            .metadata
+            .labels
+            .as_ref()
+            .and_then(|labels| labels.get(SERVICE_NAME_LABEL));
+        let (Some(namespace), Some(service)) = (namespace, service) else {
+            continue;
+        };
+        let tally = tallies.entry((namespace, service.as_str())).or_default();
+        tally.total += slice.endpoints.iter().flatten().count();
+        tally.ready += slice
+            .endpoints
+            .iter()
+            .flatten()
+            .filter(|e| is_ready(e))
+            .count();
+    }
+    tallies
+}
+
+fn service_key(service: &Service) -> (&str, &str) {
+    let namespace = service.metadata.namespace.as_deref().unwrap_or_default();
+    let name = service.metadata.name.as_deref().unwrap_or_default();
+    (namespace, name)
+}
+
 fn without_endpoints(services: &[Arc<Service>], slices: &[Arc<EndpointSlice>]) -> usize {
-    let served: BTreeSet<(&str, &str)> = slices
-        .iter()
-        .filter(|slice| slice.endpoints.iter().flatten().any(is_ready))
-        .filter_map(|slice| {
-            let namespace = slice.metadata.namespace.as_deref()?;
-            let service = slice.metadata.labels.as_ref()?.get(SERVICE_NAME_LABEL)?;
-            Some((namespace, service.as_str()))
-        })
-        .collect();
+    let tallies = tallies(slices);
     services
         .iter()
         .filter(|service| selects_pods(service))
         .filter(|service| {
-            let namespace = service.metadata.namespace.as_deref().unwrap_or_default();
-            let name = service.metadata.name.as_deref().unwrap_or_default();
-            !served.contains(&(namespace, name))
+            tallies
+                .get(&service_key(service))
+                .is_none_or(|tally| tally.ready == 0)
         })
         .count()
+}
+
+pub fn unready_services(
+    cluster: &ClusterId,
+    services: &[Arc<Service>],
+    slices: Option<&[Arc<EndpointSlice>]>,
+    now: Timestamp,
+) -> Vec<Problem> {
+    let Some(slices) = slices else {
+        return Vec::new();
+    };
+    let tallies = tallies(slices);
+    services
+        .iter()
+        .filter(|service| selects_pods(service))
+        .filter_map(|service| {
+            let tally = tallies
+                .get(&service_key(service))
+                .copied()
+                .unwrap_or_default();
+            if tally.total > 0 && tally.ready == tally.total {
+                return None;
+            }
+            let (namespace, name) = service_key(service);
+            let message = if tally.total == 0 {
+                NO_ENDPOINTS.to_owned()
+            } else {
+                format!(
+                    "{} of {} endpoints not ready",
+                    tally.total - tally.ready,
+                    tally.total
+                )
+            };
+            Some(Problem {
+                status: Status::Warn,
+                target: ResourceRef {
+                    cluster: cluster.clone(),
+                    kind: SERVICE_KIND.to_owned(),
+                    namespace: Some(namespace.to_owned()),
+                    name: name.to_owned(),
+                },
+                message,
+                age: crate::clock::age(&service.metadata, now),
+            })
+        })
+        .collect()
 }
 
 fn is_ready(endpoint: &Endpoint) -> bool {
@@ -131,6 +210,38 @@ mod tests {
         ];
         let facts = facts(&services, Some(&slices), &[]);
         assert_eq!(facts.services_without_endpoints, Some(2));
+    }
+
+    #[test]
+    fn partly_ready_and_endpointless_services_are_listed_with_their_counts() {
+        let selector = json!({"selector": {"app": "x"}});
+        let services = [
+            service("whole", &selector, &json!({})),
+            service("partial", &selector, &json!({})),
+            service("empty", &selector, &json!({})),
+            service("manual", &json!({}), &json!({})),
+        ];
+        let ready = json!({"addresses": ["10.0.0.1"], "conditions": {"ready": true}});
+        let down = json!({"addresses": ["10.0.0.2"], "conditions": {"ready": false}});
+        let slices = [
+            slice("whole", &json!([ready])),
+            slice("partial", &json!([ready, down, down])),
+        ];
+        let cluster = ClusterId::new("a");
+        let now = Timestamp::UNIX_EPOCH;
+        let problems = unready_services(&cluster, &services, Some(&slices), now);
+        let found: Vec<(&str, &str)> = problems
+            .iter()
+            .map(|p| (p.target.name.as_str(), p.message.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("partial", "2 of 3 endpoints not ready"),
+                ("empty", NO_ENDPOINTS)
+            ]
+        );
+        assert!(unready_services(&cluster, &services, None, now).is_empty());
     }
 
     #[test]

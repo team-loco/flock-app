@@ -907,7 +907,7 @@ impl Live {
             }
             Command::SelectPage(page) => self.select_page(*page),
             Command::OpenHelmRelease(key) => self.open_helm(key),
-            Command::OpenCommit(_) => {
+            Command::OpenCommit(_) | Command::OpenClusterChanges(_) => {
                 self.navigation.selected = None;
                 self.navigation.page = Page::Changes;
                 self.page_changed();
@@ -1659,6 +1659,7 @@ fn leaves_compare(command: &Command) -> bool {
             | Command::SelectPage(_)
             | Command::OpenLogs { .. }
             | Command::OpenCommit(_)
+            | Command::OpenClusterChanges(_)
             | Command::OpenFluxObject(_)
             | Command::OpenResource(_)
             | Command::EditYaml(_)

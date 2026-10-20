@@ -253,8 +253,10 @@ impl NamespacePage {
             })
             .unwrap_or_default();
         events.sort_by_key(|e| e.age);
+        let unready = detail.map(|d| d.overview.unready_services.as_slice());
         let attention = problems
             .iter()
+            .chain(unready.unwrap_or_default())
             .filter(|p| {
                 p.target.cluster == target.cluster && p.target.namespace.as_deref() == Some(name)
             })
@@ -569,6 +571,18 @@ mod tests {
         };
         assert_eq!(quiet.badge(), Some((Status::Warn, "2 warnings".into())));
         assert_eq!(NamespacePage::default().badge(), None);
+    }
+
+    #[test]
+    fn unready_services_of_this_namespace_join_what_needs_attention() {
+        let mut service = problem(NS, Status::Warn);
+        service.target.kind = "Service".into();
+        let mut elsewhere = problem("orders", Status::Warn);
+        elsewhere.target.kind = "Service".into();
+        let mut detail = detail();
+        detail.overview.unready_services = vec![service.clone(), elsewhere];
+        let page = NamespacePage::build(&target(), Some(&detail), &[]);
+        assert_eq!(page.attention, [service]);
     }
 
     #[test]

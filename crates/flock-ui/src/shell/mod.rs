@@ -342,6 +342,10 @@ impl Shell {
         self.focused_screens().settings.read(cx).selected().cloned()
     }
 
+    pub fn changes_cluster(&self, cx: &App) -> Option<ClusterId> {
+        self.focused_screens().changes.read(cx).cluster().cloned()
+    }
+
     pub fn open_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.switcher
             .update(cx, |switcher, cx| switcher.show(window, cx));
@@ -563,6 +567,11 @@ impl Shell {
                 toast(Toast::new(Status::Ok, title).detail(detail), cx);
             }
             Command::StopPortForward { .. } => {}
+            Command::OpenClusterChanges(cluster) => {
+                self.focused_screens()
+                    .changes
+                    .update(cx, |changes, cx| changes.show_cluster(cluster, cx));
+            }
             Command::OpenCommit(sha) => {
                 self.focused_screens()
                     .changes

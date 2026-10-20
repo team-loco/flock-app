@@ -20,6 +20,7 @@ pub enum Command {
     SelectPage(Page),
     NewTab(Box<Command>),
     OpenCommit(String),
+    OpenClusterChanges(ClusterId),
     ToggleSidebar,
     OpenResource(ResourceRef),
     InspectResource(ResourceRef),
@@ -163,6 +164,7 @@ impl AppState {
             Command::CompareWith { .. } => Some(vec![command.clone()]),
             Command::OpenFluxObject(_) => Some(vec![command.clone()]),
             Command::OpenCommit(_) => Some(vec![command.clone()]),
+            Command::OpenClusterChanges(_) => Some(vec![command.clone()]),
             Command::ShowClusterSettings(_) => Some(vec![command.clone()]),
             Command::NewTab(inner) => self.window_commands(inner),
             _ => None,
@@ -321,6 +323,7 @@ fn navigate(location: &mut Location, command: &Command, snapshot: &Snapshot) {
         Command::SelectCluster(None) => *location = Location::default(),
         Command::SelectPage(page) => select_page(location, *page),
         Command::OpenCommit(_) => select_page(location, Page::Changes),
+        Command::OpenClusterChanges(_) => select_page(location, Page::Changes),
         Command::OpenResource(resource) => open_resource(location, resource, snapshot),
         Command::InspectResource(target) => {
             if location.cluster.as_ref() == Some(&target.cluster) {

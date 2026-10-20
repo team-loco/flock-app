@@ -923,8 +923,11 @@ fn overview_recent_changes_open_the_object_and_link_to_changes() -> anyhow::Resu
     let mut ui = Ui::open(Screen::Cluster)?;
     assert!(ui.bounds("overview-change-5").is_some());
     assert!(ui.bounds("overview-change-6").is_none());
+    let cluster = ui.state().location().cluster.clone();
     ui.click("overview-changes-all")?;
     assert_eq!(ui.state().location().page, Page::Changes);
+    assert_eq!(ui.read(Shell::changes_cluster), cluster);
+    assert!(cluster.is_some());
     Ok(())
 }
 
@@ -3002,6 +3005,18 @@ fn a_namespace_page_opens_what_needs_attention_its_contents_and_its_events() -> 
         .iter()
         .find(|problem| problem.target.namespace.as_deref() == Some("payments"))
         .map(|problem| problem.target.name.clone());
+    assert!(ui.bounds("namespace-attention-row-0").is_some());
+    let services = ui
+        .state()
+        .snapshot
+        .detail(
+            namespace
+                .cluster
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("no cluster"))?,
+        )
+        .map(|detail| detail.overview.unready_services.len());
+    assert_eq!(services, Some(1));
     ui.click("namespace-attention-row-0")?;
     assert_eq!(
         ui.state().workload().map(|target| target.name.clone()),

@@ -23,7 +23,7 @@ use flock_core::{
 use gpui::{
     AnyElement, App, AppContext, Context, Div, ElementId, Entity, EventEmitter, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, Stateful, StatefulInteractiveElement, Styled,
-    Window, div,
+    Window, div, relative,
 };
 
 use super::ScreenEvent;
@@ -33,6 +33,7 @@ use crate::theme::{
     TEXT_CONTROL, TEXT_SMALL,
 };
 
+const CHANGES_BAND_WEIGHTS: [f32; 2] = [3., 2.];
 const LIVE: &str = "Live";
 const LIVE_TOOLTIP: &str = "Follow new data; turn off to hold the current view";
 const SEPARATOR: &str = " · ";
@@ -256,7 +257,7 @@ impl Render for OverviewScreen {
         let sections = [
             Some(header::render(&data, &palette, cx)),
             Some(summary::render(&data, &palette, cx)),
-            band(changes_band, &palette),
+            weighted_band(changes_band, &CHANGES_BAND_WEIGHTS, &palette),
             band(pods::render(&data, &palette, cx), &palette),
             Some(namespaces::render(&data, self.sort, &palette, cx)),
             band(facts::render(&data, &palette, cx), &palette),
@@ -279,19 +280,44 @@ impl Render for OverviewScreen {
     }
 }
 
+fn band_shares(count: usize, weights: &[f32]) -> Vec<f32> {
+    let weight = |ix: usize| weights.get(ix).copied().unwrap_or(1.);
+    let total: f32 = (0..count).map(weight).sum();
+    (0..count).map(|ix| weight(ix) / total).collect()
+}
+
 fn band(sections: Vec<AnyElement>, palette: &Palette) -> Option<AnyElement> {
+    weighted_band(sections, &[], palette)
+}
+
+fn weighted_band(
+    sections: Vec<AnyElement>,
+    weights: &[f32],
+    palette: &Palette,
+) -> Option<AnyElement> {
     if sections.is_empty() {
         return None;
     }
     let last = sections.len() - 1;
-    let cells = sections.into_iter().enumerate().map(|(ix, section)| {
-        let cell = div().flex_1().min_w_0().flex().flex_col().child(section);
-        if ix < last {
-            cell.border_r(RULE).border_color(palette.line)
-        } else {
-            cell
-        }
-    });
+    let shares = band_shares(sections.len(), weights);
+    let cells = sections
+        .into_iter()
+        .zip(shares)
+        .enumerate()
+        .map(|(ix, (section, share))| {
+            let cell = div()
+                .flex_none()
+                .w(relative(share))
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(section);
+            if ix < last {
+                cell.border_r(RULE).border_color(palette.line)
+            } else {
+                cell
+            }
+        });
     let row = div()
         .flex()
         .border_b(RULE)
@@ -380,6 +406,13 @@ mod tests {
             nav: BTreeMap::new(),
             metrics: None,
         }
+    }
+
+    #[test]
+    fn band_shares_follow_weights_and_default_to_equal() {
+        assert_eq!(band_shares(2, &CHANGES_BAND_WEIGHTS), vec![0.6, 0.4]);
+        assert_eq!(band_shares(2, &[]), vec![0.5, 0.5]);
+        assert_eq!(band_shares(1, &[]), vec![1.]);
     }
 
     #[test]

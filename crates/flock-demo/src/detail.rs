@@ -5,6 +5,7 @@ use flock_core::Condition;
 use flock_core::cluster::Namespace;
 use flock_core::cluster_changes::{ChangeKind, ClusterChange};
 use flock_core::events::Event;
+use flock_core::home::Problem;
 use flock_core::nodes::{CONDITION_TRUE, Node, READY_CONDITION, Usage};
 use flock_core::overview::{Commitment, NetworkFacts, Overview, PodPhases, TimeRange, Utilization};
 use flock_core::pod_tops::PodTops;
@@ -94,8 +95,24 @@ fn overview() -> Overview {
             load_balancers_pending: 1,
             pvcs_pending: 0,
         },
+        unready_services: unready_services(),
         changes: changes(),
     }
+}
+
+fn unready_services() -> Vec<Problem> {
+    let service = Problem {
+        status: Status::Warn,
+        target: ResourceRef {
+            cluster: ClusterId::new(DEMO_CLUSTER),
+            kind: "Service".into(),
+            namespace: Some("payments".into()),
+            name: "checkout-api".into(),
+        },
+        message: "1 of 3 endpoints not ready".into(),
+        age: Duration::from_secs(3 * HOUR),
+    };
+    vec![service]
 }
 
 fn change(

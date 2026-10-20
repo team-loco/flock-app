@@ -104,7 +104,7 @@ impl GitOpsState {
                     self.focus.remove(&window);
                 }
             },
-            Command::OpenCommit(_) => {
+            Command::OpenCommit(_) | Command::OpenClusterChanges(_) => {
                 self.focus.remove(&window);
             }
             Command::Flux(key, _, action) => self.requests.record(key, *action, Timestamp::now()),
