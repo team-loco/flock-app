@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use flock_core::cluster::Namespace;
+use flock_core::overview::plural;
 use flock_core::related::{JOB, ListLink, NAMESPACE, Related};
 use flock_core::resources::{EVENT_LIST, POD_LIST, Resource, ResourceKind};
 use flock_core::settings::NamespaceSelection;
@@ -19,7 +20,9 @@ use crate::theme::{ActiveTheme, SPACE_8};
 const YAML: &str = "YAML";
 const ALL_LOGS: &str = "Logs for all pods";
 const SEPARATOR: &str = " · ";
+const POD: &str = "pod";
 const PODS: &str = "pods";
+const NEEDS_ATTENTION: &str = "needs attention";
 const NEED_ATTENTION: &str = "need attention";
 const GONE: &str = "is not on this cluster any more.";
 
@@ -54,6 +57,23 @@ fn list_key(page: Page) -> Option<&'static str> {
         Page::Events => Some(EVENT_LIST),
         other => ResourceKind::for_page(other).map(ResourceKind::name),
     }
+}
+
+fn attention(flagged: usize) -> String {
+    plural(flagged, NEEDS_ATTENTION, NEED_ATTENTION)
+}
+
+fn pods_listed(related: &Related) -> Option<usize> {
+    related
+        .groups
+        .iter()
+        .find(|group| {
+            group
+                .list
+                .as_ref()
+                .is_some_and(|list| list.page == Page::Pods)
+        })
+        .map(|group| group.total)
 }
 
 impl DetailScreen {
@@ -140,7 +160,11 @@ impl DetailScreen {
             let label = if flagged == 0 {
                 namespace.phase.clone()
             } else {
-                format!("{}{SEPARATOR}{flagged} {NEED_ATTENTION}", namespace.phase)
+                format!(
+                    "{}{SEPARATOR}{}",
+                    namespace.phase,
+                    attention(flagged as usize)
+                )
             };
             return Some((namespace.status, label));
         }
@@ -155,7 +179,9 @@ impl DetailScreen {
         let mut parts = vec![self.target.kind.clone()];
         parts.extend(self.target.namespace.clone());
         if let Some(namespace) = &self.namespace {
-            parts.push(format!("{} {PODS}", namespace.pods));
+            let listed = self.related.as_ref().and_then(pods_listed);
+            let pods = listed.unwrap_or(namespace.pods as usize);
+            parts.push(plural(pods, POD, PODS));
         }
         parts.join(SEPARATOR)
     }
@@ -259,5 +285,36 @@ mod tests {
         assert_eq!(list_key(Page::Events), Some(EVENT_LIST));
         assert_eq!(list_key(Page::Pvcs), Some("PersistentVolumeClaim"));
         assert_eq!(list_key(Page::Nodes), None);
+    }
+
+    #[test]
+    fn one_flagged_pod_needs_attention_and_two_need_it() {
+        assert_eq!(attention(1), "1 needs attention");
+        assert_eq!(attention(2), "2 need attention");
+    }
+
+    #[test]
+    fn the_pod_count_is_the_listed_pods_including_finished_ones() {
+        let target = ResourceRef {
+            cluster: flock_core::ClusterId::new("a"),
+            kind: NAMESPACE.into(),
+            namespace: None,
+            name: "reports".into(),
+        };
+        let pods = flock_core::related::Group {
+            title: "Pods".into(),
+            items: Vec::new(),
+            total: 100,
+            counts: flock_core::Counts::default(),
+            list: Some(ListLink {
+                page: Page::Pods,
+                namespace: "reports".into(),
+            }),
+        };
+        let related = Related {
+            target,
+            groups: vec![pods],
+        };
+        assert_eq!(pods_listed(&related), Some(100));
     }
 }
