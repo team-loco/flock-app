@@ -3244,3 +3244,32 @@ fn a_custom_object_opens_the_inspector_and_edits_its_yaml() -> anyhow::Result<()
     );
     Ok(())
 }
+
+#[test]
+fn helm_releases_open_their_history_values_and_flux_owner() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::HelmReleases)?;
+    assert_eq!(ui.state().location().page, Page::Releases);
+    assert!(ui.bounds("helm-releases-row-2").is_some());
+    ui.press("/")?;
+    ui.type_text("airflow")?;
+    assert!(ui.bounds("helm-releases-row-1").is_none());
+    ui.press("escape")?;
+    ui.double_click("helm-releases-row-0")?;
+    let location = ui.state().location().clone();
+    let opened = location.helm.map(|key| key.name);
+    assert_eq!(opened.as_deref(), Some("kube-prometheus-stack"));
+    assert!(ui.bounds("helm-history-row-2").is_some());
+    assert!(ui.bounds("helm-user-values").is_some());
+    ui.click("helm-values-computed")?;
+    assert!(ui.bounds("helm-computed-values").is_some());
+    assert!(ui.bounds("helm-user-values").is_none());
+    ui.click("helm-open-flux")?;
+    let flux = ui
+        .state()
+        .location()
+        .flux_object
+        .clone()
+        .map(|key| key.kind);
+    assert_eq!(flux, Some(flock_core::FluxKind::HelmRelease));
+    Ok(())
+}

@@ -16,6 +16,7 @@ pub mod failure;
 mod fake;
 pub mod flux;
 pub mod gitops;
+pub mod helm;
 pub mod inspect;
 pub mod jsonpath;
 pub mod lists;

@@ -361,6 +361,8 @@ mod tests {
             last_deployed: None,
             description: format!("rev {version}"),
             manifest: manifest.to_owned(),
+            config: json!({}),
+            chart_values: json!({}),
         }
     }
 

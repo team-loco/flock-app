@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use flate2::read::GzDecoder;
 use k8s_openapi::api::core::v1::Secret;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use similar::TextDiff;
 use thiserror::Error;
 
@@ -28,6 +29,8 @@ pub struct Release {
     pub last_deployed: Option<DateTime<Utc>>,
     pub description: String,
     pub manifest: String,
+    pub config: Value,
+    pub chart_values: Value,
 }
 
 #[derive(Debug, Error)]
@@ -58,6 +61,8 @@ struct StoredRelease {
     info: StoredInfo,
     chart: StoredChart,
     manifest: String,
+    #[serde(default)]
+    config: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -74,6 +79,8 @@ struct StoredInfo {
 #[derive(Deserialize)]
 struct StoredChart {
     metadata: ChartMetadata,
+    #[serde(default)]
+    values: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -133,7 +140,43 @@ pub fn decode_secret(secret: &Secret) -> Result<Release, StorageError> {
         last_deployed: stored.info.last_deployed,
         description: stored.info.description,
         manifest: stored.manifest,
+        config: stored.config.unwrap_or_else(empty),
+        chart_values: stored.chart.values.unwrap_or_else(empty),
     })
+}
+
+fn empty() -> Value {
+    Value::Object(Map::new())
+}
+
+pub fn computed_values(release: &Release) -> Value {
+    let mut computed = release.chart_values.clone();
+    coalesce(&mut computed, &release.config);
+    computed
+}
+
+fn coalesce(base: &mut Value, overrides: &Value) {
+    let (Some(fields), Some(changes)) = (base.as_object_mut(), overrides.as_object()) else {
+        if !overrides.is_null() {
+            *base = overrides.clone();
+        }
+        return;
+    };
+    for (key, value) in changes {
+        if value.is_null() {
+            fields.remove(key);
+            continue;
+        }
+        match fields.get_mut(key) {
+            Some(existing) if existing.is_object() && value.is_object() => {
+                coalesce(existing, value);
+            }
+            Some(existing) => *existing = value.clone(),
+            None => {
+                fields.insert(key.clone(), value.clone());
+            }
+        }
+    }
 }
 
 pub fn decode_secret_json(json: &str) -> Result<Release, StorageError> {

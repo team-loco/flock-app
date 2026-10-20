@@ -302,3 +302,59 @@ async fn live_edit_yaml_loads_and_dry_runs_a_custom_object() {
         "{reviewed:?}"
     );
 }
+
+#[test]
+fn live_helm_releases_come_from_storage_with_history_values_and_flux_owners() {
+    if !enabled() {
+        return;
+    }
+    let Some(context) = context(FLUX_CONTEXT) else {
+        return;
+    };
+    let running = start(&context);
+    let cluster = ClusterId::new(FLUX_CONTEXT);
+    running.send(Command::SelectCluster(Some(cluster.clone())));
+    running.send(Command::SelectPage(Page::Releases));
+    let listed = running.until("Helm releases owned by Flux", |snapshot| {
+        snapshot
+            .helm_releases(&cluster)
+            .iter()
+            .any(|release| release.flux.is_some() && release.revision > 1)
+    });
+    let Some(release) = listed
+        .helm_releases(&cluster)
+        .into_iter()
+        .filter(|release| release.flux.is_some())
+        .max_by_key(|release| release.revision)
+        .cloned()
+    else {
+        panic!("no release");
+    };
+    assert_ne!(release.chart, "");
+    assert_ne!(release.chart_version, "");
+    assert!(release.updated.is_some());
+    running.send(Command::OpenHelmRelease(release.key.clone()));
+    let opened = running.until("the release history", |snapshot| {
+        snapshot
+            .helm_detail(&release.key)
+            .is_some_and(|detail| detail.history.len() > 1)
+    });
+    let Some(detail) = opened.helm_detail(&release.key) else {
+        panic!("detail");
+    };
+    assert_eq!(
+        detail.history.first().map(|r| r.revision),
+        Some(release.revision)
+    );
+    assert!(detail.manifest.contains("kind:"), "{}", detail.manifest);
+    assert_ne!(detail.computed_values, "");
+    assert!(
+        listed
+            .page_state(&cluster, Page::Releases)
+            .is_some_and(flock_core::WatchState::is_loaded)
+    );
+    running.send(Command::SelectPage(Page::Pods));
+    running.until("the Helm storage watch to stop", |snapshot| {
+        snapshot.helm.is_empty() && snapshot.helm_details.is_empty()
+    });
+}

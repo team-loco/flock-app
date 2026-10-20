@@ -8,6 +8,7 @@ mod edit;
 mod flux;
 mod flux_events;
 mod gitops;
+mod helm;
 mod home;
 mod lists;
 #[cfg(feature = "loco")]
@@ -223,6 +224,8 @@ pub fn snapshot() -> Snapshot {
         forwards: Vec::new(),
         crds: BTreeMap::from([(ClusterId::new(PROD_US_EAST), crds::definitions())]),
         custom: crds::objects(&ClusterId::new(PROD_US_EAST)),
+        helm: helm::releases(&ClusterId::new(PROD_US_EAST)),
+        helm_details: helm::details(&ClusterId::new(PROD_US_EAST)),
     };
     simulate::recount_pods(&mut snapshot, &ClusterId::new(PROD_US_EAST));
     derive_clusters(&mut snapshot);

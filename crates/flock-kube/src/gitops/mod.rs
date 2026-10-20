@@ -1,7 +1,7 @@
 mod changes;
-mod convert;
+pub(crate) mod convert;
 mod drift;
-mod focus;
+pub(crate) mod focus;
 mod git;
 mod grid;
 mod health;

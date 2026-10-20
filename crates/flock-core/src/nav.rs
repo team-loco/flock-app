@@ -31,6 +31,7 @@ pub enum Page {
     HelmReleases,
     Sources,
     FluxGraph,
+    Releases,
     Services,
     Ingresses,
     ConfigMaps,
@@ -74,6 +75,7 @@ impl Page {
             Self::HelmReleases => "HelmReleases",
             Self::Sources => "Sources",
             Self::FluxGraph => "Graph",
+            Self::Releases => "Releases",
             Self::Services => "Services",
             Self::Ingresses => "Ingresses",
             Self::ConfigMaps => "ConfigMaps",
@@ -106,6 +108,7 @@ impl Page {
             Self::Kustomizations => "Kustomization",
             Self::HelmReleases => "HelmRelease",
             Self::Sources => "Source",
+            Self::Releases => "Release",
             Self::Services => "Service",
             Self::Ingresses => "Ingress",
             Self::ConfigMaps => "ConfigMap",
@@ -120,6 +123,7 @@ impl Page {
         match self {
             Self::ClusterOverview => "Cluster overview",
             Self::FluxGraph => "Flux graph",
+            Self::Releases => "Helm releases",
             other => other.label(),
         }
     }
@@ -209,6 +213,10 @@ pub const CLUSTER_NAV: &[NavSection] = &[
             Page::Sources,
             Page::FluxGraph,
         ],
+    },
+    NavSection {
+        label: Some("Helm"),
+        pages: &[Page::Releases],
     },
     NavSection {
         label: Some("Network"),

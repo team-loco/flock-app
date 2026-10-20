@@ -1,5 +1,6 @@
 use clap::ValueEnum;
 use flock_core::crd::CrdKey;
+use flock_core::helm::HelmKey;
 use flock_core::history::Location;
 use flock_core::tabs::{SavedPane, SavedWindow};
 use flock_core::{
@@ -37,6 +38,8 @@ const SAMPLE_CRD_GROUP: &str = "cert-manager.io";
 const SAMPLE_CRD_KIND: &str = "Certificate";
 const SAMPLE_CRD_NAMESPACE: &str = "web";
 const SAMPLE_CRD_OBJECT: &str = "web-frontend-tls";
+const SAMPLE_HELM_NAMESPACE: &str = "monitoring";
+const SAMPLE_HELM_RELEASE: &str = "kube-prometheus-stack";
 const FLUX_NAMESPACE: &str = "flux-system";
 
 pub const APP_ID: &str = "dev.flock.app";
@@ -171,6 +174,8 @@ pub enum Screen {
     FluxEvents,
     CustomResources,
     CustomResourceInspector,
+    HelmReleases,
+    HelmRelease,
     Job,
     Node,
     Gitops,
@@ -242,6 +247,8 @@ impl Screen {
             Self::FluxGraph => vec![sample, Command::SelectPage(Page::FluxGraph)],
             Self::FluxEvents => vec![Command::SelectPage(Page::FluxEvents)],
             Self::CustomResources => vec![sample, open_certificates(&cluster)],
+            Self::HelmReleases => vec![sample, Command::SelectPage(Page::Releases)],
+            Self::HelmRelease => vec![sample, open_helm_release(&cluster)],
             Self::CustomResourceInspector => {
                 vec![
                     sample,
@@ -309,6 +316,11 @@ fn open_certificates(cluster: &ClusterId) -> Command {
         cluster: cluster.clone(),
         crd: CrdKey::new(SAMPLE_CRD_GROUP, SAMPLE_CRD_KIND),
     }
+}
+
+fn open_helm_release(cluster: &ClusterId) -> Command {
+    let key = HelmKey::new(cluster.clone(), SAMPLE_HELM_NAMESPACE, SAMPLE_HELM_RELEASE);
+    Command::OpenHelmRelease(key)
 }
 
 fn inspect_certificate(cluster: &ClusterId) -> Command {
@@ -455,6 +467,8 @@ pub fn root_view(
         Screen::FluxEvents => shell_view(store, screen, preset, window, cx),
         Screen::CustomResources => shell_view(store, screen, preset, window, cx),
         Screen::CustomResourceInspector => shell_view(store, screen, preset, window, cx),
+        Screen::HelmReleases => shell_view(store, screen, preset, window, cx),
+        Screen::HelmRelease => shell_view(store, screen, preset, window, cx),
         Screen::Namespace => shell_view(store, screen, preset, window, cx),
         Screen::Job => shell_view(store, screen, preset, window, cx),
         Screen::Node => shell_view(store, screen, preset, window, cx),

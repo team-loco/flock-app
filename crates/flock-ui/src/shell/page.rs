@@ -92,6 +92,9 @@ impl Shell {
         if location.flux_object.is_some() {
             return screens.flux_object.clone().into_any_element();
         }
+        if location.helm.is_some() {
+            return screens.helm_release.clone().into_any_element();
+        }
         let loading = self.load_view(ix, &location, cx);
         let body = if let Some(view) = loading {
             let bar = self.filter_bar_at(ix, &location, cx);

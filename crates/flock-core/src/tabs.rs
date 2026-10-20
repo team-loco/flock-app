@@ -8,6 +8,7 @@ pub const COMPARE_KIND: &str = "Compare";
 pub const EDIT_KIND: &str = "Edit";
 pub const CLUSTER_KIND: &str = "Cluster";
 pub const CRD_KIND: &str = "Custom";
+pub const HELM_KIND: &str = "Helm";
 pub const MAX_PANES: usize = 2;
 const PER_MILLE: u16 = 1000;
 const EVEN: u16 = PER_MILLE / 2;
@@ -598,6 +599,10 @@ fn describe(location: &Location, snapshot: &Snapshot) -> (Option<Status>, String
     let Some(resource) = &location.resource else {
         if let Some(crd) = &location.crd {
             return (None, CRD_KIND.to_owned(), crd.kind.clone());
+        }
+        if let Some(key) = &location.helm {
+            let status = snapshot.helm_release(key).map(|release| release.status);
+            return (status, HELM_KIND.to_owned(), key.name.clone());
         }
         return (
             None,
