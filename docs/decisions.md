@@ -404,3 +404,9 @@ Settled; change only with a new entry that says why.
     usual URL and embedded-Secret redaction. The manifest goes through `redact::manifest`. The list
     shows every namespace with the filter bar's `ns:` token instead of a namespace picker, because
     releases are few and often live in their own namespaces.
+45. **The YAML editor keeps ⌘[ and ⌘] for outdent and indent** (#272): inside Edit YAML, ⌘[ and ⌘]
+    follow the editor convention (outdent, indent) instead of Back and Forward, so Flock's own
+    ⌘[ and ⌘] bindings exclude the code editor's key context. Back and Forward stay reachable with
+    the editor focused through their second bindings, ⌃- and ⌃⇧-, which the editor does not use.
+    Esc in the editor moves focus to the page, where ⌘[ and ⌘] navigate again. An Edit YAML tab
+    opens with the page it was opened from as its Back entry, so Back returns to that page.

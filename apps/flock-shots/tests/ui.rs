@@ -3205,6 +3205,42 @@ fn command_e_edits_the_yaml_on_detail_and_flux_pages() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn editor_text(ui: &mut Ui) -> anyhow::Result<String> {
+    ui.press("cmd-a")?;
+    ui.press("cmd-c")?;
+    Ok(ui.clipboard().unwrap_or_default())
+}
+
+#[test]
+fn the_yaml_editor_indents_with_brackets_and_goes_back_with_control_minus_or_escape()
+-> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Namespace)?;
+    let detail = ui.state().location().clone();
+    ui.press("cmd-e")?;
+    assert_eq!(ui.state().location().page, Page::EditYaml);
+    ui.click("edit-editor")?;
+    let before = editor_text(&mut ui)?;
+    ui.press("cmd-]")?;
+    let indented = editor_text(&mut ui)?;
+    assert_ne!(indented, before);
+    assert_eq!(ui.state().location().page, Page::EditYaml);
+    ui.press("cmd-[")?;
+    assert_eq!(editor_text(&mut ui)?, before);
+    ui.press("ctrl--")?;
+    assert_eq!(ui.state().location(), &detail);
+    ui.press("ctrl-_")?;
+    assert_eq!(ui.state().location().page, Page::EditYaml);
+    ui.press("ctrl--")?;
+    ui.press("cmd-e")?;
+    assert_eq!(ui.state().location().page, Page::EditYaml);
+    ui.click("edit-editor")?;
+    ui.press("escape")?;
+    assert_eq!(ui.state().location().page, Page::EditYaml);
+    ui.press("cmd-[")?;
+    assert_eq!(ui.state().location(), &detail);
+    Ok(())
+}
+
 #[test]
 fn flux_events_are_reachable_from_the_keyboard() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::FluxEvents)?;

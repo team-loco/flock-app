@@ -12,8 +12,8 @@ use gpui::{
 
 use crate::kit::{
     Button, CodeEditor, CodeEditorState, ConfirmDialog, DiffFile, DiffView, EmptyState, InputEvent,
-    MetaLine, PageHeader, SectionHeader, Skeleton, TextFieldEnter, Toast, confirm, highlight_yaml,
-    mark_error, toast, yaml_editor,
+    MetaLine, PageHeader, SectionHeader, Skeleton, TextFieldEnter, TextFieldEscape, Toast, confirm,
+    highlight_yaml, mark_error, toast, yaml_editor,
 };
 use crate::screens::compare::diff_line;
 use crate::theme::{
@@ -591,6 +591,10 @@ impl Render for EditScreen {
                     cx.stop_propagation();
                     this.submit(window, cx);
                 }
+            }))
+            .capture_action(cx.listener(|this, _: &TextFieldEscape, window, cx| {
+                cx.stop_propagation();
+                window.focus(&this.focus, cx);
             }))
             .child(header)
             .child(MetaLine::new(self.meta()))

@@ -18,6 +18,7 @@ use crate::screens::workload::{self, KEY_CONTEXT as WORKLOAD_CONTEXT};
 type Bind = fn(&'static str, Option<&'static str>) -> KeyBinding;
 
 const OUTSIDE_TEXT: &str = "Shell && !Input && !Terminal";
+const OUTSIDE_CODE_EDITOR: &str = "Shell && !(mode == editor)";
 const SEPARATOR: &str = " / ";
 const TYPE_AHEAD: &str = "letters";
 const COMMAND_CLICK: &str = "cmd-click";
@@ -273,10 +274,24 @@ pub const BINDINGS: &[Binding] = &[
     }),
     Binding::new(&["cmd-["], "Back", Group::Navigate, |k, c| {
         KeyBinding::new(k, GoBack, c)
-    }),
+    })
+    .within(OUTSIDE_CODE_EDITOR),
     Binding::new(&["cmd-]"], "Forward", Group::Navigate, |k, c| {
         KeyBinding::new(k, GoForward, c)
-    }),
+    })
+    .within(OUTSIDE_CODE_EDITOR),
+    Binding::new(
+        &["ctrl--"],
+        "Back, also in the YAML editor where ⌘[ outdents",
+        Group::Navigate,
+        |k, c| KeyBinding::new(k, GoBack, c),
+    ),
+    Binding::new(
+        &["ctrl-_"],
+        "Forward, also in the YAML editor where ⌘] indents",
+        Group::Navigate,
+        |k, c| KeyBinding::new(k, GoForward, c),
+    ),
     Binding::built_in(&["up", "down"], "Move the selection", Group::Lists),
     Binding::built_in(&["home", "end"], "First or last row", Group::Lists),
     Binding::built_in(&["pageup", "pagedown"], "Move a page", Group::Lists),
@@ -468,6 +483,7 @@ fn key_name(key: &str) -> String {
         "pageup" => "PgUp",
         "pagedown" => "PgDn",
         "tab" => "Tab",
+        "_" => "⇧-",
         "space" => "Space",
         "click" => "-click",
         other if other.chars().count() == 1 => return other.to_uppercase(),
@@ -514,6 +530,8 @@ mod tests {
         assert_eq!(display("cmd-shift-p"), "⌘⇧P");
         assert_eq!(display("ctrl-shift-tab"), "⌃⇧Tab");
         assert_eq!(display("cmd-["), "⌘[");
+        assert_eq!(display("ctrl--"), "⌃-");
+        assert_eq!(display("ctrl-_"), "⌃⇧-");
         assert_eq!(display("cmd-,"), "⌘,");
         assert_eq!(display("/"), "/");
         assert_eq!(display("alt-enter"), "⌥↵");
@@ -565,8 +583,8 @@ mod tests {
             "ctrl-tab",
             "cmd-t",
             "cmd-1",
-            "cmd-[",
-            "cmd-]",
+            "ctrl--",
+            "ctrl-_",
             "cmd-f",
             "cmd-k",
         ] {

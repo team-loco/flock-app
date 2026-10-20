@@ -327,6 +327,14 @@ impl Panes {
     }
 
     pub fn open(&mut self, location: Location) -> TabId {
+        self.open_with(location, None)
+    }
+
+    pub fn open_from(&mut self, origin: Location, location: Location) -> TabId {
+        self.open_with(location, Some(origin))
+    }
+
+    fn open_with(&mut self, location: Location, origin: Option<Location>) -> TabId {
         let pane = self.focused();
         let existing = pane
             .tabs
@@ -337,14 +345,26 @@ impl Panes {
             self.activate(id);
             return id;
         }
-        self.add(location)
+        let id = self.allocate();
+        let mut tab = Tab::new(id, location.clone());
+        if let Some(origin) = origin {
+            let mut history = History::starting_at(origin);
+            history.visit(location);
+            tab.history = history;
+        }
+        self.insert(tab)
     }
 
     pub fn add(&mut self, location: Location) -> TabId {
         let id = self.allocate();
+        self.insert(Tab::new(id, location))
+    }
+
+    fn insert(&mut self, tab: Tab) -> TabId {
+        let id = tab.id;
         let pane = self.focused_mut();
         let at = pane.active + 1;
-        pane.tabs.insert(at, Tab::new(id, location));
+        pane.tabs.insert(at, tab);
         pane.active = at;
         id
     }

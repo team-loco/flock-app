@@ -60,6 +60,8 @@ Generated from the binding table in `crates/flock-ui/src/keymap.rs`; run `mise r
 |---|---|
 | ⌘[ | Back |
 | ⌘] | Forward |
+| ⌃- | Back, also in the YAML editor where ⌘[ outdents |
+| ⌃⇧- | Forward, also in the YAML editor where ⌘] indents |
 
 ## Lists and tables
 
