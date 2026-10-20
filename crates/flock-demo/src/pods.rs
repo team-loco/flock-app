@@ -2,8 +2,10 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use flock_core::pods::{
-    Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Qos, Usage, Volume,
+    Container, ContainerPort, ContainerState, Pod, PodEvent, PodPhase, Probe, ProbeKind, Qos,
+    Resources, Termination, Usage, Volume,
 };
+use flock_core::related::{REPLICA_SET, TEMPLATE_HASH};
 use flock_core::{ClusterId, Condition, ResourceRef, Status, Uid};
 
 mod fill;
@@ -57,6 +59,7 @@ fn running(name: &str, image: &str, restarts: u32, ports: Vec<ContainerPort>) ->
         ports,
         note: None,
         message: String::new(),
+        ..Container::default()
     }
 }
 
@@ -72,6 +75,7 @@ fn waiting(name: &str, image: &str, note: &str) -> Container {
         ports: Vec::new(),
         note: Some(note.into()),
         message: note.into(),
+        ..Container::default()
     }
 }
 
@@ -79,8 +83,31 @@ fn envoy() -> Container {
     running("envoy", ENVOY_IMAGE, 0, vec![port(9901, TCP, "admin")])
 }
 
+fn resources(cpu: &str, memory: &str) -> Resources {
+    Resources {
+        cpu: Some(cpu.into()),
+        memory: Some(memory.into()),
+    }
+}
+
+fn probe(kind: ProbeKind, target: &str) -> Probe {
+    Probe {
+        kind,
+        target: target.into(),
+    }
+}
+
 fn checkout_api() -> Container {
-    running("api", CHECKOUT_IMAGE, 0, vec![port(8080, TCP, "http")])
+    Container {
+        requests: resources("250m", "256Mi"),
+        limits: resources("1", "512Mi"),
+        probes: vec![
+            probe(ProbeKind::Liveness, ":8080/healthz"),
+            probe(ProbeKind::Readiness, ":8080/readyz"),
+        ],
+        since: Some(age(3 * HOUR)),
+        ..running("api", CHECKOUT_IMAGE, 0, vec![port(8080, TCP, "http")])
+    }
 }
 
 fn owner(kind: &str, namespace: &str, name: &str) -> ResourceRef {
@@ -168,11 +195,18 @@ struct Seed {
     events: Vec<PodEvent>,
 }
 
+fn template_hash(kind: &str, owner: &str) -> Option<(String, String)> {
+    let (_, hash) = owner.rsplit_once('-').filter(|_| kind == REPLICA_SET)?;
+    Some((TEMPLATE_HASH.to_owned(), hash.to_owned()))
+}
+
 fn pod(seed: Seed) -> Pod {
+    let hash = template_hash(seed.owner.0, seed.owner.1);
     let labels: BTreeMap<String, String> = seed
         .labels
         .iter()
         .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .chain(hash)
         .collect();
     let mut pod = Pod {
         uid: Uid::default(),
@@ -241,6 +275,15 @@ fn crashing_checkout() -> Seed {
         restarts: 14,
         note: Some("exit 1".into()),
         message: "last exit Error (1)".into(),
+        since: None,
+        last_termination: Some(Termination {
+            reason: "Error".into(),
+            exit_code: 1,
+            started: Some("2026-10-20 14:08".into()),
+            finished: Some("2026-10-20 14:09".into()),
+            ago: Some(age(2 * MINUTE)),
+            ran: Some(age(MINUTE + 12)),
+        }),
         ..checkout_api()
     };
     Seed {
@@ -752,9 +795,10 @@ mod tests {
             counts,
             [
                 (PodFilter::All, 412),
-                (PodFilter::Running, 398),
+                (PodFilter::Running, 403),
                 (PodFilter::Pending, 9),
-                (PodFilter::Failing, 5),
+                (PodFilter::Failed, 0),
+                (PodFilter::Succeeded, 0),
             ]
         );
     }

@@ -1,15 +1,21 @@
 use std::collections::BTreeMap;
 
-use crate::filter::{FilterSpec, TextFilter};
 use std::time::Duration;
 
 use crate::diagnosis::{self, Condition, Diagnosis};
-use crate::{ClusterId, Counts, ResourceRef, Status, Uid, units};
+use crate::filter::{FilterSpec, TextFilter};
+use crate::related::{DEPLOYMENT, REPLICA_SET, deployment_name};
+use crate::resource::short_kind;
+use crate::{ClusterId, Counts, ResourceRef, Status, Uid, time, units};
 
 pub const POD_KIND: &str = "Pod";
 const RESTARTS_ERR: u32 = 5;
 const SHORT_NAME_MIN: usize = 4;
 const SEPARATOR: &str = " · ";
+const ARROW: &str = " → ";
+const RUNNING_LABEL: &str = "Running";
+const WAITING_LABEL: &str = "Waiting";
+const TERMINATED_LABEL: &str = "Terminated";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PodPhase {
@@ -64,6 +70,81 @@ impl ContainerPort {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Resources {
+    pub cpu: Option<String>,
+    pub memory: Option<String>,
+}
+
+impl Resources {
+    pub fn label(&self) -> Option<String> {
+        let cpu = self.cpu.as_ref().map(|cpu| format!("cpu {cpu}"));
+        let memory = self.memory.as_ref().map(|memory| format!("mem {memory}"));
+        let parts: Vec<String> = cpu.into_iter().chain(memory).collect();
+        (!parts.is_empty()).then(|| parts.join(SEPARATOR))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProbeKind {
+    Liveness,
+    Readiness,
+    Startup,
+}
+
+impl ProbeKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Liveness => "live",
+            Self::Readiness => "ready",
+            Self::Startup => "start",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Probe {
+    pub kind: ProbeKind,
+    pub target: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Termination {
+    pub reason: String,
+    pub exit_code: i32,
+    pub started: Option<String>,
+    pub finished: Option<String>,
+    pub ago: Option<Duration>,
+    pub ran: Option<Duration>,
+}
+
+impl Termination {
+    pub fn detail(&self) -> String {
+        let exit = format!("exit {}", self.exit_code);
+        let ago = self.ago.map(|ago| format!("{} ago", time::age(ago)));
+        std::iter::once(exit)
+            .chain(ago)
+            .collect::<Vec<_>>()
+            .join(SEPARATOR)
+    }
+
+    pub fn run(&self) -> Option<String> {
+        let (started, finished) = (self.started.as_ref()?, self.finished.as_ref()?);
+        let window = format!("{started}{ARROW}{finished}");
+        let took = self.ran.map(time::span);
+        Some(
+            std::iter::once(window)
+                .chain(took)
+                .collect::<Vec<_>>()
+                .join(SEPARATOR),
+        )
+    }
+
+    pub fn span(&self) -> Option<String> {
+        self.run().map(|run| format!("ran {run}"))
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Container {
     pub name: String,
     pub image: String,
@@ -75,24 +156,50 @@ pub struct Container {
     pub ports: Vec<ContainerPort>,
     pub note: Option<String>,
     pub message: String,
+    pub requests: Resources,
+    pub limits: Resources,
+    pub probes: Vec<Probe>,
+    pub since: Option<Duration>,
+    pub terminated: Option<Termination>,
+    pub last_termination: Option<Termination>,
 }
 
 impl Container {
-    fn started(&self) -> bool {
-        self.state != ContainerState::Waiting || self.restarts > 0
+    pub fn state_label(&self) -> String {
+        match (self.state, &self.terminated) {
+            (ContainerState::Running, _) => match self.since {
+                Some(since) => format!("{RUNNING_LABEL}{SEPARATOR}{}", time::age(since)),
+                None => RUNNING_LABEL.to_owned(),
+            },
+            (ContainerState::Terminated, Some(terminated)) => {
+                let reason = Some(terminated.reason.clone()).filter(|r| !r.is_empty());
+                let exit = format!("exit {}", terminated.exit_code);
+                std::iter::once(TERMINATED_LABEL.to_owned())
+                    .chain(reason)
+                    .chain(std::iter::once(exit))
+                    .collect::<Vec<_>>()
+                    .join(SEPARATOR)
+            }
+            (ContainerState::Terminated, None) => TERMINATED_LABEL.to_owned(),
+            (ContainerState::Waiting, _) if self.reason.is_empty() => WAITING_LABEL.to_owned(),
+            (ContainerState::Waiting, _) => format!("{WAITING_LABEL}{SEPARATOR}{}", self.reason),
+        }
     }
 
-    pub fn meta(&self) -> String {
-        if !self.started() {
-            return self.note.clone().unwrap_or_default();
+    pub fn restarts_label(&self) -> String {
+        match self.restarts {
+            1 => "1 restart".to_owned(),
+            n => format!("{n} restarts"),
         }
-        let restarts = format!("restarts {}", self.restarts);
-        let ports = self.ports.iter().map(|p| format!(":{}", p.port));
-        std::iter::once(restarts)
-            .chain(self.note.clone())
-            .chain(ports)
-            .collect::<Vec<_>>()
-            .join(SEPARATOR)
+    }
+
+    pub fn probes_label(&self) -> Option<String> {
+        let probes: Vec<String> = self
+            .probes
+            .iter()
+            .map(|probe| format!("{} {}", probe.kind.label(), probe.target))
+            .collect();
+        (!probes.is_empty()).then(|| probes.join(SEPARATOR))
     }
 }
 
@@ -179,8 +286,29 @@ impl Pod {
     }
 
     pub fn ready_label(&self) -> String {
+        let (ready, total) = self.ready_count();
+        format!("{ready}/{total}")
+    }
+
+    pub fn ready_count(&self) -> (usize, usize) {
         let ready = self.containers.iter().filter(|c| c.ready).count();
-        format!("{ready}/{}", self.containers.len())
+        (ready, self.containers.len())
+    }
+
+    pub fn all_ready(&self) -> bool {
+        let (ready, total) = self.ready_count();
+        ready == total
+    }
+
+    pub fn owner_label(&self) -> Option<String> {
+        let owner = self.owner.as_ref()?;
+        let deployment = (owner.kind == REPLICA_SET)
+            .then(|| deployment_name(&owner.name, &self.labels))
+            .flatten();
+        Some(match deployment {
+            Some(name) => format!("{}/{name}", short_kind(DEPLOYMENT)),
+            None => format!("{}/{}", short_kind(&owner.kind), owner.name),
+        })
     }
 
     pub fn restarts(&self) -> u32 {
@@ -268,29 +396,42 @@ pub enum PodFilter {
     All,
     Running,
     Pending,
-    Failing,
+    Failed,
+    Succeeded,
 }
 
 impl PodFilter {
-    pub const ALL: [Self; 4] = [Self::All, Self::Running, Self::Pending, Self::Failing];
+    pub const ALL: [Self; 5] = [
+        Self::All,
+        Self::Running,
+        Self::Pending,
+        Self::Failed,
+        Self::Succeeded,
+    ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
             Self::Running => "Running",
             Self::Pending => "Pending",
-            Self::Failing => "Failing",
+            Self::Failed => "Failed",
+            Self::Succeeded => "Succeeded",
         }
     }
 
     pub fn keeps(self, pod: &Pod) -> bool {
         match self {
             Self::All => true,
-            Self::Running => pod.phase == PodPhase::Running && pod.status != Status::Err,
+            Self::Running => pod.phase == PodPhase::Running,
             Self::Pending => pod.phase == PodPhase::Pending,
-            Self::Failing => pod.status == Status::Err,
+            Self::Failed => pod.phase == PodPhase::Failed,
+            Self::Succeeded => pod.phase == PodPhase::Succeeded,
         }
     }
+}
+
+pub fn failing(pod: &Pod) -> bool {
+    pod.status == Status::Err
 }
 
 pub fn filter_counts(pods: &[&Pod]) -> Vec<(PodFilter, usize)> {
@@ -305,11 +446,11 @@ pub fn filter_counts(pods: &[&Pod]) -> Vec<(PodFilter, usize)> {
 
 pub fn nav_counts(pods: &[Pod], cluster: &ClusterId) -> Counts {
     let rows: Vec<&Pod> = pods.iter().filter(|pod| &pod.cluster == cluster).collect();
-    let tally = |filter: PodFilter| {
-        let matching = rows.iter().filter(|pod| filter.keeps(pod)).count();
+    let tally = |keep: &dyn Fn(&Pod) -> bool| {
+        let matching = rows.iter().filter(|pod| keep(pod)).count();
         u32::try_from(matching).unwrap_or(u32::MAX)
     };
-    Counts::total(tally(PodFilter::All)).with_err(tally(PodFilter::Failing))
+    Counts::total(tally(&|_| true)).with_err(tally(&failing))
 }
 
 impl Pod {
@@ -387,6 +528,7 @@ mod tests {
             ports: Vec::new(),
             note: None,
             message: String::new(),
+            ..Container::default()
         }
     }
 
@@ -471,20 +613,6 @@ mod tests {
     }
 
     #[test]
-    fn container_meta_matches_the_design() {
-        let pod = crashing();
-        let metas: Vec<String> = pod.containers.iter().map(Container::meta).collect();
-        assert_eq!(
-            metas,
-            ["restarts 14 · exit 1 · :8080", "restarts 0 · :9901"]
-        );
-        assert_eq!(
-            pending().containers[0].meta(),
-            "unschedulable · nvidia.com/gpu: 1"
-        );
-    }
-
-    #[test]
     fn ready_restarts_and_names_derive_from_containers() {
         let pod = crashing();
         assert_eq!(pod.ready_label(), "1/2");
@@ -539,11 +667,131 @@ mod tests {
     }
 
     #[test]
-    fn filters_split_running_pending_and_failing() {
-        let pods = [crashing(), healthy("a", "web"), pending()];
+    fn filters_split_pods_by_phase() {
+        let mut done = healthy("migrate-29031-x8f2k", "web");
+        done.phase = PodPhase::Succeeded;
+        let mut evicted = healthy("evicted", "web");
+        evicted.phase = PodPhase::Failed;
+        let mut lost = healthy("lost", "web");
+        lost.phase = PodPhase::Unknown;
+        let pods = [
+            crashing(),
+            healthy("a", "web"),
+            pending(),
+            done,
+            evicted,
+            lost,
+        ];
         let refs: Vec<&Pod> = pods.iter().collect();
-        let counts: Vec<usize> = filter_counts(&refs).into_iter().map(|(_, n)| n).collect();
-        assert_eq!(counts, [3, 1, 1, 1]);
+        let counts: Vec<(&str, usize)> = filter_counts(&refs)
+            .into_iter()
+            .map(|(filter, n)| (filter.label(), n))
+            .collect();
+        assert_eq!(
+            counts,
+            [
+                ("All", 6),
+                ("Running", 2),
+                ("Pending", 1),
+                ("Failed", 1),
+                ("Succeeded", 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn owners_name_the_deployment_behind_a_replica_set() {
+        let owner = |kind: &str, name: &str| ResourceRef {
+            cluster: ClusterId::new("prod"),
+            kind: kind.into(),
+            namespace: Some("web".into()),
+            name: name.into(),
+        };
+        let mut pod = healthy("podinfo-cbf5d9d89-9clpk", "web");
+        assert_eq!(pod.owner_label(), None);
+        pod.owner = Some(owner("ReplicaSet", "podinfo-cbf5d9d89"));
+        pod.labels = BTreeMap::from([("pod-template-hash".into(), "cbf5d9d89".into())]);
+        assert_eq!(pod.owner_label().as_deref(), Some("deploy/podinfo"));
+        pod.labels.clear();
+        assert_eq!(
+            pod.owner_label().as_deref(),
+            Some("replicaset/podinfo-cbf5d9d89")
+        );
+        pod.owner = Some(owner("StatefulSet", "redis"));
+        assert_eq!(pod.owner_label().as_deref(), Some("sts/redis"));
+        pod.owner = Some(owner("Job", "migrate-29031"));
+        assert_eq!(pod.owner_label().as_deref(), Some("job/migrate-29031"));
+    }
+
+    #[test]
+    fn container_cards_read_like_the_design() {
+        let mut web = container("podinfod", ContainerState::Running, Status::Ok, 1);
+        web.since = Some(Duration::from_hours(15));
+        web.requests = Resources {
+            cpu: Some("1m".into()),
+            memory: Some("16Mi".into()),
+        };
+        web.limits = Resources {
+            cpu: Some("2".into()),
+            memory: None,
+        };
+        web.probes = vec![
+            Probe {
+                kind: ProbeKind::Liveness,
+                target: ":9898/healthz".into(),
+            },
+            Probe {
+                kind: ProbeKind::Readiness,
+                target: ":9898/readyz".into(),
+            },
+        ];
+        assert_eq!(web.state_label(), "Running · 15h");
+        assert_eq!(web.restarts_label(), "1 restart");
+        assert_eq!(web.requests.label().as_deref(), Some("cpu 1m · mem 16Mi"));
+        assert_eq!(web.limits.label().as_deref(), Some("cpu 2"));
+        assert_eq!(Resources::default().label(), None);
+        assert_eq!(
+            web.probes_label().as_deref(),
+            Some("live :9898/healthz · ready :9898/readyz")
+        );
+        let mut done = container("migrate", ContainerState::Terminated, Status::Ok, 0);
+        done.terminated = Some(Termination {
+            reason: "Completed".into(),
+            ..Termination::default()
+        });
+        assert_eq!(done.state_label(), "Terminated · Completed · exit 0");
+        assert_eq!(done.restarts_label(), "0 restarts");
+        assert_eq!(done.probes_label(), None);
+        let mut crash = container("api", ContainerState::Waiting, Status::Err, 14);
+        crash.reason = "CrashLoopBackOff".into();
+        assert_eq!(crash.state_label(), "Waiting · CrashLoopBackOff");
+    }
+
+    #[test]
+    fn terminations_say_how_and_when_the_container_stopped() {
+        let last = Termination {
+            reason: "Error".into(),
+            exit_code: 1,
+            started: Some("2026-10-19 16:31".into()),
+            finished: Some("2026-10-20 02:37".into()),
+            ago: Some(Duration::from_hours(15)),
+            ran: Some(Duration::from_mins(6 * 60 + 6)),
+        };
+        assert_eq!(last.detail(), "exit 1 · 15h ago");
+        assert_eq!(
+            last.span().as_deref(),
+            Some("ran 2026-10-19 16:31 → 2026-10-20 02:37 · 6h 6m")
+        );
+        let unknown = Termination {
+            exit_code: 137,
+            ..Termination::default()
+        };
+        assert_eq!(
+            last.run().as_deref(),
+            Some("2026-10-19 16:31 → 2026-10-20 02:37 · 6h 6m")
+        );
+        assert_eq!(unknown.detail(), "exit 137");
+        assert_eq!(unknown.span(), None);
     }
 
     #[test]
@@ -587,12 +835,12 @@ mod tests {
             .map(|p| p.name.as_str())
             .collect();
         assert_eq!(names, ["a"]);
-        let failing = PodQuery {
-            filter: PodFilter::Failing,
+        let pending = PodQuery {
+            filter: PodFilter::Pending,
             ..PodQuery::default()
         };
-        assert_eq!(failing.apply(&pods, &prod).len(), 1);
-        assert_eq!(failing.base(&pods, &prod).len(), 3);
+        assert_eq!(pending.apply(&pods, &prod).len(), 1);
+        assert_eq!(pending.base(&pods, &prod).len(), 3);
     }
 
     #[test]

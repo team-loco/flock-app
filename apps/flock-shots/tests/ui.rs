@@ -2273,6 +2273,19 @@ fn filter_namespace_completion_chips_and_backspace_work_in_both_appearances() ->
 }
 
 #[test]
+fn the_pod_phase_filter_keeps_one_phase() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    assert!(ui.bounds("pods-row-9").is_some());
+    ui.click("pod-filter-chips-1")?;
+    assert!(ui.bounds("pods-row-9").is_some());
+    ui.click("pod-filter-chips-4")?;
+    assert!(ui.bounds("pods-row-0").is_none());
+    ui.click("pod-filter-chips-0")?;
+    assert!(ui.bounds("pods-row-9").is_some());
+    Ok(())
+}
+
+#[test]
 fn the_pods_dock_waits_for_a_pod_before_offering_log_controls() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
     assert!(ui.bounds("pod-logs-follow").is_some());

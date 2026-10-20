@@ -5,12 +5,15 @@ use crate::kit::SelectableText;
 use flock_core::emptiness::Noun;
 use flock_core::filter::label_values;
 use flock_core::multilog::LabelSelector;
-use flock_core::pods::{Container, Pod, PodFilter, PodQuery, filter_counts, nav_counts};
+use flock_core::pods::{
+    Container, ContainerState, Pod, PodFilter, PodPhase, PodQuery, Resources, Termination, Usage,
+    filter_counts, nav_counts,
+};
 use flock_core::related::Related;
 use flock_core::resources::{NamespaceCount, POD_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
 use flock_core::{
-    ClusterId, Command, Counts, LogTarget, Page, Preferences, ResourceRef, Seen, Snapshot,
+    ClusterId, Command, Counts, LogTarget, Page, Preferences, ResourceRef, Seen, Snapshot, Status,
 };
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
@@ -25,9 +28,8 @@ use streams::{LogSession, ShellSession, TERMINAL_ID};
 use crate::kit::{
     Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, EVENTS, Entrance,
     EventList, FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER,
-    Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, ShowAll, StatusGlyph, StatusText,
-    Table, TableEvent, Terminal, TextFieldState, WHATS_WRONG, WhatsWrong, chip_label, confirm,
-    reason_tooltip, swap_in,
+    Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, ShowAll, StatusText, Table,
+    TableEvent, Terminal, TextFieldState, WHATS_WRONG, WhatsWrong, chip_label, confirm, swap_in,
 };
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
 use crate::screens::{
@@ -35,26 +37,33 @@ use crate::screens::{
     set_namespace_options,
 };
 use crate::theme::{
-    ActiveTheme, CONTAINER_SQUARE, CONTAINER_SQUARE_GAP, FONT_MONO, INSPECTOR_POD, LINE_PROSE,
-    MESSAGE_MIN, Palette, RADIUS_SMALL, REASON_WEIGHT, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
-    SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_SMALL, TEXT_UI,
+    ActiveTheme, FONT_MONO, INSPECTOR_POD, LINE_PROSE, Palette, RULE, SPACE_2, SPACE_3, SPACE_4,
+    SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI, WHATS_WRONG_BAR,
 };
 
 const INSPECTOR_ID: &str = "pod-inspector";
-const NAME_MIN: Pixels = px(220.);
+const NAME_MIN: Pixels = px(180.);
 const NAME_WEIGHT: f32 = 2.;
-const NAMESPACE: Pixels = px(100.);
-const CONTAINERS: Pixels = px(96.);
+const OWNER_MIN: Pixels = px(96.);
+const OWNER_WEIGHT: f32 = 1.;
+const READY: Pixels = px(48.);
 const RESTARTS: Pixels = px(64.);
-const AGE: Pixels = px(48.);
-const STATUS_MIN: Pixels = px(110.);
-const STATUS_MAX: Pixels = px(260.);
+const STATUS_MIN: Pixels = px(92.);
+const STATUS_MAX: Pixels = px(220.);
+const NODE_MIN: Pixels = px(100.);
+const NODE_WEIGHT: f32 = 1.;
+const CPU: Pixels = px(52.);
+const MEMORY: Pixels = px(60.);
+const AGE: Pixels = px(44.);
 const NAMESPACE_SELECT: Pixels = px(180.);
 const CONTAINER_SELECT: Pixels = px(160.);
 const INSPECTOR_LABEL: Pixels = px(96.);
+const CONTAINER_LABEL: Pixels = px(80.);
+const SEPARATOR: &str = " · ";
 
 const MISSING: &str = "—";
-const MESSAGE: &str = "Message";
+const NO_RESOURCES: &str = "none";
+const LAST_TERMINATION: &str = "Last termination";
 const LOGS_FOR: &str = "Logs for";
 const LOGS_FOR_SELECTED: &str = "Logs for selected pods";
 const SELECTED_PODS: &str = "selected pods";
@@ -109,7 +118,7 @@ impl PodsScreen {
                 .row_actions(move |pod: &Pod| menu_items(pod, &screen))
                 .row_key(|pod: &Pod| format!("{}/{}", pod.namespace, pod.name).into())
                 .multi_select()
-                .column_gap(SPACE_7)
+                .column_gap(SPACE_6)
         });
         let search =
             cx.new(|cx| TextFieldState::new(window, cx).placeholder(LOG_FILTER_PLACEHOLDER));
@@ -606,11 +615,11 @@ impl PodsScreen {
             .flex()
             .flex_col()
             .children(whats_wrong)
+            .child(Self::facts(pod, palette, cx))
+            .child(Self::containers_section(pod, palette, cx))
             .child(conditions(pod, palette))
             .child(events(pod, palette))
-            .child(Self::facts(pod, palette, cx))
             .child(labels(pod, palette))
-            .child(Self::containers_section(pod, palette, cx))
             .child(volumes(pod, palette))
     }
 
@@ -655,9 +664,10 @@ impl PodsScreen {
             .enumerate()
             .map(|(ix, container)| Self::container_row(pod, ix, container, palette, cx))
             .collect();
+        let label = format!("Containers{SEPARATOR}{}", pod.containers.len());
         section(palette)
-            .gap(SPACE_5)
-            .child(SectionLabel::new("Containers"))
+            .gap(SPACE_3)
+            .child(SectionLabel::new(label))
             .children(rows)
     }
 
@@ -680,9 +690,7 @@ impl PodsScreen {
                 div()
                     .flex()
                     .gap(SPACE_4)
-                    .font_family(FONT_MONO)
-                    .text_size(TEXT_SMALL)
-                    .child(div().text_color(palette.fg2).child(port.label()))
+                    .child(div().text_color(palette.fg).child(port.label()))
                     .child(
                         Link::new(id, "Forward").on_click(cx.listener(move |_, _, _, cx| {
                             cx.emit(Command::PortForward {
@@ -695,34 +703,131 @@ impl PodsScreen {
                     .into_any_element()
             })
             .collect();
+        let state_color = match (container.state, container.status) {
+            (ContainerState::Terminated, Status::Ok) => palette.mute,
+            (_, status) => palette.status(status),
+        };
+        let restarts_color = if container.restarts > 0 {
+            palette.warn
+        } else {
+            palette.mute
+        };
+        let fields = container_fields(container, ports, palette);
+        let last = container
+            .last_termination
+            .as_ref()
+            .map(|last| last_termination(last, palette));
         div()
             .flex()
             .flex_col()
-            .gap(SPACE_1)
+            .gap(SPACE_3)
+            .pt(SPACE_3)
+            .border_t(RULE)
+            .border_color(palette.line)
             .child(
                 div()
                     .flex()
-                    .items_center()
-                    .gap(SPACE_3)
-                    .child(StatusGlyph::new(container.status))
+                    .items_baseline()
+                    .gap(SPACE_4)
+                    .font_family(FONT_MONO)
+                    .text_size(TEXT_MONO)
                     .child(
                         div()
-                            .flex_1()
                             .font_weight(FontWeight::MEDIUM)
                             .child(container.name.clone()),
                     )
                     .child(
                         div()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(state_color)
+                            .child(container.state_label()),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .flex_none()
                             .text_size(TEXT_SMALL)
-                            .text_color(palette.status(container.status))
-                            .child(container.reason.clone()),
+                            .text_color(restarts_color)
+                            .child(container.restarts_label()),
                     ),
             )
-            .child(mono_line(container.image.clone(), palette.fg2))
-            .child(mono_line(container.meta(), palette.mute))
-            .children(ports)
+            .child(fields)
+            .children(last)
             .into_any_element()
     }
+}
+
+fn container_fields(container: &Container, ports: Vec<AnyElement>, palette: &Palette) -> KeyValue {
+    let resources = |resources: &Resources| match resources.label() {
+        Some(label) => value(label, palette.fg),
+        None => value(NO_RESOURCES, palette.mute),
+    };
+    let probes = container
+        .probes_label()
+        .map(|probes| value(probes, palette.fg2));
+    let run = container
+        .terminated
+        .as_ref()
+        .and_then(Termination::run)
+        .map(|run| value(run, palette.fg));
+    let fields = KeyValue::new()
+        .label_width(CONTAINER_LABEL)
+        .row("image", value(container.image.clone(), palette.fg))
+        .row("requests", resources(&container.requests))
+        .row("limits", resources(&container.limits));
+    let fields = match probes {
+        Some(probes) => fields.row("probes", probes),
+        None => fields,
+    };
+    let fields = match run {
+        Some(run) => fields.row("ran", run),
+        None => fields,
+    };
+    if ports.is_empty() {
+        return fields;
+    }
+    let ports = div().flex().flex_col().gap(SPACE_2).children(ports);
+    fields.row("ports", ports)
+}
+
+fn value(text: impl Into<SharedString>, color: gpui::Hsla) -> AnyElement {
+    div()
+        .min_w_0()
+        .text_color(color)
+        .child(SelectableText::new(text))
+        .into_any_element()
+}
+
+fn last_termination(last: &Termination, palette: &Palette) -> AnyElement {
+    let reason = Some(last.reason.clone()).filter(|reason| !reason.is_empty());
+    let summary = div()
+        .flex()
+        .flex_wrap()
+        .children(reason.map(|reason| {
+            div()
+                .text_color(palette.warn)
+                .child(format!("{reason}{SEPARATOR}"))
+        }))
+        .child(div().text_color(palette.fg).child(last.detail()));
+    let span = last
+        .span()
+        .map(|span| div().text_color(palette.mute).child(span));
+    div()
+        .flex()
+        .flex_col()
+        .gap(SPACE_2)
+        .px(SPACE_4)
+        .py(SPACE_3)
+        .border_l(WHATS_WRONG_BAR)
+        .border_color(palette.warn)
+        .bg(palette.warnbg)
+        .font_family(FONT_MONO)
+        .text_size(TEXT_SMALL)
+        .child(SectionLabel::new(LAST_TERMINATION))
+        .child(summary)
+        .children(span)
+        .into_any_element()
 }
 
 fn section(palette: &Palette) -> gpui::Div {
@@ -734,15 +839,6 @@ fn section(palette: &Palette) -> gpui::Div {
         .py(SPACE_5)
         .border_b(RULE)
         .border_color(palette.line)
-}
-
-fn mono_line(text: impl Into<SharedString>, color: gpui::Hsla) -> impl IntoElement {
-    div()
-        .min_w_0()
-        .font_family(FONT_MONO)
-        .text_size(TEXT_SMALL)
-        .text_color(color)
-        .child(text.into())
 }
 
 fn missing(palette: &Palette) -> AnyElement {
@@ -908,19 +1004,19 @@ fn text(value: impl Into<SharedString>, color: gpui::Hsla) -> AnyElement {
         .into_any_element()
 }
 
-fn container_squares(pod: &Pod, palette: &Palette) -> AnyElement {
-    let squares = pod.containers.iter().map(|container| {
-        div()
-            .size(CONTAINER_SQUARE)
-            .flex_none()
-            .rounded(RADIUS_SMALL)
-            .bg(palette.status(container.status))
-    });
-    div()
-        .flex()
-        .gap(CONTAINER_SQUARE_GAP)
-        .children(squares)
-        .into_any_element()
+fn ready_color(pod: &Pod, palette: &Palette) -> gpui::Hsla {
+    if pod.phase == PodPhase::Succeeded {
+        palette.mute
+    } else if pod.all_ready() {
+        palette.fg2
+    } else {
+        palette.warn
+    }
+}
+
+fn usage_text(pod: &Pod, label: fn(Usage) -> String) -> SharedString {
+    pod.usage
+        .map_or_else(|| MISSING.into(), |usage| label(usage).into())
 }
 
 fn columns() -> Vec<Column<Pod>> {
@@ -931,14 +1027,20 @@ fn columns() -> Vec<Column<Pod>> {
             .flex(NAME_WEIGHT, NAME_MIN)
             .sort_by_key(|p: &Pod| p.name.clone()),
         Column::colored_text(
-            "Namespace",
-            |p: &Pod| p.namespace.clone().into(),
+            "Owner",
+            |p: &Pod| p.owner_label().unwrap_or_else(|| MISSING.into()).into(),
             |_, palette| palette.fg2,
         )
-        .highlight()
-        .fixed(NAMESPACE)
-        .sort_by_key(|p: &Pod| p.namespace.clone()),
-        Column::new("Containers", container_squares).fixed(CONTAINERS),
+        .mono()
+        .flex(OWNER_WEIGHT, OWNER_MIN)
+        .sort_by_key(Pod::owner_label),
+        Column::new("Ready", |p: &Pod, palette| {
+            text(p.ready_label(), ready_color(p, palette))
+        })
+        .mono()
+        .end()
+        .fixed(READY)
+        .sort_by_key(|p: &Pod| p.all_ready()),
         Column::new("Restarts", |p: &Pod, palette| {
             let color = p
                 .restart_status()
@@ -949,12 +1051,6 @@ fn columns() -> Vec<Column<Pod>> {
         .end()
         .fixed(RESTARTS)
         .sort_by_key(|p: &Pod| std::cmp::Reverse(p.restarts())),
-        Column::new("Age", |p: &Pod, palette| {
-            text(flock_core::time::age(p.age), palette.mute)
-        })
-        .mono()
-        .fixed(AGE)
-        .sort_by_key(|p: &Pod| p.age),
         Column::new("Status", |p: &Pod, _| {
             StatusText::new(p.status, p.reason.clone()).into_any_element()
         })
@@ -962,12 +1058,39 @@ fn columns() -> Vec<Column<Pod>> {
         .auto(STATUS_MIN, STATUS_MAX)
         .sort_by_key(|p: &Pod| std::cmp::Reverse(p.status)),
         Column::colored_text(
-            MESSAGE,
-            |p: &Pod| p.diagnosis().map(|d| d.message).unwrap_or_default().into(),
-            |_, palette| palette.mute,
+            "Node",
+            |p: &Pod| p.node_short().unwrap_or(MISSING).to_owned().into(),
+            |_, palette| palette.fg2,
         )
-        .tooltip(|p: &Pod| reason_tooltip(p.diagnosis().as_ref()))
-        .flex(REASON_WEIGHT, MESSAGE_MIN),
+        .highlight()
+        .mono()
+        .flex(NODE_WEIGHT, NODE_MIN)
+        .sort_by_key(|p: &Pod| p.node.clone()),
+        Column::colored_text(
+            "CPU",
+            |p: &Pod| usage_text(p, Usage::cpu_label),
+            |_, palette| palette.fg2,
+        )
+        .mono()
+        .end()
+        .fixed(CPU)
+        .sort_by_key(|p: &Pod| std::cmp::Reverse(p.usage.map(|u| u.cpu_millis))),
+        Column::colored_text(
+            "Memory",
+            |p: &Pod| usage_text(p, Usage::memory_label),
+            |_, palette| palette.fg2,
+        )
+        .mono()
+        .end()
+        .fixed(MEMORY)
+        .sort_by_key(|p: &Pod| std::cmp::Reverse(p.usage.map(|u| u.memory_mib))),
+        Column::new("Age", |p: &Pod, palette| {
+            text(flock_core::time::age(p.age), palette.mute)
+        })
+        .mono()
+        .end()
+        .fixed(AGE)
+        .sort_by_key(|p: &Pod| p.age),
     ]
 }
 

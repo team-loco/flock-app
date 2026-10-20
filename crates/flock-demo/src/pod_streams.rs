@@ -132,7 +132,7 @@ pub fn initial_logs(pod: &Pod, request: &LogRequest) -> Vec<LogLine> {
         let waiting = format!(
             "container {} is waiting to start: {}",
             container.name,
-            container.meta()
+            container.note.as_deref().unwrap_or(&container.reason)
         );
         return vec![
             LogLine::new(WAITING_TIME, LogLevel::Warn, waiting),

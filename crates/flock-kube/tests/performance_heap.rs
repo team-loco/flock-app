@@ -9,6 +9,7 @@ use flock_kube::shell_env::ShellEnv;
 use flock_kube::store::ClusterStore;
 use flock_kube::{lists, pods};
 use jiff::Timestamp;
+use jiff::tz::TimeZone;
 
 #[global_allocator]
 static ALLOCATOR: dhat::Alloc = dhat::Alloc;
@@ -65,8 +66,10 @@ fn synthetic_snapshot_allocations() {
     let maps = synthetic::configmaps();
     let cluster = ClusterId::new("scale");
     let now = Timestamp::now();
+    let zone = TimeZone::UTC;
+    let clock = pods::Clock { now, zone: &zone };
     let profiler = dhat::Profiler::builder().testing().build();
-    let rows = pods::pods(&cluster, &raw, &[], &[], now);
+    let rows = pods::pods(&cluster, &raw, &[], &[], &clock);
     let pod_stats = dhat::HeapStats::get();
     let index = PodIndex::build(&raw, now);
     let overview_stats = dhat::HeapStats::get();
