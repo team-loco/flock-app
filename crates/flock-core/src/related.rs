@@ -57,12 +57,12 @@ pub const DETAIL_KINDS: [&str; 8] = [
     JOB, "CronJob", SERVICE, "Ingress", CONFIG_MAP, SECRET, CLAIM, NAMESPACE,
 ];
 pub const NAMESPACE_PAGES: [Page; 11] = [
-    Page::Pods,
     Page::Deployments,
     Page::StatefulSets,
     Page::DaemonSets,
     Page::Jobs,
     Page::CronJobs,
+    Page::Pods,
     Page::Services,
     Page::Ingresses,
     Page::ConfigMaps,
@@ -548,19 +548,26 @@ pub fn contents(cluster: &ClusterId, facts: &[Fact], events: &[Event], namespace
             namespace: namespace.to_owned(),
         })
     };
-    let mut groups: Vec<Group> = NAMESPACE_PAGES
-        .into_iter()
-        .filter_map(|page| page_kind(page).map(|kind| (page, kind)))
-        .map(|(page, kind)| {
-            let mut items: Vec<Item> = facts
-                .iter()
-                .filter(|fact| fact.kind == kind && fact.namespace.as_deref() == Some(namespace))
-                .map(|fact| fact.item(cluster))
-                .collect();
-            sort(kind, &mut items);
-            Group::new(page.label().to_owned(), items, link(page))
-        })
-        .collect();
+    let facts = with_replica_sets(facts);
+    let group = |kind: &str| {
+        let mut items: Vec<Item> = facts
+            .iter()
+            .filter(|fact| fact.kind == kind && fact.namespace.as_deref() == Some(namespace))
+            .map(|fact| fact.item(cluster))
+            .collect();
+        sort(kind, &mut items);
+        items
+    };
+    let mut groups: Vec<Group> = Vec::new();
+    for page in NAMESPACE_PAGES {
+        let Some(kind) = page_kind(page) else {
+            continue;
+        };
+        groups.push(Group::new(page.label().to_owned(), group(kind), link(page)));
+        if kind == POD {
+            groups.push(Group::new(plural(REPLICA_SET), group(REPLICA_SET), None));
+        }
+    }
     let events: Vec<Item> = events
         .iter()
         .filter(|event| event.namespace.as_deref() == Some(namespace))
@@ -900,7 +907,7 @@ mod tests {
     }
 
     #[test]
-    fn a_namespace_lists_every_kind_in_sidebar_order_with_list_links() {
+    fn a_namespace_lists_workloads_then_pods_and_replica_sets_then_the_rest_with_list_links() {
         let mut facts = shop();
         facts.push(Fact::new(DEPLOYMENT, Some("web"), "web"));
         let events = vec![
@@ -912,12 +919,13 @@ mod tests {
         assert_eq!(
             titles(&related),
             [
-                "Pods",
                 "Deployments",
                 "StatefulSets",
                 "DaemonSets",
                 "Jobs",
                 "CronJobs",
+                "Pods",
+                "ReplicaSets",
                 "Services",
                 "Ingresses",
                 "ConfigMaps",
@@ -936,6 +944,7 @@ mod tests {
         assert_eq!(total("Pods"), Some(3));
         assert_eq!(total("Deployments"), Some(1));
         assert_eq!(total("PVCs"), Some(0));
+        assert_eq!(total("ReplicaSets"), Some(1));
         assert_eq!(names(&related, "Pods").first(), Some(&"cart-7f9c-b"));
         let events = related.groups.last();
         assert_eq!(
@@ -956,7 +965,7 @@ mod tests {
                 .first()
                 .and_then(|g| g.list.as_ref())
                 .map(|l| l.page),
-            Some(Page::Pods)
+            Some(Page::Deployments)
         );
     }
 

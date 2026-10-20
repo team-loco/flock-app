@@ -644,7 +644,10 @@ fn gather(cluster: &ClusterId, watch: &PageWatch, observed: &Observed) -> Inputs
         pods: owned::<Pod>(handle, |ns| pod_namespaces.contains(ns)),
         secrets: metadata::<Secret>(handle, workspace),
         service_accounts: metadata::<ServiceAccount>(handle, workspace),
-        network_policies: metadata::<NetworkPolicy>(handle, workspace),
+        network_policies: owned::<NetworkPolicy>(handle, workspace)
+            .into_iter()
+            .map(|policy| policy.metadata)
+            .collect(),
         workloads_watched: true,
         agent: observed.agent.clone(),
         builds_enabled: observed.builds_enabled,

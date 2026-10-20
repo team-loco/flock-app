@@ -27,6 +27,7 @@ pub mod manager;
 pub mod metrics;
 pub mod metrics_history;
 pub mod migrate;
+pub mod namespace;
 pub mod ops;
 pub mod paste;
 pub mod pod_tops;

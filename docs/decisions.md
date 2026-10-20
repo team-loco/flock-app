@@ -439,3 +439,13 @@ Settled; change only with a new entry that says why.
     `stalled` is derived from `ProgressDeadlineExceeded` among them. The prose sentence stays as
     the fallback while a Restart, Scale or Rollback is pending and for objects that report no
     conditions; Flux list rows, pods and Compare keep their sentences.
+47. **Namespaces open their own page** (design v2 `Namespace`; amends 39): a namespace no longer
+    opens the generic detail page. `screens::namespace` shows what needs attention (the cluster's
+    problems in that namespace), the contents grouped by kind with a summary per group and the
+    empty kinds named, and an aside with requested CPU and memory against the smallest
+    ResourceQuota, each quota's used/hard values, labels, a one-line summary per NetworkPolicy and
+    the newest events. ReplicaSets are derived from their pods' owners, so old revisions scaled to
+    0 are not listed. ResourceQuota and NetworkPolicy are watched cluster-wide only while a
+    namespace is inspected (`flock_kube::namespace::WATCHES`); when RBAC denies them the section
+    says why instead of failing the page. Services "with unready endpoints" wait for an
+    EndpointSlice watch.

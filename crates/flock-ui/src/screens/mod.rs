@@ -20,6 +20,7 @@ pub mod gitops;
 pub(crate) mod helm;
 pub mod logs;
 pub mod multilog;
+pub mod namespace;
 mod namespaces;
 mod no_shell;
 mod nodes;

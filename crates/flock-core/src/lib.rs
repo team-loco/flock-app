@@ -25,6 +25,7 @@ pub mod loco;
 pub mod logparse;
 pub mod menubar;
 pub mod multilog;
+pub mod namespace;
 pub mod nav;
 pub mod nodes;
 pub mod notify;

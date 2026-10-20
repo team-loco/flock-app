@@ -118,3 +118,4 @@ Spec column points at `design/`.
 | WU2 | Pod logs: previous instance (Logs before restart, current/previous segment, banner), parsed JSON/logfmt lines with a raw toggle | claude | logs-v2 | done |
 | WU5 | Cluster Problems page: problems grouped by reason and message template, 6h occurrences with Flux-apply markers, shared traits, affected table | claude | cluster-problems | done |
 | WU6 | Cluster overview v2 part 1: screens/overview/ module per section; problem and Flux header links, Nodes/Pods/CPU/Memory cells, top restarts and longest Pending, sortable Namespaces with requests, design workload copy, CPU and Memory charts; Warnings table removed | claude | overview-v2 | done |
+| WU9 | Namespace page: needs attention, contents grouped by kind (ReplicaSets from pods), usage against quota, labels, network policy summaries, recent events; ResourceQuota and NetworkPolicy watches while a namespace is open | claude | namespace-page | done |

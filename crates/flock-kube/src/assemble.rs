@@ -260,6 +260,7 @@ fn cluster_detail(
         events,
         resources,
         related,
+        namespace_details: crate::namespace::details(handle, selection.inspected, now),
     }
 }
 

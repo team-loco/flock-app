@@ -199,9 +199,17 @@ pub fn handle(command: &Command, snapshot: &mut Snapshot) -> bool {
     let Some(found) = relate(snapshot, target) else {
         return false;
     };
+    let namespace = (target.kind == NAMESPACE)
+        .then(|| crate::namespace::detail(snapshot, &target.cluster, &target.name));
     let Some(detail) = snapshot.details.get_mut(&target.cluster) else {
         return false;
     };
+    if let Some(namespace) = namespace {
+        detail
+            .namespace_details
+            .retain(|known| known.name != namespace.name);
+        detail.namespace_details.push(namespace);
+    }
     detail.related.retain(|known| known.target != found.target);
     detail.related.insert(0, found);
     detail.related.truncate(KEPT);

@@ -148,6 +148,7 @@ struct CustomWatch {
 struct Inspecting {
     target: ResourceRef,
     shown: Option<String>,
+    _watches: Vec<Subscription>,
 }
 
 struct Navigation {
@@ -768,13 +769,27 @@ impl Live {
     fn inspect(&mut self, target: &ResourceRef) {
         self.navigation.yaml = None;
         self.navigation.yaml_task = None;
+        let watches = self.namespace_watches(target);
         self.navigation.inspecting = Some(Inspecting {
             target: target.clone(),
             shown: None,
+            _watches: watches,
         });
         if has_rows(target) {
             self.fetch_yaml();
         }
+    }
+
+    fn namespace_watches(&self, target: &ResourceRef) -> Vec<Subscription> {
+        let handle = self
+            .handle(&target.cluster)
+            .filter(|_| target.kind == flock_core::related::NAMESPACE);
+        handle.map_or_else(Vec::new, |handle| {
+            crate::namespace::WATCHES
+                .iter()
+                .map(|kind| handle.subscribe(kind.clone()))
+                .collect()
+        })
     }
 
     fn refresh_yaml(&mut self, changed: &ContextRef) {
