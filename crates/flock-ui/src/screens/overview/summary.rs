@@ -1,4 +1,4 @@
-use flock_core::overview::{Capacity, percent, thousands};
+use flock_core::overview::{Capacity, percent, plural, thousands};
 use flock_core::{Page, Status};
 use gpui::{
     AnyElement, Context, Div, Hsla, InteractiveElement, IntoElement, ParentElement, Styled, div,
@@ -89,10 +89,13 @@ fn nodes(data: &OverviewData, palette: &Palette, cx: &mut Context<OverviewScreen
     if nodes.not_ready > 0 {
         parts.push(counted(nodes.not_ready, "not ready", palette.err));
     }
+    if nodes.disk_pressure > 0 {
+        parts.push(counted(nodes.disk_pressure, "DiskPressure", palette.warn));
+    }
     if nodes.cordoned > 0 {
         parts.push(counted(nodes.cordoned, "cordoned", palette.warn));
     }
-    let detail = Some(nodes.compact_instance_label()).filter(|label| !label.is_empty());
+    let detail = (nodes.pools > 0).then(|| plural(nodes.pools, "pool", "pools"));
     let title = title("Nodes", nodes.total.to_string(), detail, palette);
     let body = [
         title.into_any_element(),

@@ -27,6 +27,7 @@ pub mod menubar;
 pub mod multilog;
 pub mod namespace;
 pub mod nav;
+pub mod node_pools;
 pub mod nodes;
 pub mod notify;
 pub mod overview;

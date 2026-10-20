@@ -28,6 +28,7 @@ pub mod metrics;
 pub mod metrics_history;
 pub mod migrate;
 pub mod namespace;
+pub mod network;
 pub mod ops;
 pub mod paste;
 pub mod pod_tops;

@@ -1,14 +1,18 @@
 mod charts;
+mod facts;
 mod header;
 mod namespaces;
 mod pods;
+mod pools;
 mod summary;
 mod workloads;
 
 use flock_core::cluster::{Namespace, NamespaceSort};
+use flock_core::node_pools::{KubeletSkew, NodePool};
 use flock_core::nodes::NodeSummary;
 use flock_core::overview::{
-    Capacity, PodPhases, TimeRange, Utilization, UtilizationSource, WorkloadHealth, plural,
+    Capacity, NetworkFacts, PodPhases, TimeRange, Utilization, UtilizationSource, WorkloadHealth,
+    plural,
 };
 use flock_core::pod_tops::PodTops;
 use flock_core::{
@@ -48,6 +52,9 @@ struct OverviewData {
     pods: PodPhases,
     nodes: NodeSummary,
     node_health: Counts,
+    pools: Vec<NodePool>,
+    skew: Option<KubeletSkew>,
+    network: NetworkFacts,
     utilization: Vec<Utilization>,
     workloads: Vec<WorkloadHealth>,
     tops: PodTops,
@@ -75,6 +82,12 @@ impl OverviewData {
             pods: detail.overview.pods,
             nodes: detail.node_summary(),
             node_health: Counts::of(detail.nodes.iter().map(|n| n.status)),
+            pools: NodePool::of(&detail.nodes),
+            skew: cluster
+                .version
+                .as_deref()
+                .and_then(|version| KubeletSkew::of(&detail.nodes, version)),
+            network: detail.overview.network,
             utilization: detail.overview.utilization.clone(),
             workloads: detail.workload_health(),
             tops: detail.overview.tops.clone(),
@@ -233,8 +246,10 @@ impl Render for OverviewScreen {
         let sections = [
             Some(header::render(&data, &palette, cx)),
             Some(summary::render(&data, &palette, cx)),
+            band(pools::render(&data, &palette, cx), &palette),
             band(pods::render(&data, &palette, cx), &palette),
             Some(namespaces::render(&data, self.sort, &palette, cx)),
+            band(facts::render(&data, &palette, cx), &palette),
             Some(workloads::render(&data, &palette, cx)),
             Some(charts::render(&data, self.range, &palette, cx)),
         ];

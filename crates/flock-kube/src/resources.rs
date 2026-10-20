@@ -11,6 +11,7 @@ use k8s_openapi::api::core::v1::{
     ConfigMap, Event, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret, Service,
     ServiceAccount,
 };
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{FieldsV1, ManagedFieldsEntry};
@@ -67,6 +68,7 @@ pub enum WatchKind {
     Jobs,
     CronJobs,
     Services,
+    EndpointSlices,
     Ingresses,
     ConfigMaps,
     Secrets,
@@ -93,6 +95,7 @@ impl WatchKind {
             Self::Jobs => "Job",
             Self::CronJobs => "CronJob",
             Self::Services => "Service",
+            Self::EndpointSlices => "EndpointSlice",
             Self::Ingresses => "Ingress",
             Self::ConfigMaps => "ConfigMap",
             Self::Secrets => "Secret",
@@ -131,6 +134,7 @@ watched! {
     Job => Jobs,
     CronJob => CronJobs,
     Service => Services,
+    EndpointSlice => EndpointSlices,
     Ingress => Ingresses,
     PartialObjectMeta<ConfigMap> => ConfigMaps,
     PartialObjectMeta<Secret> => Secrets,
@@ -283,6 +287,7 @@ pub fn spawn_builtin(
         WatchKind::Jobs => spawn_full::<Job>(runtime, client, signals),
         WatchKind::CronJobs => spawn_full::<CronJob>(runtime, client, signals),
         WatchKind::Services => spawn_full::<Service>(runtime, client, signals),
+        WatchKind::EndpointSlices => spawn_full::<EndpointSlice>(runtime, client, signals),
         WatchKind::Ingresses => spawn_full::<Ingress>(runtime, client, signals),
         WatchKind::ConfigMaps => {
             spawn_full::<PartialObjectMeta<ConfigMap>>(runtime, client, signals)

@@ -8,13 +8,15 @@ use flock_core::{
 };
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
-use k8s_openapi::api::core::v1::{Event, Namespace, Node, Pod};
+use k8s_openapi::api::core::v1::{Event, Namespace, Node, PersistentVolumeClaim, Pod, Service};
+use k8s_openapi::api::discovery::v1::EndpointSlice;
 
 use crate::detail::{self, PodIndex, capacity};
 use crate::flux::{self, FluxHealth};
 use crate::lists::{self, watched_lists};
 use crate::manager::{ClusterHandle, ConnectionStatus};
 use crate::metrics::{NodeUsage, PodUsage};
+use crate::network;
 use crate::pod_tops::pod_tops;
 use crate::probe::PrometheusTarget;
 use crate::problems::{connection_problem, node_problems, pod_problems};
@@ -231,6 +233,15 @@ fn cluster_detail(
             row.yaml.clone_from(yaml);
         }
     }
+    let slices = handle
+        .watch_state(&WatchKind::EndpointSlices)
+        .is_loaded()
+        .then(|| handle.objects::<EndpointSlice>());
+    let network = network::facts(
+        &handle.objects::<Service>(),
+        slices.as_deref(),
+        &handle.objects::<PersistentVolumeClaim>(),
+    );
     let nodes = detail::nodes(nodes, index, usage, now);
     let scope = related::Scope {
         cluster: id,
@@ -249,6 +260,7 @@ fn cluster_detail(
             pods: index.phases,
             utilization,
             tops: pod_tops(id, pods, now),
+            network,
         },
         nodes,
         namespaces: detail::namespaces(

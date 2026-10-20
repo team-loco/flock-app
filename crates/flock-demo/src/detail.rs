@@ -5,7 +5,7 @@ use flock_core::Condition;
 use flock_core::cluster::Namespace;
 use flock_core::events::Event;
 use flock_core::nodes::{CONDITION_TRUE, Node, READY_CONDITION, Usage};
-use flock_core::overview::{Commitment, Overview, PodPhases, TimeRange, Utilization};
+use flock_core::overview::{Commitment, NetworkFacts, Overview, PodPhases, TimeRange, Utilization};
 use flock_core::pod_tops::PodTops;
 use flock_core::{ClusterDetail, Counts, Status, Uid};
 
@@ -20,6 +20,17 @@ const GENERAL_MEMORY: f32 = 36.;
 const GPU_MEMORY: f32 = 40.;
 const POD_CAPACITY: u32 = 110;
 const KUBELET: &str = "v1.31.2-eks-7f9249a";
+const GPU_KUBELET: &str = "v1.30.4-eks-a737599";
+const GPU_COMMITMENT: (Commitment, Commitment) = (
+    Commitment {
+        requests: 0.96,
+        limits: 1.,
+    },
+    Commitment {
+        requests: 0.71,
+        limits: 0.9,
+    },
+);
 const OS_IMAGE: &str = "Amazon Linux 2023.5.20240916";
 const EVENT_FIRST_AGE: Duration = Duration::from_secs(3600);
 const EVENT_NOW: jiff::Timestamp = jiff::Timestamp::constant(1_791_873_360, 0);
@@ -76,6 +87,11 @@ fn overview() -> Overview {
         },
         utilization: utilization(),
         tops: PodTops::default(),
+        network: NetworkFacts {
+            services_without_endpoints: Some(2),
+            load_balancers_pending: 1,
+            pvcs_pending: 0,
+        },
     }
 }
 
@@ -276,10 +292,15 @@ pub fn nodes() -> Vec<Node> {
 
 fn node(seed: &NodeSeed) -> Node {
     let schedulable = seed.name != CORDONED;
-    let (instance, memory, group) = if seed.gpu {
-        (GPU, GPU_MEMORY, "gpu")
+    let (instance, memory, group, kubelet) = if seed.gpu {
+        (GPU, GPU_MEMORY, "gpu", GPU_KUBELET)
     } else {
-        (GENERAL, GENERAL_MEMORY, "general")
+        (GENERAL, GENERAL_MEMORY, "general", KUBELET)
+    };
+    let (cpu_commitment, memory_commitment) = if seed.gpu {
+        GPU_COMMITMENT
+    } else {
+        (overview().cpu, overview().memory)
     };
     let mut taints = Vec::new();
     if seed.gpu {
@@ -300,7 +321,7 @@ fn node(seed: &NodeSeed) -> Node {
         schedulable,
         instance_type: instance.into(),
         zone: seed.zone.into(),
-        version: KUBELET.into(),
+        version: kubelet.into(),
         internal_ip,
         os_image: OS_IMAGE.into(),
         runtime: RUNTIME.into(),
@@ -312,8 +333,8 @@ fn node(seed: &NodeSeed) -> Node {
             used: seed.memory,
             allocatable: memory,
         },
-        cpu_commitment: overview().cpu,
-        memory_commitment: overview().memory,
+        cpu_commitment,
+        memory_commitment,
         pods: seed.pods,
         pod_capacity: POD_CAPACITY,
         age: days(seed.age_days),

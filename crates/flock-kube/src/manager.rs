@@ -372,8 +372,8 @@ struct Health {
 
 impl Health {
     fn record(&mut self, kind: WatchKind, failure: Failure) {
-        let page_scoped =
-            matches!(kind, WatchKind::Custom(_)) && failure.kind == FailureKind::Forbidden;
+        let optional = matches!(kind, WatchKind::Custom(_) | WatchKind::EndpointSlices);
+        let page_scoped = optional && failure.kind == FailureKind::Forbidden;
         if !page_scoped {
             self.kinds.insert(kind, failure);
         }
@@ -717,6 +717,18 @@ mod tests {
         assert!(matches!(health.status(), ConnectionStatus::Degraded(_)));
         health.record(WatchKind::Secrets, failure(FailureKind::Forbidden));
         assert!(matches!(health.status(), ConnectionStatus::Degraded(ref f) if f.len() == 2));
+    }
+
+    #[test]
+    fn forbidden_endpoint_slices_do_not_degrade() {
+        let mut health = Health {
+            connected_once: true,
+            ..Health::default()
+        };
+        health.record(WatchKind::EndpointSlices, failure(FailureKind::Forbidden));
+        assert_eq!(health.status(), ConnectionStatus::Connected);
+        health.record(WatchKind::EndpointSlices, failure(FailureKind::Other));
+        assert!(matches!(health.status(), ConnectionStatus::Degraded(_)));
     }
 
     const ROUND_TRIP: Duration = Duration::from_secs(1);
