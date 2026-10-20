@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::crd::{Crd, CrdKey, CustomObjects};
+use crate::crd::{Crd, CrdKey, CustomObjects, Definition};
 use crate::helm::{HelmKey, HelmRelease, HelmReleaseDetail};
 use crate::home::{ClusterMetrics, problems_badge};
 use crate::{
@@ -86,6 +86,34 @@ impl Snapshot {
 
     pub fn crd(&self, id: &ClusterId, key: &CrdKey) -> Option<&Crd> {
         self.crds(id).iter().find(|crd| &crd.key == key)
+    }
+
+    pub fn definitions(&self, id: &ClusterId) -> Vec<Definition> {
+        let mut definitions: Vec<Definition> = self
+            .crds(id)
+            .iter()
+            .map(|crd| Definition::of(crd, self.known_objects(id, &crd.key)))
+            .collect();
+        definitions.sort_by(|a, b| {
+            a.key
+                .kind
+                .cmp(&b.key.kind)
+                .then_with(|| a.key.group.cmp(&b.key.group))
+        });
+        definitions
+    }
+
+    fn known_objects(&self, id: &ClusterId, key: &CrdKey) -> Option<usize> {
+        let Some(kind) = key.flux_kind() else {
+            return self
+                .custom_objects(id, key)
+                .map(|objects| objects.rows.len());
+        };
+        let objects = self
+            .flux
+            .iter()
+            .filter(|object| &object.key.cluster == id && object.key.kind == kind);
+        Some(objects.count())
     }
 
     pub fn custom_objects(&self, id: &ClusterId, key: &CrdKey) -> Option<&CustomObjects> {
@@ -410,6 +438,58 @@ pub(crate) mod tests {
             ..target
         };
         assert_eq!(snapshot.yaml(&pod), None);
+    }
+
+    #[test]
+    fn definitions_sort_by_kind_and_count_only_known_objects() {
+        let mut snapshot = sample();
+        let id = ClusterId::new("a");
+        let crd = |group: &str, kind: &str, plural: &str| Crd {
+            key: CrdKey::new(group, kind),
+            plural: plural.into(),
+            version: "v1".into(),
+            namespaced: true,
+            columns: Vec::new(),
+        };
+        let issuer = crd("cert-manager.io", "Issuer", "issuers");
+        let certificate = crd("cert-manager.io", "Certificate", "certificates");
+        let kustomization = crd(
+            "kustomize.toolkit.fluxcd.io",
+            "Kustomization",
+            "kustomizations",
+        );
+        snapshot
+            .crds
+            .insert(id.clone(), vec![kustomization, issuer, certificate.clone()]);
+        snapshot.custom.push(CustomObjects {
+            cluster: id.clone(),
+            key: certificate.key,
+            rows: Vec::new(),
+        });
+        snapshot.flux.push(crate::flux::tests::object(
+            "a",
+            crate::flux::Phase::Ready,
+            "r1",
+        ));
+        snapshot.flux.push(crate::flux::tests::object(
+            "b",
+            crate::flux::Phase::Ready,
+            "r1",
+        ));
+        let rows: Vec<(String, Option<usize>)> = snapshot
+            .definitions(&id)
+            .into_iter()
+            .map(|definition| (definition.key.kind, definition.objects))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("Certificate".to_owned(), Some(0)),
+                ("Issuer".to_owned(), None),
+                ("Kustomization".to_owned(), Some(1)),
+            ]
+        );
+        assert_eq!(snapshot.definitions(&ClusterId::new("b")), Vec::new());
     }
 
     #[test]

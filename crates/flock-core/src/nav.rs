@@ -141,6 +141,13 @@ impl Page {
         )
     }
 
+    pub fn section(self) -> Option<&'static str> {
+        CLUSTER_NAV
+            .iter()
+            .find(|section| section.pages.contains(&self))
+            .and_then(|section| section.label)
+    }
+
     #[cfg(feature = "loco")]
     pub const fn is_loco(self) -> bool {
         matches!(
@@ -230,6 +237,10 @@ pub const CLUSTER_NAV: &[NavSection] = &[
         label: Some("Storage"),
         pages: &[Page::Pvcs],
     },
+    NavSection {
+        label: Some("Extensions"),
+        pages: &[Page::CustomResources],
+    },
 ];
 
 #[cfg(test)]
@@ -249,6 +260,14 @@ mod tests {
         assert_eq!(Page::ClusterOverview.label(), "Overview");
         assert_eq!(Page::ClusterOverview.title(), "Cluster overview");
         assert_eq!(Page::Nodes.title(), "Nodes");
+    }
+
+    #[test]
+    fn pages_name_their_sidebar_section() {
+        assert_eq!(Page::Sources.section(), Some("Flux"));
+        assert_eq!(Page::CustomResources.section(), Some("Extensions"));
+        assert_eq!(Page::Nodes.section(), None);
+        assert_eq!(Page::Overview.section(), None);
     }
 
     #[cfg(feature = "loco")]

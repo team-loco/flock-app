@@ -173,6 +173,7 @@ pub enum Screen {
     FluxGraph,
     FluxEvents,
     CustomResources,
+    CustomResourceDefinitions,
     CustomResourceInspector,
     HelmReleases,
     HelmRelease,
@@ -247,14 +248,14 @@ impl Screen {
             Self::FluxGraph => vec![sample, Command::SelectPage(Page::FluxGraph)],
             Self::FluxEvents => vec![Command::SelectPage(Page::FluxEvents)],
             Self::CustomResources => vec![sample, open_certificates(&cluster)],
+            Self::CustomResourceDefinitions => {
+                vec![sample, Command::SelectPage(Page::CustomResources)]
+            }
             Self::HelmReleases => vec![sample, Command::SelectPage(Page::Releases)],
             Self::HelmRelease => vec![sample, open_helm_release(&cluster)],
             Self::CustomResourceInspector => {
-                vec![
-                    sample,
-                    open_certificates(&cluster),
-                    inspect_certificate(&cluster),
-                ]
+                let open = open_certificates(&cluster);
+                vec![sample, open, inspect_certificate(&cluster)]
             }
             Self::Node => {
                 let target = preset.cluster_object(NODE, SAMPLE_NODE);
@@ -466,6 +467,7 @@ pub fn root_view(
         Screen::FluxGraph => shell_view(store, screen, preset, window, cx),
         Screen::FluxEvents => shell_view(store, screen, preset, window, cx),
         Screen::CustomResources => shell_view(store, screen, preset, window, cx),
+        Screen::CustomResourceDefinitions => shell_view(store, screen, preset, window, cx),
         Screen::CustomResourceInspector => shell_view(store, screen, preset, window, cx),
         Screen::HelmReleases => shell_view(store, screen, preset, window, cx),
         Screen::HelmRelease => shell_view(store, screen, preset, window, cx),

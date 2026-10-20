@@ -40,7 +40,7 @@ use self::map::{
 };
 use self::pending::{Pending, apply_pending};
 
-const LOCO_GROUP: &str = "infra.loco.io";
+const LOCO_GROUP: &str = flock_core::loco::GROUP;
 const LOCO_VERSION: &str = "v1alpha1";
 const GATEWAY_GROUP: &str = "gateway.networking.k8s.io";
 const GATEWAY_VERSION: &str = "v1";

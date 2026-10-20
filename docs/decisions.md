@@ -373,11 +373,17 @@ Settled; change only with a new entry that says why.
     HelmRelease drift is left out. A trustworthy version needs a dry-run apply of the release manifest decoded
     from Helm storage, owned the way helm-controller owns it, and helm-controller already does that
     when `spec.driftDetection` is enabled.
-43. **Custom resources: a live CRD list and per-pane object watches** (#234): every connected
-    cluster watches its CustomResourceDefinitions in the background (decision 31's
-    `BACKGROUND_KINDS`), with each version's OpenAPI schema dropped from the store, so the sidebar's
-    Custom resources section (definitions grouped by API group, filtered by kind, plural or group)
-    updates live. A definition's objects are watched only while some pane shows that definition
+43. **Custom resources: a live CRD list and per-pane object watches** (#234, reshaped in #301):
+    every connected cluster watches its CustomResourceDefinitions in the background (decision 31's
+    `BACKGROUND_KINDS`), with each version's OpenAPI schema dropped from the store. The sidebar has
+    one Custom resources row under Extensions, counting the definitions, and it opens the Custom
+    resources page: a table of definitions (Kind, Group, Version, Scope, Objects) with the standard
+    filter bar on kind, plural or group. Objects shows a count only where one is already known, from
+    the Flux store or from a running object watch; the page never starts a watch to count. Opening a
+    definition goes to its object list (the same page with `Location::crd` set), and Back returns to
+    the definitions. Kinds that have a first-class page (Flux's Kustomization, HelmRelease and
+    sources; with `loco`, Application and Build) stay listed with a small tag naming their sidebar
+    section, and opening one goes to that page instead of the generic list. A definition's objects are watched only while some pane shows that definition
     (`Navigation::custom`), as `DynamicObject`s with an `ApiResource` built from the CRD's storage
     version, and the watch is dropped when the pane leaves the page, so the API load stays one
     watch per shown definition. A custom object's `ResourceRef::kind` is qualified as
@@ -389,7 +395,7 @@ Settled; change only with a new entry that says why.
     dates as ages. A definition without columns lists Name, Namespace and Age. Row status and
     What's wrong come from `status.conditions` with decision 37's polarity, and Related comes from
     `ownerReferences` against the built-in facts (owners outside the background stores are named,
-    not linked). Opening a Flux kind from this list shows the generic inspector, not the Flux page.
+    not linked).
 44. **Helm releases come from Helm storage, watched only while shown** (#234): Helm gains a sidebar
     section with Releases, every release Helm stores on the cluster, Flux-managed or not. While a
     pane shows Releases or a release, the backend watches that cluster's Secrets with the field

@@ -1,10 +1,16 @@
 use serde::{Deserialize, Serialize};
 
 use crate::emptiness::Noun;
+use crate::filter::TextFilter;
+use crate::flux::FluxKind;
 use crate::resources::Resource;
-use crate::{ClusterId, ResourceRef};
+use crate::{ClusterId, Command, Page, ResourceRef};
 
 const GROUP_SEPARATOR: char = '.';
+const NAMESPACED: &str = "Namespaced";
+const CLUSTER_SCOPED: &str = "Cluster";
+#[cfg(feature = "loco")]
+const LOCO_PAGES: [Page; 2] = [Page::LocoApplications, Page::LocoBuilds];
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct CrdKey {
@@ -28,6 +34,32 @@ impl CrdKey {
         let (kind, group) = kind.split_once(GROUP_SEPARATOR)?;
         let valid = !kind.is_empty() && group.contains(GROUP_SEPARATOR);
         valid.then(|| Self::new(group, kind))
+    }
+
+    pub fn flux_kind(&self) -> Option<FluxKind> {
+        FluxKind::ALL
+            .into_iter()
+            .find(|kind| kind.group() == self.group && kind.label() == self.kind)
+    }
+
+    pub fn page(&self) -> Option<Page> {
+        self.flux_kind()
+            .map(FluxKind::page)
+            .or_else(|| self.loco_page())
+    }
+
+    #[cfg(feature = "loco")]
+    fn loco_page(&self) -> Option<Page> {
+        let loco = self.group == crate::loco::GROUP;
+        LOCO_PAGES
+            .into_iter()
+            .find(|page| loco && page.singular() == self.kind)
+    }
+
+    #[cfg(not(feature = "loco"))]
+    #[allow(clippy::unused_self)]
+    const fn loco_page(&self) -> Option<Page> {
+        None
     }
 
     pub fn object(
@@ -93,45 +125,59 @@ impl Crd {
         };
         Noun::named(kind.clone(), plural)
     }
-
-    fn matches(&self, words: &[String]) -> bool {
-        let fields = [
-            self.key.kind.to_lowercase(),
-            self.plural.to_lowercase(),
-            self.key.group.to_lowercase(),
-        ];
-        words
-            .iter()
-            .all(|word| fields.iter().any(|field| field.contains(word.as_str())))
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CrdGroup<'a> {
-    pub group: &'a str,
-    pub crds: Vec<&'a Crd>,
+pub struct Definition {
+    pub key: CrdKey,
+    pub plural: String,
+    pub version: String,
+    pub namespaced: bool,
+    pub objects: Option<usize>,
+    pub page: Option<Page>,
 }
 
-pub fn grouped<'a>(crds: &'a [Crd], query: &str) -> Vec<CrdGroup<'a>> {
-    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-    let mut shown: Vec<&Crd> = crds.iter().filter(|crd| crd.matches(&words)).collect();
-    shown.sort_by(|a, b| {
-        a.key
-            .group
-            .cmp(&b.key.group)
-            .then_with(|| a.key.kind.cmp(&b.key.kind))
-    });
-    let mut groups: Vec<CrdGroup<'a>> = Vec::new();
-    for crd in shown {
-        match groups.last_mut() {
-            Some(last) if last.group == crd.key.group => last.crds.push(crd),
-            _ => groups.push(CrdGroup {
-                group: &crd.key.group,
-                crds: vec![crd],
-            }),
+impl Definition {
+    pub fn of(crd: &Crd, objects: Option<usize>) -> Self {
+        Self {
+            key: crd.key.clone(),
+            plural: crd.plural.clone(),
+            version: crd.version.clone(),
+            namespaced: crd.namespaced,
+            objects,
+            page: crd.key.page(),
         }
     }
-    groups
+
+    pub fn name(&self) -> String {
+        format!("{}{GROUP_SEPARATOR}{}", self.plural, self.key.group)
+    }
+
+    pub const fn scope(&self) -> &'static str {
+        if self.namespaced {
+            NAMESPACED
+        } else {
+            CLUSTER_SCOPED
+        }
+    }
+
+    pub fn tag(&self) -> Option<&'static str> {
+        self.page?.section()
+    }
+
+    pub fn matches(&self, filter: &TextFilter) -> bool {
+        filter.matches_text(&[&self.key.kind, &self.plural, &self.key.group])
+    }
+
+    pub fn command(&self, cluster: ClusterId) -> Command {
+        match self.page {
+            Some(page) => Command::SelectPage(page),
+            None => Command::OpenCrd {
+                cluster,
+                crd: self.key.clone(),
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,43 +230,71 @@ mod tests {
     }
 
     #[test]
-    fn crds_group_by_api_group_and_filter_on_kind_plural_or_group() {
+    fn definitions_filter_on_kind_plural_or_group() {
         let crds = [
             crd(
                 "source.toolkit.fluxcd.io",
                 "GitRepository",
                 "gitrepositories",
             ),
-            crd("infra.loco.io", "Build", "builds"),
             crd("source.toolkit.fluxcd.io", "Bucket", "buckets"),
-            crd("infra.loco.io", "Application", "applications"),
+            crd("cert-manager.io", "Certificate", "certificates"),
         ];
-        let all: Vec<(&str, Vec<&str>)> = grouped(&crds, "")
-            .into_iter()
-            .map(|g| {
-                (
-                    g.group,
-                    g.crds.iter().map(|c| c.key.kind.as_str()).collect(),
-                )
-            })
-            .collect();
-        assert_eq!(
-            all,
-            [
-                ("infra.loco.io", vec!["Application", "Build"]),
-                ("source.toolkit.fluxcd.io", vec!["Bucket", "GitRepository"]),
-            ]
-        );
         let kinds = |query: &str| -> Vec<String> {
-            grouped(&crds, query)
-                .into_iter()
-                .flat_map(|g| g.crds.into_iter().map(|c| c.key.kind.clone()))
+            let filter = TextFilter::parse(query);
+            crds.iter()
+                .map(|crd| Definition::of(crd, None))
+                .filter(|definition| definition.matches(&filter))
+                .map(|definition| definition.key.kind)
                 .collect()
         };
         assert_eq!(kinds("GITREPO"), ["GitRepository"]);
-        assert_eq!(kinds("loco"), ["Application", "Build"]);
+        assert_eq!(kinds("cert-manager"), ["Certificate"]);
         assert_eq!(kinds("buckets flux"), ["Bucket"]);
         assert_eq!(kinds("nothing"), Vec::<String>::new());
         assert_eq!(crds[0].name(), "gitrepositories.source.toolkit.fluxcd.io");
+    }
+
+    #[test]
+    fn flux_kinds_open_their_flux_page_and_others_their_object_list() {
+        let cluster = ClusterId::new("a");
+        let repository = crd(
+            "source.toolkit.fluxcd.io",
+            "GitRepository",
+            "gitrepositories",
+        );
+        let repository = Definition::of(&repository, None);
+        assert_eq!(repository.page, Some(Page::Sources));
+        assert_eq!(repository.tag(), Some("Flux"));
+        assert_eq!(
+            repository.command(cluster.clone()),
+            Command::SelectPage(Page::Sources)
+        );
+        let release = CrdKey::new("helm.toolkit.fluxcd.io", "HelmRelease");
+        assert_eq!(release.page(), Some(Page::HelmReleases));
+        let bucket = Definition::of(&crd("source.toolkit.fluxcd.io", "Bucket", "buckets"), None);
+        assert_eq!(bucket.page, None);
+        assert_eq!(bucket.tag(), None);
+        assert_eq!(
+            bucket.command(cluster.clone()),
+            Command::OpenCrd {
+                cluster,
+                crd: bucket.key.clone()
+            }
+        );
+        let lookalike = CrdKey::new("example.com", "Kustomization");
+        assert_eq!(lookalike.page(), None);
+        assert_eq!(bucket.scope(), "Namespaced");
+    }
+
+    #[cfg(feature = "loco")]
+    #[test]
+    fn loco_kinds_open_their_loco_page() {
+        let application = CrdKey::new(crate::loco::GROUP, "Application");
+        assert_eq!(application.page(), Some(Page::LocoApplications));
+        let build = Definition::of(&crd(crate::loco::GROUP, "Build", "builds"), None);
+        assert_eq!(build.page, Some(Page::LocoBuilds));
+        assert_eq!(build.tag(), Some("Loco"));
+        assert_eq!(CrdKey::new("argoproj.io", "Application").page(), None);
     }
 }
