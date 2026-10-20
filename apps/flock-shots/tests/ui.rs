@@ -910,6 +910,25 @@ fn overview_pod_tops_open_the_pod_and_link_to_the_pods_list() -> anyhow::Result<
 }
 
 #[test]
+fn overview_recent_changes_open_the_object_and_link_to_changes() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-change-0")?;
+    assert_eq!(
+        opened(&ui),
+        Some(("Deployment".into(), "checkout-api".into()))
+    );
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-change-4")?;
+    assert_eq!(opened(&ui), Some(("Node".into(), "ip-10-4-20-19".into())));
+    let mut ui = Ui::open(Screen::Cluster)?;
+    assert!(ui.bounds("overview-change-5").is_some());
+    assert!(ui.bounds("overview-change-6").is_none());
+    ui.click("overview-changes-all")?;
+    assert_eq!(ui.state().location().page, Page::Changes);
+    Ok(())
+}
+
+#[test]
 fn overview_header_links_to_the_clusters_problems_and_flux() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     let cluster = ui.state().location().cluster.clone();

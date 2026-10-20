@@ -1,3 +1,6 @@
+use std::time::Duration;
+
+use crate::cluster_changes::ClusterChange;
 use crate::pod_tops::PodTops;
 use crate::resources::{Resource, ResourceKind};
 use crate::{Page, Status, units};
@@ -5,6 +8,10 @@ use crate::{Page, Status, units};
 pub const PERCENT: f32 = 100.;
 const THOUSANDS_GROUP: usize = 3;
 pub const NAMED_LIMIT: usize = 3;
+const HOUR: Duration = Duration::from_hours(1);
+const SIX_HOURS: Duration = Duration::from_hours(6);
+const DAY: Duration = Duration::from_hours(24);
+const WEEK: Duration = Duration::from_hours(7 * 24);
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Capacity {
@@ -77,6 +84,15 @@ impl TimeRange {
             Self::SixHours => "6h",
             Self::Day => "24h",
             Self::Week => "7d",
+        }
+    }
+
+    pub const fn duration(self) -> Duration {
+        match self {
+            Self::Hour => HOUR,
+            Self::SixHours => SIX_HOURS,
+            Self::Day => DAY,
+            Self::Week => WEEK,
         }
     }
 
@@ -196,6 +212,7 @@ pub struct Overview {
     pub utilization: Vec<Utilization>,
     pub tops: PodTops,
     pub network: NetworkFacts,
+    pub changes: Vec<ClusterChange>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

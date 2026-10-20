@@ -111,10 +111,13 @@ pub fn cluster(
         .collect();
     let events = events(&problems, &template.detail.events, &present);
     let tops = PodTops::of(&pods);
-    let overview = Overview {
+    let mut overview = Overview {
         tops,
         ..detail.overview
     };
+    for change in &mut overview.changes {
+        change.target.cluster = summary.id.clone();
+    }
     Some(Derived {
         detail: ClusterDetail {
             events,

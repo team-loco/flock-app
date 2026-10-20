@@ -5,6 +5,7 @@ pub mod backoff;
 pub mod checks;
 pub mod client;
 pub mod clock;
+pub mod cluster_changes;
 pub mod compare;
 pub mod conditions;
 pub mod crd;
