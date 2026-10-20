@@ -79,9 +79,9 @@ and UI crates; the live backend harness runs in `flock-kube` on both platforms.
 macOS also runs the headless UI tests. `--skip-up` requires existing clusters;
 `--no-teardown` keeps them (the default, except when `CI` is set).
 
-Tests that change shared scenario objects restore them even when they panic: `scale_up_then_back_down`
-(`web/podinfo` replicas), `cordon_then_uncordon_the_node` (the control-plane node) and the suspend
-journey below. Everything else uses its own scratch objects.
+Tests that change shared scenario objects restore them even when they panic:
+`cordon_then_uncordon_the_node` (the control-plane node) and the suspend journey below. Everything
+else, including `scale_up_then_back_down`, uses its own scratch objects.
 
 The live UI journeys in `apps/flock-shots/tests/journeys.rs` are part of that run. They open the
 headless Flock shell on a `LiveBackend` with all three clusters added to a temporary data directory,
