@@ -3,6 +3,7 @@ pub mod add_cluster;
 pub mod app_settings;
 pub mod changes;
 pub mod cluster;
+pub mod cluster_changes;
 pub mod compare;
 pub mod condition_line;
 pub mod crd;

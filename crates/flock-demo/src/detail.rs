@@ -3,11 +3,12 @@ use std::time::Duration;
 
 use flock_core::Condition;
 use flock_core::cluster::Namespace;
+use flock_core::cluster_changes::{ChangeKind, ClusterChange};
 use flock_core::events::Event;
 use flock_core::nodes::{CONDITION_TRUE, Node, READY_CONDITION, Usage};
 use flock_core::overview::{Commitment, NetworkFacts, Overview, PodPhases, TimeRange, Utilization};
 use flock_core::pod_tops::PodTops;
-use flock_core::{ClusterDetail, Counts, Status, Uid};
+use flock_core::{ClusterDetail, ClusterId, Counts, ResourceRef, Status, Uid};
 
 use crate::lists;
 
@@ -35,6 +36,7 @@ const OS_IMAGE: &str = "Amazon Linux 2023.5.20240916";
 const EVENT_FIRST_AGE: Duration = Duration::from_secs(3600);
 const EVENT_NOW: jiff::Timestamp = jiff::Timestamp::constant(1_791_873_360, 0);
 
+const DEMO_CLUSTER: &str = "prod-us-east";
 const RUNTIME: &str = "containerd://1.7.20";
 const GENERAL: &str = "m6i.4xlarge";
 const GPU: &str = "g5.2xlarge";
@@ -92,7 +94,105 @@ fn overview() -> Overview {
             load_balancers_pending: 1,
             pvcs_pending: 0,
         },
+        changes: changes(),
     }
+}
+
+fn change(
+    (age, at): (Duration, &str),
+    kind: ChangeKind,
+    status: Option<Status>,
+    (object, namespace, name): (&str, Option<&str>, &str),
+    (what, by): (&str, &str),
+) -> ClusterChange {
+    ClusterChange {
+        age,
+        at: at.into(),
+        kind,
+        status,
+        target: ResourceRef {
+            cluster: ClusterId::new(DEMO_CLUSTER),
+            kind: object.into(),
+            namespace: namespace.map(Into::into),
+            name: name.into(),
+        },
+        what: what.into(),
+        by: by.into(),
+    }
+}
+
+fn changes() -> Vec<ClusterChange> {
+    vec![
+        change(
+            (minutes(3), "10:31"),
+            ChangeKind::Rollout,
+            None,
+            ("Deployment", Some("payments"), "checkout-api"),
+            (
+                "deploy/checkout-api rev 52 · payments",
+                "flux · apps-payments",
+            ),
+        ),
+        change(
+            (minutes(22), "10:12"),
+            ChangeKind::Scale,
+            None,
+            ("Deployment", Some("payments"), "payments-worker"),
+            ("deploy/payments-worker 2 → 4 replicas · payments", ""),
+        ),
+        change(
+            (minutes(34), "10:00"),
+            ChangeKind::Helm,
+            Some(Status::Err),
+            ("HelmRelease", Some("monitoring"), "kube-prometheus-stack"),
+            (
+                "monitoring/kube-prometheus-stack 62.6.0 → 62.7.0 · failed",
+                "helm-controller",
+            ),
+        ),
+        change(
+            (minutes(53), "09:41"),
+            ChangeKind::Flux,
+            None,
+            ("Kustomization", Some("flux-system"), "platform-registry"),
+            (
+                "ks/platform-registry → main@a91c3f2",
+                "kustomize-controller",
+            ),
+        ),
+        change(
+            (minutes(57), "09:37"),
+            ChangeKind::Node,
+            Some(Status::Warn),
+            ("Node", None, "ip-10-4-20-19"),
+            ("ip-10-4-20-19 cordoned", "node-controller"),
+        ),
+        change(
+            (minutes(58), "09:36"),
+            ChangeKind::Namespace,
+            None,
+            ("Namespace", None, "search"),
+            ("search created", ""),
+        ),
+        change(
+            (hours(3), "07:34"),
+            ChangeKind::Node,
+            None,
+            ("Node", None, "ip-10-4-14-201"),
+            ("ip-10-4-14-201 joined · m6i.4xlarge", ""),
+        ),
+        change(
+            (days(2), "Oct 18"),
+            ChangeKind::Crd,
+            None,
+            (
+                "CustomResourceDefinition",
+                None,
+                "certificates.cert-manager.io",
+            ),
+            ("certificates.cert-manager.io created", "helm"),
+        ),
+    ]
 }
 
 fn utilization() -> Vec<Utilization> {

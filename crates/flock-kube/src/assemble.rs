@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use flock_core::cluster_changes::ClusterChange;
 use flock_core::home::{ClusterMetrics, Problem, problem_counts};
 use flock_core::overview::{MetricsServer, Overview, TimeRange, Utilization, UtilizationSource};
 use flock_core::{
@@ -8,9 +9,12 @@ use flock_core::{
 };
 use jiff::Timestamp;
 use jiff::tz::TimeZone;
+use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::{Event, Namespace, Node, PersistentVolumeClaim, Pod, Service};
 use k8s_openapi::api::discovery::v1::EndpointSlice;
+use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 
+use crate::cluster_changes::{self, Change, Observed};
 use crate::detail::{self, PodIndex, capacity};
 use crate::flux::{self, FluxHealth};
 use crate::lists::{self, watched_lists};
@@ -48,6 +52,7 @@ pub struct Extras {
     pub ring: UsageRing,
     pub polled: bool,
     pub prometheus: Option<Prometheus>,
+    pub observed: Observed,
 }
 
 impl Extras {
@@ -191,6 +196,33 @@ fn nav(
     nav
 }
 
+fn object_changes(
+    id: &ClusterId,
+    handle: &ClusterHandle,
+    extras: &Extras,
+    parts: &Parts<'_>,
+    now: Timestamp,
+) -> Vec<ClusterChange> {
+    let deployments = handle.objects::<Deployment>();
+    let mut changes: Vec<Change> = cluster_changes::rollouts(id, &deployments);
+    changes.extend(cluster_changes::nodes(id, parts.nodes, parts.events));
+    changes.extend(cluster_changes::namespaces(
+        id,
+        &handle.objects::<Namespace>(),
+    ));
+    changes.extend(cluster_changes::definitions(
+        id,
+        &handle.objects::<CustomResourceDefinition>(),
+    ));
+    changes.extend(extras.observed.changes(id));
+    let zone = TimeZone::system();
+    let clock = crate::pods::Clock { now, zone: &zone };
+    changes
+        .into_iter()
+        .filter_map(|change| change.stamp(&clock))
+        .collect()
+}
+
 struct Parts<'a> {
     pods: &'a [Arc<Pod>],
     nodes: &'a [Arc<Node>],
@@ -261,6 +293,7 @@ fn cluster_detail(
             utilization,
             tops: pod_tops(id, pods, now),
             network,
+            changes: object_changes(id, handle, extras, parts, now),
         },
         nodes,
         namespaces: detail::namespaces(

@@ -1,3 +1,4 @@
+mod changes;
 mod charts;
 mod facts;
 mod header;
@@ -8,6 +9,7 @@ mod summary;
 mod workloads;
 
 use flock_core::cluster::{Namespace, NamespaceSort};
+use flock_core::cluster_changes::{ClusterChange, newest_first};
 use flock_core::node_pools::{KubeletSkew, NodePool};
 use flock_core::nodes::NodeSummary;
 use flock_core::overview::{
@@ -59,6 +61,7 @@ struct OverviewData {
     workloads: Vec<WorkloadHealth>,
     tops: PodTops,
     namespaces: Vec<Namespace>,
+    changes: Vec<ClusterChange>,
 }
 
 impl OverviewData {
@@ -71,6 +74,8 @@ impl OverviewData {
             detail.overview.metrics_source.clone(),
         ];
         let meta: Vec<String> = meta.into_iter().filter(|part| !part.is_empty()).collect();
+        let mut changes = detail.overview.changes.clone();
+        newest_first(&mut changes);
         Self {
             cluster: cluster.id.clone(),
             meta: meta.join(SEPARATOR),
@@ -92,6 +97,7 @@ impl OverviewData {
             workloads: detail.workload_health(),
             tops: detail.overview.tops.clone(),
             namespaces: detail.namespaces.clone(),
+            changes,
         }
     }
 }
@@ -243,10 +249,14 @@ impl Render for OverviewScreen {
         let Some(data) = self.data.clone() else {
             return div().into_any_element();
         };
+        let changes_band: Vec<AnyElement> = changes::render(&data, self.range, &palette, cx)
+            .into_iter()
+            .chain(pools::render(&data, &palette, cx))
+            .collect();
         let sections = [
             Some(header::render(&data, &palette, cx)),
             Some(summary::render(&data, &palette, cx)),
-            band(pools::render(&data, &palette, cx), &palette),
+            band(changes_band, &palette),
             band(pods::render(&data, &palette, cx), &palette),
             Some(namespaces::render(&data, self.sort, &palette, cx)),
             band(facts::render(&data, &palette, cx), &palette),

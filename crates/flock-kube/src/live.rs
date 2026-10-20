@@ -19,6 +19,7 @@ use flock_core::{
     WatchState, Workload, WorkloadKind,
 };
 use jiff::Timestamp;
+use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use k8s_openapi::api::core::v1::Node;
 use tokio::time::MissedTickBehavior;
 
@@ -26,6 +27,7 @@ use crate::actions::pending::Mutation;
 use crate::actions::{Actions, cluster_of};
 use crate::assemble::{self, Extras, Prometheus, Selection};
 use crate::checks::{self, CheckResult, run_checks_streaming};
+use crate::cluster_changes::Workloads;
 use crate::discovery::{
     ContextRef, Discovery, DiscoveryEvent, DiscoverySources, KubeContext, discover,
 };
@@ -35,6 +37,7 @@ use crate::manager::{ClusterEvent, ClusterHandle, ClusterManager, ConnectionStat
 use crate::metrics::{NodeUsage, PodUsage};
 use crate::metrics_history;
 use crate::paste;
+use crate::pods::Clock;
 use crate::probe::find_prometheus;
 use crate::problems::order;
 use crate::provider::AuthKind;
@@ -340,6 +343,22 @@ impl Live {
         };
         if let Err(error) = metrics_history::save(&path, &cluster.extras.ring) {
             tracing::warn!(%error, path = %path.display(), "saving metrics history failed");
+        }
+    }
+
+    fn observe_changes(&mut self) {
+        let now = Timestamp::now();
+        for cluster in self.clusters.values_mut() {
+            let handle = &cluster.handle;
+            let deployments = handle.objects::<Deployment>();
+            let stateful_sets = handle.objects::<StatefulSet>();
+            let daemon_sets = handle.objects::<DaemonSet>();
+            let workloads = Workloads {
+                deployments: &deployments,
+                stateful_sets: &stateful_sets,
+                daemon_sets: &daemon_sets,
+            };
+            cluster.extras.observed.observe(&workloads, now);
         }
     }
 
@@ -1347,6 +1366,7 @@ impl Live {
     fn snapshot(&self) -> Snapshot {
         let now = Timestamp::now();
         let (helm, helm_details) = self.helm(now);
+        let zone = jiff::tz::TimeZone::system();
         let mut connected = Vec::new();
         let mut problems = Vec::new();
         let mut details = BTreeMap::new();
@@ -1375,7 +1395,11 @@ impl Live {
             pods.extend(built.pods);
             problems.extend(built.problems);
             flux = flux + built.flux;
-            if let Some(detail) = built.detail {
+            if let Some(mut detail) = built.detail {
+                let clock = Clock { now, zone: &zone };
+                let flux = self.gitops.recent_changes(&cluster.id);
+                let stamped = flux.into_iter().filter_map(|change| change.stamp(&clock));
+                detail.overview.changes.extend(stamped);
                 details.insert(cluster.id.clone(), detail);
             }
         }
@@ -1612,6 +1636,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
             () = publish.ready(), if dirty => {
                 publish.fired();
                 dirty = false;
+                live.observe_changes();
                 if updates.send(Update::Snapshot(Box::new(live.snapshot()))).await.is_err() {
                     live.save_histories();
                     return;

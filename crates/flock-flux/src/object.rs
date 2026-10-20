@@ -110,6 +110,8 @@ pub struct ReleaseSnapshot {
     pub app_version: Option<String>,
     pub first_deployed: String,
     pub last_deployed: String,
+    #[serde(default)]
+    pub action: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

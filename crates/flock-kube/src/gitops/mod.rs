@@ -5,6 +5,7 @@ pub(crate) mod focus;
 mod git;
 mod grid;
 mod health;
+mod recent;
 mod requests;
 mod watch;
 
@@ -136,6 +137,14 @@ impl GitOpsState {
             return None;
         }
         Some(cluster_health(&parsed_objects(flux), now))
+    }
+
+    pub fn recent_changes(&self, cluster: &ClusterId) -> Vec<crate::cluster_changes::Change> {
+        self.clusters
+            .get(cluster)
+            .filter(|flux| flux.info().detected())
+            .map(|flux| recent::changes(cluster, &parsed_objects(flux)))
+            .unwrap_or_default()
     }
 
     fn data(&self) -> Vec<ClusterData> {

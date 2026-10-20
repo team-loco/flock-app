@@ -583,6 +583,10 @@ pub const AFFECTED_NODE_WIDTH: Pixels = px(130.);
 pub const AFFECTED_TAG_WIDTH: Pixels = px(70.);
 pub const AFFECTED_SINCE_WIDTH: Pixels = px(50.);
 
+pub const OVERVIEW_CHANGE_TIME: Pixels = px(44.);
+pub const OVERVIEW_CHANGE_KIND: Pixels = px(74.);
+pub const OVERVIEW_CHANGE_BY: Pixels = px(110.);
+pub const OVERVIEW_CHANGE_ROW: Pixels = px(25.);
 pub const OVERVIEW_NAMESPACE_MIN: Pixels = px(110.);
 pub const OVERVIEW_COUNT_WIDTH: Pixels = px(64.);
 pub const OVERVIEW_USAGE_MIN: Pixels = px(150.);

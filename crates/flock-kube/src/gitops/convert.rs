@@ -82,7 +82,7 @@ impl Parsed {
             .and_then(|condition| timestamp(condition.get("lastTransitionTime")))
     }
 
-    fn ready_since(&self) -> Option<Timestamp> {
+    pub(super) fn ready_since(&self) -> Option<Timestamp> {
         self.changed(READY)
     }
 
@@ -331,7 +331,7 @@ fn applied_revision(parsed: &Parsed) -> Option<&str> {
         .or(object.last_applied_revision.as_deref())
 }
 
-fn reconciled_at(parsed: &Parsed, revision: &str) -> Option<Timestamp> {
+pub(super) fn reconciled_at(parsed: &Parsed, revision: &str) -> Option<Timestamp> {
     match parsed.kind() {
         ObjectKind::HelmRelease => parsed
             .object
