@@ -116,6 +116,10 @@ impl Tab {
         self.history.visit(self.location.clone());
     }
 
+    pub(crate) fn amend(&mut self) {
+        self.history.amend(self.location.clone());
+    }
+
     pub(crate) fn history_mut(&mut self) -> &mut History {
         &mut self.history
     }
@@ -1044,6 +1048,24 @@ mod tests {
         assert_eq!(tabs, [at(Page::Nodes), Location::flock(Page::GitOps)]);
         let json = serde_json::to_string(&session)?;
         assert_eq!(serde_json::from_str::<Session>(&json)?, session);
+        Ok(())
+    }
+
+    #[test]
+    fn a_tab_keeps_its_inspected_object_across_a_save() -> Result<(), serde_json::Error> {
+        let inspected = Location {
+            inspecting: Some(crate::ResourceRef {
+                cluster: ClusterId::new("a"),
+                kind: "ConfigMap".into(),
+                namespace: Some("shop".into()),
+                name: "settings".into(),
+            }),
+            ..at(Page::ConfigMaps)
+        };
+        let json = serde_json::to_string(&inspected)?;
+        assert_eq!(serde_json::from_str::<Location>(&json)?, inspected);
+        let plain = serde_json::to_string(&at(Page::ConfigMaps))?;
+        assert!(!plain.contains("inspecting"));
         Ok(())
     }
 

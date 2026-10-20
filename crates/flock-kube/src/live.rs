@@ -887,6 +887,7 @@ impl Live {
             Command::ToggleSidebar => {}
             Command::OpenResource(resource) => self.open(resource),
             Command::InspectResource(resource) => self.open(resource),
+            Command::CloseInspector => {}
             Command::OpenCrd { cluster, crd } => self.open_crd(cluster, crd),
             Command::FollowLogs(_) => {}
             Command::OpenLogs { pod, .. } => self.open(pod),

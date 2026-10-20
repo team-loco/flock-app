@@ -2832,6 +2832,40 @@ fn unhealthy_job_inspector_leads_with_whats_wrong_then_conditions_events_and_yam
     Ok(())
 }
 
+const CONFIG_ROWS: usize = 40;
+
+#[test]
+fn back_from_a_related_link_reopens_the_inspector_it_left() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::ResourceInspector)?;
+    let inspected = ui.state().location().inspecting.clone();
+    assert!(inspected.is_some());
+    ui.click("close-resource")?;
+    assert!(ui.bounds("resource-inspector-pane").is_none());
+    assert_eq!(ui.state().location().inspecting, None);
+    let row = (0..CONFIG_ROWS).find(|ix| {
+        let clicked = ui.click(selector(format!("resources-ConfigMap-row-{ix}")));
+        clicked.is_ok() && ui.state().location().inspecting == inspected
+    });
+    assert!(row.is_some());
+    assert!(!ui.state().panes().active().can_go_forward());
+    ui.click("related-Deployments-checkout-api")?;
+    let deployment = ui.state().location().clone();
+    assert_eq!(
+        deployment.workload().map(|target| target.name.as_str()),
+        Some("checkout-api")
+    );
+    ui.press("cmd-[")?;
+    assert_eq!(ui.state().location().page, Page::ConfigMaps);
+    assert_eq!(ui.state().location().inspecting, inspected);
+    assert!(ui.bounds("resource-inspector-pane").is_some());
+    assert!(ui.bounds("related-Deployments-checkout-api").is_some());
+    ui.press("cmd-]")?;
+    assert_eq!(ui.state().location(), &deployment);
+    ui.press("cmd-[")?;
+    assert!(ui.bounds("resource-inspector-pane").is_some());
+    Ok(())
+}
+
 #[test]
 fn a_namespace_page_links_to_its_objects_and_back_returns_to_it() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Namespace)?;

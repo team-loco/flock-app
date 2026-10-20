@@ -246,10 +246,10 @@ impl NodesScreen {
     fn select(&mut self, name: Option<String>, cx: &mut Context<Self>) {
         self.selected = name;
         let target = self.selected.as_ref().zip(self.cluster.as_ref());
-        if let Some((name, cluster)) = target {
-            let command = Command::InspectResource(node_ref(cluster, name));
-            cx.emit(ScreenEvent::Command(command));
-        }
+        let command = target.map_or(Command::CloseInspector, |(name, cluster)| {
+            Command::InspectResource(node_ref(cluster, name))
+        });
+        cx.emit(ScreenEvent::Command(command));
         cx.notify();
     }
 

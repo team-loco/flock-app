@@ -23,6 +23,7 @@ pub enum Command {
     ToggleSidebar,
     OpenResource(ResourceRef),
     InspectResource(ResourceRef),
+    CloseInspector,
     OpenCrd {
         cluster: ClusterId,
         crd: CrdKey,
@@ -179,7 +180,11 @@ impl AppState {
         let snapshot = &self.snapshot;
         let tab = self.panes.active_mut();
         navigate(tab.location_mut(), command, snapshot);
-        tab.record();
+        if is_inspection(command) {
+            tab.amend();
+        } else {
+            tab.record();
+        }
     }
 
     pub fn open_tab(&mut self, command: &Command) -> Option<TabId> {
@@ -312,6 +317,12 @@ fn navigate(location: &mut Location, command: &Command, snapshot: &Snapshot) {
         Command::SelectPage(page) => select_page(location, *page),
         Command::OpenCommit(_) => select_page(location, Page::Changes),
         Command::OpenResource(resource) => open_resource(location, resource, snapshot),
+        Command::InspectResource(target) => {
+            if location.cluster.as_ref() == Some(&target.cluster) {
+                location.inspecting = Some(target.clone());
+            }
+        }
+        Command::CloseInspector => location.inspecting = None,
         Command::OpenCrd { cluster, crd } => {
             if has_cluster(cluster) {
                 *location = Location::crd_on(cluster.clone(), crd.clone());
@@ -346,6 +357,13 @@ fn navigate(location: &mut Location, command: &Command, snapshot: &Snapshot) {
         Command::ShowClusterSettings(_) => select_page(location, Page::ClusterSettings),
         _ => {}
     }
+}
+
+const fn is_inspection(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::InspectResource(_) | Command::CloseInspector
+    )
 }
 
 fn select_page(location: &mut Location, page: Page) {
@@ -661,11 +679,34 @@ mod tests {
         let mut state = loaded();
         state.apply(&Command::SelectCluster(Some(ClusterId::new("b"))));
         state.apply(&Command::SelectPage(Page::Deployments));
-        let before = state.clone();
+        let list = state.location().clone();
+        let back = state
+            .panes()
+            .active()
+            .history()
+            .entries(crate::history::Direction::Back)
+            .len();
         state.apply(&Command::InspectResource(deployment("b")));
-        assert_eq!(state, before);
+        let inspecting = Location {
+            inspecting: Some(deployment("b")),
+            ..list.clone()
+        };
+        assert_eq!(state.location(), &inspecting);
+        let history = state.panes().active().history();
+        assert_eq!(history.entries(crate::history::Direction::Back).len(), back);
+        assert_eq!(history.current(), Some(&inspecting));
+        state.apply(&Command::InspectResource(deployment("a")));
+        assert_eq!(state.location(), &inspecting);
         state.apply(&Command::OpenResource(deployment("b")));
         assert_eq!(state.location().resource, Some(deployment("b")));
+        assert_eq!(state.location().inspecting, None);
+        assert!(state.back());
+        assert_eq!(state.location(), &inspecting);
+        state.apply(&Command::CloseInspector);
+        assert_eq!(state.location(), &list);
+        assert!(state.forward());
+        assert!(state.back());
+        assert_eq!(state.location(), &list);
     }
 
     #[test]
