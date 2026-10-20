@@ -197,6 +197,7 @@ async fn follow(
         tail_lines: Some(TAIL_LINES),
         timestamps: true,
         since_seconds: None,
+        previous: false,
     };
     let stream = handle.logs(&params).await?;
     let zone = TimeZone::system();

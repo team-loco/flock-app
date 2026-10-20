@@ -95,6 +95,47 @@ pub enum LogLevel {
     Fatal,
 }
 
+impl LogLevel {
+    pub fn from_word(word: &str) -> Option<Self> {
+        match word.to_ascii_lowercase().as_str() {
+            "trace" => Some(Self::Debug),
+            "debug" => Some(Self::Debug),
+            "dbg" => Some(Self::Debug),
+            "info" => Some(Self::Info),
+            "inf" => Some(Self::Info),
+            "notice" => Some(Self::Info),
+            "warn" => Some(Self::Warn),
+            "warning" => Some(Self::Warn),
+            "wrn" => Some(Self::Warn),
+            "error" => Some(Self::Error),
+            "err" => Some(Self::Error),
+            "fatal" => Some(Self::Fatal),
+            "panic" => Some(Self::Fatal),
+            "critical" => Some(Self::Fatal),
+            "crit" => Some(Self::Fatal),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LogInstance {
+    #[default]
+    Current,
+    Previous,
+}
+
+impl LogInstance {
+    pub const ALL: [Self; 2] = [Self::Current, Self::Previous];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Previous => "previous",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogLine {
     pub time: Option<String>,
@@ -124,6 +165,7 @@ impl LogLine {
 pub struct LogRequest {
     pub pod: ResourceRef,
     pub container: String,
+    pub instance: LogInstance,
     pub sink: Sink<LogLine>,
 }
 
@@ -217,6 +259,13 @@ mod tests {
             target.command_line(),
             "$ kubectl exec -it checkout-api-7f9c6d-x2lqp -c api -- sh"
         );
+    }
+
+    #[test]
+    fn level_words_ignore_case() {
+        assert_eq!(LogLevel::from_word("WARNING"), Some(LogLevel::Warn));
+        assert_eq!(LogLevel::from_word("crit"), Some(LogLevel::Fatal));
+        assert_eq!(LogLevel::from_word("chatty"), None);
     }
 
     #[test]

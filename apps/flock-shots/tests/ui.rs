@@ -347,6 +347,8 @@ const SAMPLE: &str = "prod-us-east";
 const DRAG: f32 = 80.;
 const ROWS_UNDER_POPOVER: usize = 8;
 const AVAILABLE: usize = 4;
+const POD_ROWS: usize = 12;
+const INSPECTOR_SCROLL: f32 = 400.;
 const AVAILABLE_DEFAULT: f32 = 72.;
 
 fn selector(text: String) -> &'static str {
@@ -946,11 +948,32 @@ fn close_shell_and_collapsing_the_dock_end_the_session_but_switching_tabs_keeps_
 }
 
 #[test]
-fn pod_logs_have_no_previous_container_toggle() -> anyhow::Result<()> {
-    let mut ui = Ui::open(Screen::PodsShell)?;
-    ui.click("dock-tab-0")?;
-    assert!(ui.bounds("pod-logs-follow").is_some());
-    assert!(ui.bounds("pod-logs-previous").is_none());
+fn logs_before_restart_open_the_previous_instance_with_a_banner() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    assert!(ui.bounds("pod-logs-raw").is_some());
+    assert!(ui.bounds("pod-logs-previous-banner").is_none());
+    let crashed = (0..POD_ROWS).find_map(|ix| {
+        let row: &'static str = format!("pods-row-{ix}").leak();
+        ui.click(row).ok()?;
+        ui.bounds("pod-logs-before-restart-0").map(|_| ix)
+    });
+    assert!(crashed.is_some(), "no demo pod shows a last termination");
+    assert!(ui.bounds("pod-logs-instance-1").is_some());
+    ui.press("cmd-j")?;
+    assert_eq!(ui.read(Shell::dock_open), Some(false));
+    ui.scroll(
+        "pod-inspector-pane",
+        gpui::point(gpui::px(0.), gpui::px(-INSPECTOR_SCROLL)),
+    )?;
+    ui.click("pod-logs-before-restart-0")?;
+    assert_eq!(ui.read(Shell::dock_open), Some(true));
+    assert!(ui.bounds("pod-logs-previous-banner").is_some());
+    ui.click("pod-logs-raw")?;
+    assert!(ui.bounds("pod-logs-previous-banner").is_some());
+    ui.click("pod-logs-instance-0")?;
+    assert!(ui.bounds("pod-logs-previous-banner").is_none());
+    ui.click("pod-logs-instance-1")?;
+    assert!(ui.bounds("pod-logs-previous-banner").is_some());
     Ok(())
 }
 

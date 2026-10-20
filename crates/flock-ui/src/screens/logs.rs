@@ -76,6 +76,7 @@ impl LogsScreen {
         cx.emit(Command::StreamLogs(LogRequest {
             pod: self.pod.clone(),
             container: self.container.clone(),
+            instance: flock_core::LogInstance::Current,
             sink,
         }));
         self.stream = Some(cx.spawn(async move |this, cx| {

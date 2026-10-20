@@ -22,6 +22,7 @@ pub mod home;
 pub mod id;
 #[cfg(feature = "loco")]
 pub mod loco;
+pub mod logparse;
 pub mod menubar;
 pub mod multilog;
 pub mod nav;
@@ -69,7 +70,8 @@ pub use settings::{ClusterCatalog, Preferences};
 pub use state::{AppState, Command, Update};
 pub use status::{Counts, Status};
 pub use stream::{
-    ExecEvent, ExecRequest, ExecTarget, LogLevel, LogLine, LogRequest, Sink, Source, TermSize,
+    ExecEvent, ExecRequest, ExecTarget, LogInstance, LogLevel, LogLine, LogRequest, Sink, Source,
+    TermSize,
 };
 pub use updater::{Trigger, UpdaterRequest, UpdaterState, UpdaterStatus};
 pub use watch::WatchState;

@@ -112,6 +112,21 @@ pub struct LogRequest {
     pub tail_lines: Option<i64>,
     pub timestamps: bool,
     pub since_seconds: Option<i64>,
+    pub previous: bool,
+}
+
+impl LogRequest {
+    fn params(&self) -> LogParams {
+        LogParams {
+            container: self.container.clone(),
+            follow: self.follow,
+            tail_lines: self.tail_lines,
+            timestamps: self.timestamps,
+            since_seconds: self.since_seconds,
+            previous: self.previous,
+            ..LogParams::default()
+        }
+    }
 }
 
 pub struct LogStream {
@@ -336,14 +351,7 @@ impl ClusterHandle {
     pub async fn logs(&self, request: &LogRequest) -> Result<LogStream> {
         let client = self.client()?;
         let pods: Api<Pod> = Api::namespaced(client, &request.namespace);
-        let params = LogParams {
-            container: request.container.clone(),
-            follow: request.follow,
-            tail_lines: request.tail_lines,
-            timestamps: request.timestamps,
-            since_seconds: request.since_seconds,
-            ..LogParams::default()
-        };
+        let params = request.params();
         let reader = pods.log_stream(&request.pod, &params).await?;
         let (sender, lines) = async_channel::bounded(LOG_CHANNEL_CAPACITY);
         let _guard = self.shared.runtime.enter();
@@ -601,6 +609,25 @@ mod tests {
         assert_eq!(target.gvk().group, "");
         let deployment = object_ref::<Deployment>(Some("apps"), "api");
         assert_eq!(deployment.api_version, "apps/v1");
+    }
+
+    #[test]
+    fn previous_log_requests_ask_for_the_terminated_instance() {
+        let request = LogRequest {
+            namespace: "web".into(),
+            pod: "podinfo-1".into(),
+            container: Some("podinfo".into()),
+            tail_lines: Some(500),
+            timestamps: true,
+            previous: true,
+            ..LogRequest::default()
+        };
+        let params = request.params();
+        assert!(params.previous);
+        assert!(!params.follow);
+        assert_eq!(params.container.as_deref(), Some("podinfo"));
+        assert_eq!(params.tail_lines, Some(500));
+        assert!(!LogRequest::default().params().previous);
     }
 
     #[test]
