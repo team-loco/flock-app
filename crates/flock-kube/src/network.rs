@@ -241,7 +241,8 @@ mod tests {
                 ("empty", NO_ENDPOINTS)
             ]
         );
-        assert!(unready_services(&cluster, &services, None, now).is_empty());
+        let unknown = unready_services(&cluster, &services, None, now);
+        assert_eq!(unknown.len(), 0);
     }
 
     #[test]
