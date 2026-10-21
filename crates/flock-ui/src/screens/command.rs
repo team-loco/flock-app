@@ -283,8 +283,10 @@ impl CommandPalette {
     ) -> AnyElement {
         let selected = self.selected == Some(ix);
         let hover = palette.hover;
+        let open = self.is_open();
         let row = div()
             .id(ElementId::NamedInteger("palette-hit".into(), ix as u64))
+            .debug_selector(move || format!("palette-hit-{ix}"))
             .flex()
             .flex_none()
             .items_center()
@@ -299,7 +301,9 @@ impl CommandPalette {
                 row.bg(palette.sel).border_color(palette.selline)
             })
             .when(!selected, |row| row.hover(move |style| style.bg(hover)))
-            .on_click(cx.listener(move |this, _, _, cx| this.run(ix, cx)))
+            .when(open, |row| {
+                row.on_click(cx.listener(move |this, _, _, cx| this.run(ix, cx)))
+            })
             .child(
                 div()
                     .w(PALETTE_KIND)
@@ -496,7 +500,9 @@ impl Render for CommandPalette {
             .on_action(cx.listener(|this, _: &ShowFluxOwner, _, cx| {
                 this.run_shortcut(OWNER_KEY, cx);
             }))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .when(phase == Phase::Open, |panel| {
+                panel.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            })
             .child(self.render_query(&palette))
             .child(hints(&palette))
             .child(self.render_results(cx))
