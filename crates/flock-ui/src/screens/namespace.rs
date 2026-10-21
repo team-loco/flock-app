@@ -177,7 +177,7 @@ impl NamespaceScreen {
         let header = if facts.is_empty() {
             header
         } else {
-            header.sentence(fact_line(&facts, palette))
+            header.detail(Some(fact_line(&facts, palette)))
         };
         match self.page.badge() {
             Some((status, label)) => header.status(status, label),

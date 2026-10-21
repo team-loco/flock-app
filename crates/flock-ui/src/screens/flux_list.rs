@@ -232,7 +232,7 @@ fn columns() -> Vec<Column<FluxObject>> {
         Column::text("Kind", |o: &FluxObject| o.key.kind.label().into())
             .fixed(KIND_WIDTH)
             .sort_by_key(|o: &FluxObject| o.key.kind.label()),
-        Column::text("Status", |o: &FluxObject| o.sentence.plain().into())
+        Column::text("Status", |o: &FluxObject| o.phase.label().into())
             .flex(STATUS_WEIGHT, STATUS_MIN),
         Column::new(REASON, |o: &FluxObject, palette| {
             reason_cell(o.status(), o.current_diagnosis(), palette)

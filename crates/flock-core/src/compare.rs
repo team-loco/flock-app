@@ -144,24 +144,6 @@ impl Comparison {
             n => format!("{n} identical fields hidden"),
         }
     }
-
-    pub fn sentence(&self) -> String {
-        let count = self.clusters.len();
-        let differing = self.differing();
-        let total = self.fields.len();
-        let broken = self
-            .clusters
-            .iter()
-            .find(|c| c.status == Status::Err || c.status == Status::Warn);
-        let summary = match differing {
-            0 => format!("Same object on {count} clusters, and every field matches."),
-            _ => format!("Same object on {count} clusters; {differing} of {total} fields differ."),
-        };
-        match broken {
-            Some(c) => format!("{summary} {} is {}.", c.cluster, lowercase_first(&c.health)),
-            None => summary,
-        }
-    }
 }
 
 pub fn build(target: &ResourceRef, observed: &[Observed], spec: Option<SpecDiff>) -> Comparison {
@@ -378,14 +360,6 @@ fn fields(observed: &[&Observed]) -> Vec<Field> {
     fields
 }
 
-fn lowercase_first(text: &str) -> String {
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(first) => first.to_lowercase().chain(chars).collect(),
-        None => String::new(),
-    }
-}
-
 pub fn short_names(a: &str, b: &str) -> (String, String) {
     let names = [a, b];
     (short_name(a, &names), short_name(b, &names))
@@ -448,21 +422,6 @@ mod tests {
         assert_eq!(comparison.visible(false).len(), 3);
         assert_eq!(comparison.hidden_note(true), "2 identical fields hidden");
         assert_eq!(comparison.hidden_note(false), "Showing all fields");
-    }
-
-    #[test]
-    fn sentence_names_the_unhealthy_cluster() {
-        assert_eq!(
-            sample().sentence(),
-            "Same object on 2 clusters; 1 of 3 fields differ. a is degraded · 1 pod crashlooping."
-        );
-        let mut healthy = sample();
-        healthy.clusters[0] = compared("a", Status::Ok, "Healthy");
-        healthy.fields.remove(0);
-        assert_eq!(
-            healthy.sentence(),
-            "Same object on 2 clusters, and every field matches."
-        );
     }
 
     #[test]

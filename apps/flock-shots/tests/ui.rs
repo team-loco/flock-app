@@ -443,6 +443,9 @@ fn slash_focuses_the_filter_and_escape_clears_it() -> anyhow::Result<()> {
         ui.bounds(selector(format!("{DEPLOYMENTS}-row-1")))
             .is_some()
     );
+    let toolbar = ["resource-filter-field", "resource-filter-clear-slot"];
+    let idle = toolbar.map(|part| ui.bounds(part));
+    assert!(idle.iter().all(Option::is_some), "{idle:?}");
     ui.press("/")?;
     ui.type_text("checkout")?;
     assert_eq!(filter_words(&ui), Some(vec!["checkout".to_owned()]));
@@ -454,14 +457,56 @@ fn slash_focuses_the_filter_and_escape_clears_it() -> anyhow::Result<()> {
         ui.bounds(selector(format!("{DEPLOYMENTS}-row-1")))
             .is_none()
     );
-    assert!(ui.bounds("resource-filter-clear").is_some());
+    assert_eq!(toolbar.map(|part| ui.bounds(part)), idle);
     ui.press("escape")?;
     assert_eq!(filter_words(&ui), Some(Vec::new()));
     assert!(
         ui.bounds(selector(format!("{DEPLOYMENTS}-row-1")))
             .is_some()
     );
-    assert!(ui.bounds("resource-filter-clear").is_none());
+    assert_eq!(toolbar.map(|part| ui.bounds(part)), idle);
+    Ok(())
+}
+
+#[test]
+fn pod_toolbar_controls_keep_their_place_when_a_filter_is_applied() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    let toolbar = [
+        "pod-filter-field",
+        "pod-filter-chips-1",
+        "pod-filter-clear-slot",
+        "pod-filter-note",
+        "pods-logs-bar",
+        "pods-row-0",
+    ];
+    let idle = toolbar.map(|part| ui.bounds(part));
+    assert!(idle.iter().all(Option::is_some), "{idle:?}");
+    ui.click("pod-filter-chips-1")?;
+    assert_eq!(toolbar.map(|part| ui.bounds(part)), idle);
+    ui.press("/")?;
+    ui.type_text("checkout")?;
+    assert_eq!(toolbar.map(|part| ui.bounds(part)), idle);
+    ui.click("pod-filter-clear")?;
+    assert_eq!(toolbar.map(|part| ui.bounds(part)), idle);
+    Ok(())
+}
+
+#[test]
+fn marking_pods_for_logs_moves_nothing() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    let watched = [
+        "pods-logs-bar",
+        "pods-clear-selection-slot",
+        "pods-row-0",
+        "pods-row-2",
+    ];
+    let idle = watched.map(|part| ui.bounds(part));
+    assert!(idle.iter().all(Option::is_some), "{idle:?}");
+    ui.click("pods-row-0")?;
+    ui.shift_click("pods-row-1")?;
+    assert_eq!(watched.map(|part| ui.bounds(part)), idle);
+    ui.click("pods-clear-selection")?;
+    assert_eq!(watched.map(|part| ui.bounds(part)), idle);
     Ok(())
 }
 
@@ -2983,7 +3028,8 @@ fn the_workload_menu_and_dock_follow_all_pods() -> anyhow::Result<()> {
 #[test]
 fn shift_clicked_pods_open_one_merged_logs_tab() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
-    assert!(ui.bounds("pods-logs-selected").is_none());
+    ui.click("pods-logs-selected")?;
+    assert_eq!(ui.state().location().page, Page::Pods);
     ui.click("pods-row-0")?;
     ui.shift_click("pods-row-1")?;
     ui.click("pods-logs-selected")?;
@@ -4066,3 +4112,34 @@ fn the_expiring_horizon_stays_inside_its_column_with_the_drill_in_open() -> anyh
     assert!(last.origin.x + last.size.width <= network.origin.x);
     Ok(())
 }
+
+#[test]
+fn the_shell_button_is_disabled_in_place_when_no_container_runs() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    let enabled = bounds_of(&mut ui, "pod-shell")?;
+    ui.click("pod-failing-elsewhere")?;
+    ui.click("pod-filter-chips-3")?;
+    ui.click("pods-row-0")?;
+    let disabled = bounds_of(&mut ui, "pod-shell")?;
+    assert_eq!(disabled, enabled);
+    ui.click("pod-shell")?;
+    assert!(ui.bounds("pod-close-shell").is_none());
+    Ok(())
+}
+
+#[test]
+fn the_pod_condition_block_sits_in_the_header_and_copies_its_exact_text() -> anyhow::Result<()> {
+    use gpui::{point, px};
+    let mut ui = Ui::open(Screen::Pods)?;
+    let wrong = bounds_of(&mut ui, "whats-wrong")?;
+    let facts = top(&mut ui, "pod-container-head")?;
+    assert!(wrong.bottom() < facts);
+    let from = wrong.origin + point(px(SELECT_INSET), wrong.size.height - px(SELECT_INSET));
+    let to = point(wrong.right(), wrong.bottom()) - point(px(SELECT_INSET), px(SELECT_INSET));
+    ui.drag_between(from, to)?;
+    ui.press("cmd-c")?;
+    assert_eq!(ui.clipboard().as_deref(), Some("last exit Error (1)"));
+    Ok(())
+}
+
+const SELECT_INSET: f32 = 4.;

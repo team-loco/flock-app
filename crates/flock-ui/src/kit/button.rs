@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window,
-    div, prelude::FluentBuilder, svg,
+    AnyElement, App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement,
+    MouseButton, ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement,
+    Styled, Window, div, prelude::FluentBuilder, svg,
 };
 
 use super::tooltip::Tooltip;
@@ -369,7 +369,7 @@ type SelectHandler = Rc<dyn Fn(&usize, &mut Window, &mut App)>;
 #[derive(IntoElement)]
 pub struct Segmented {
     id: ElementId,
-    options: Vec<SharedString>,
+    options: Vec<(SharedString, Option<SharedString>)>,
     selected: usize,
     small: bool,
     mono: bool,
@@ -389,7 +389,16 @@ impl Segmented {
     }
 
     pub fn option(mut self, label: impl Into<SharedString>) -> Self {
-        self.options.push(label.into());
+        self.options.push((label.into(), None));
+        self
+    }
+
+    pub fn reserved_option(
+        mut self,
+        label: impl Into<SharedString>,
+        widest: impl Into<SharedString>,
+    ) -> Self {
+        self.options.push((label.into(), Some(widest.into())));
         self
     }
 
@@ -423,36 +432,40 @@ impl RenderOnce for Segmented {
             (SEGMENT, SPACE_5, TEXT_CONTROL)
         };
         let group = self.id.to_string();
-        let segments = self.options.into_iter().enumerate().map(|(ix, label)| {
-            let selected = ix == self.selected;
-            let handler = self.on_select.clone();
-            let hover = palette.hover;
-            let selector = format!("{group}-{ix}");
-            div()
-                .debug_selector(|| selector)
-                .id(ix)
-                .flex()
-                .items_center()
-                .h(height)
-                .px(padding)
-                .cursor_pointer()
-                .whitespace_nowrap()
-                .when(ix > 0, |segment| {
-                    segment.border_l(RULE).border_color(palette.line2)
-                })
-                .when(selected, |segment| {
-                    segment.bg(palette.sel).text_color(palette.selfg)
-                })
-                .when(!selected, |segment| {
-                    segment
-                        .text_color(palette.fg2)
-                        .hover(move |style| style.bg(hover))
-                })
-                .when_some(handler, |segment, handler| {
-                    segment.on_click(move |_, window, cx| handler(&ix, window, cx))
-                })
-                .child(label)
-        });
+        let segments = self
+            .options
+            .into_iter()
+            .enumerate()
+            .map(|(ix, (label, widest))| {
+                let selected = ix == self.selected;
+                let handler = self.on_select.clone();
+                let hover = palette.hover;
+                let selector = format!("{group}-{ix}");
+                div()
+                    .debug_selector(|| selector)
+                    .id(ix)
+                    .flex()
+                    .items_center()
+                    .h(height)
+                    .px(padding)
+                    .cursor_pointer()
+                    .whitespace_nowrap()
+                    .when(ix > 0, |segment| {
+                        segment.border_l(RULE).border_color(palette.line2)
+                    })
+                    .when(selected, |segment| {
+                        segment.bg(palette.sel).text_color(palette.selfg)
+                    })
+                    .when(!selected, |segment| {
+                        segment
+                            .text_color(palette.fg2)
+                            .hover(move |style| style.bg(hover))
+                    })
+                    .when_some(handler, |segment, handler| {
+                        segment.on_click(move |_, window, cx| handler(&ix, window, cx))
+                    })
+                    .child(segment_label(label, widest))
+            });
         div()
             .debug_selector(|| self.id.to_string())
             .id(self.id)
@@ -466,6 +479,26 @@ impl RenderOnce for Segmented {
             .when(self.mono, |group| group.font_family(FONT_MONO))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .children(segments)
+    }
+}
+
+fn segment_label(label: SharedString, widest: Option<SharedString>) -> AnyElement {
+    match widest {
+        Some(widest) => div()
+            .relative()
+            .child(div().invisible().child(widest))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .flex()
+                    .justify_center()
+                    .child(label),
+            )
+            .into_any_element(),
+        None => label.into_any_element(),
     }
 }
 

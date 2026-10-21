@@ -7,8 +7,8 @@ use gpui::{
     AnyElement, App, BorderStyle, Bounds, ClickEvent, Corners, CursorStyle, Edges, Element,
     ElementId, Global, GlobalElementId, HighlightStyle, Hitbox, HitboxBehavior, Hsla,
     InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseUpEvent,
-    PaintQuad, Pixels, Point, RenderOnce, SharedString, StyledText, Subscription, TextLayout,
-    Window, WindowId, px, transparent_black,
+    PaintQuad, ParentElement, Pixels, Point, RenderOnce, SharedString, Styled, StyledText,
+    Subscription, TextLayout, Window, WindowId, div, px, transparent_black,
 };
 use gpui_base::{TextSelection, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun};
 
@@ -18,6 +18,8 @@ gpui::actions!(flock, [SelectAllText]);
 
 const DEFAULT_ID: &str = "selectable";
 const LINE_BREAK: &str = "\n";
+const WORD_BREAK: char = ' ';
+const NO_SEPARATOR: &str = "";
 const DRAG_SLOP: Pixels = px(3.);
 
 type LinkHandler = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -101,7 +103,7 @@ pub fn is_text_drag(event: &ClickEvent, window: &mut Window, cx: &mut App) -> bo
     moved(click.down.position, click.up.position) && TextSelection::has_selection(window, cx)
 }
 
-pub fn joined(texts: &[SharedString], ranges: &[Option<Range<usize>>]) -> String {
+pub fn joined(texts: &[SharedString], ranges: &[Option<Range<usize>>], separator: &str) -> String {
     let first = ranges.iter().position(Option::is_some);
     let last = ranges.iter().rposition(Option::is_some);
     let (Some(first), Some(last)) = (first, last) else {
@@ -118,7 +120,7 @@ pub fn joined(texts: &[SharedString], ranges: &[Option<Range<usize>>]) -> String
                 .unwrap_or_default()
         })
         .collect::<Vec<_>>()
-        .join(LINE_BREAK)
+        .join(separator)
 }
 
 pub fn quads(
@@ -191,6 +193,7 @@ pub struct Selectable {
     links: Vec<(Range<usize>, LinkHandler)>,
     rows: bool,
     on_selected: bool,
+    separator: &'static str,
 }
 
 impl Selectable {
@@ -202,7 +205,13 @@ impl Selectable {
             links: Vec::new(),
             rows: false,
             on_selected: false,
+            separator: LINE_BREAK,
         }
+    }
+
+    pub fn separator(mut self, separator: &'static str) -> Self {
+        self.separator = separator;
+        self
     }
 
     pub fn run(mut self, text: impl Into<SharedString>, layout: TextLayout) -> Self {
@@ -382,8 +391,8 @@ impl Selectable {
             .iter()
             .map(SharedString::as_ref)
             .collect::<Vec<_>>()
-            .join(LINE_BREAK);
-        *retained.shared.selected.borrow_mut() = joined(&texts, &ranges);
+            .join(self.separator);
+        *retained.shared.selected.borrow_mut() = joined(&texts, &ranges, self.separator);
         let palette = cx.palette();
         let color = if self.on_selected {
             palette.textsel_on_sel
@@ -524,6 +533,52 @@ impl RenderOnce for SelectableText {
     }
 }
 
+pub fn words(text: &str) -> Option<Vec<&str>> {
+    (!text.contains(LINE_BREAK)).then(|| text.split_inclusive(WORD_BREAK).collect())
+}
+
+#[derive(IntoElement)]
+pub struct SelectableWords {
+    text: SharedString,
+}
+
+impl SelectableWords {
+    pub fn new(text: impl Into<SharedString>) -> Self {
+        Self { text: text.into() }
+    }
+}
+
+impl RenderOnce for SelectableWords {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let Some(pieces) = words(&self.text) else {
+            return SelectableText::new(self.text).into_any_element();
+        };
+        let pieces: Vec<(SharedString, StyledText)> = pieces
+            .into_iter()
+            .map(|piece| {
+                let text = SharedString::from(piece.to_owned());
+                (text.clone(), StyledText::new(text))
+            })
+            .collect();
+        let runs: Vec<(SharedString, TextLayout)> = pieces
+            .iter()
+            .map(|(text, styled)| (text.clone(), styled.layout().clone()))
+            .collect();
+        let styled = pieces.into_iter().map(|(_, styled)| styled);
+        let block = div()
+            .flex()
+            .flex_wrap()
+            .min_w_0()
+            .children(styled.map(|text| div().max_w_full().child(text)));
+        runs.into_iter()
+            .fold(
+                Selectable::new(default_id(&self.text), block).separator(NO_SEPARATOR),
+                |selectable, (text, layout)| selectable.run(text, layout),
+            )
+            .into_any_element()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use gpui::{point, size};
@@ -538,20 +593,20 @@ mod tests {
     fn copied_lines_keep_blank_lines_between_the_ends() {
         let lines = texts(&["spec:", "", "  replicas: 3", "  paused: false"]);
         let ranges = [Some(2..5), None, Some(0..13), None];
-        assert_eq!(joined(&lines, &ranges), "ec:\n\n  replicas: 3");
+        assert_eq!(joined(&lines, &ranges, LINE_BREAK), "ec:\n\n  replicas: 3");
     }
 
     #[test]
     fn nothing_selected_copies_nothing() {
         let lines = texts(&["a", "b"]);
-        assert_eq!(joined(&lines, &[None, None]), "");
-        assert_eq!(joined(&lines, &[None, Some(0..1)]), "b");
+        assert_eq!(joined(&lines, &[None, None], LINE_BREAK), "");
+        assert_eq!(joined(&lines, &[None, Some(0..1)], LINE_BREAK), "b");
     }
 
     #[test]
     fn ranges_off_character_boundaries_copy_nothing_for_that_line() {
         let lines = texts(&["→ x", "y"]);
-        assert_eq!(joined(&lines, &[Some(1..3), Some(0..1)]), "\ny");
+        assert_eq!(joined(&lines, &[Some(1..3), Some(0..1)], LINE_BREAK), "\ny");
     }
 
     #[test]
@@ -598,6 +653,16 @@ mod tests {
                 Bounds::from_corners(point(px(10.), px(80.)), point(px(30.), px(100.))),
             ]
         );
+    }
+
+    #[test]
+    fn words_keep_their_spaces_so_joining_them_gives_the_text_back() {
+        let text = "couldn't find key  webhook_secret in Secret payments/stripe";
+        let pieces = words(text).unwrap_or_default();
+        assert_eq!(pieces.concat(), text);
+        assert_eq!(pieces.last(), Some(&"payments/stripe"));
+        assert!(pieces.contains(&" "));
+        assert_eq!(words("first\nsecond"), None);
     }
 
     #[test]

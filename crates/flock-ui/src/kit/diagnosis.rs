@@ -6,14 +6,13 @@ use gpui::{
     RenderOnce, SharedString, Styled, Window, div, prelude::FluentBuilder, relative,
 };
 
-use super::selectable::SelectableText;
+use super::selectable::{SelectableText, SelectableWords};
 use super::status::StatusGlyph;
 use crate::theme::{
     ActiveTheme, CONDITION_AGE, CONDITION_VALUE, FONT_MONO, GLYPH_SLOT, LINE_PROSE, SPACE_1,
     SPACE_3, SPACE_4, SPACE_5, TEXT_LABEL, TEXT_MONO, TEXT_SMALL, WHATS_WRONG_BAR,
 };
 
-pub const WHATS_WRONG: &str = "What’s wrong";
 pub const CONDITIONS: &str = "Conditions";
 pub const EVENTS: &str = "Events";
 const NO_CONDITIONS: &str = "No conditions reported.";
@@ -96,7 +95,7 @@ impl RenderOnce for WhatsWrong {
                         .min_w_0()
                         .text_color(fg)
                         .line_height(relative(LINE_PROSE))
-                        .child(SelectableText::new(message)),
+                        .child(SelectableWords::new(message)),
                 )
             })
     }

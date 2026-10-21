@@ -4,14 +4,10 @@ use crate::condition_line::ConditionLine;
 use crate::diagnosis::Condition;
 use crate::{ResourceRef, Status, Uid, time, units};
 
-const CRASH_LOOP: &str = "CrashLoopBackOff";
 pub const PROGRESS_DEADLINE: &str = "ProgressDeadlineExceeded";
 const NONE: &str = "—";
 const FIELD_SEPARATOR: &str = " · ";
 const LIMIT_SEPARATOR: &str = " / ";
-const NUMBER_WORDS: [&str; 10] = [
-    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
-];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkloadKind {
@@ -186,106 +182,6 @@ impl Workload {
         }
         fields
     }
-
-    pub fn sentence(&self) -> String {
-        if let Some(pending) = &self.pending {
-            return pending_sentence(pending);
-        }
-        let revision = self.current_revision().map(|r| r.number);
-        let ready = self.ready();
-        if ready >= self.desired {
-            return ready_sentence(self.desired, revision);
-        }
-        let failing: Vec<&Pod> = self
-            .pods
-            .iter()
-            .filter(|pod| pod.status == Status::Err)
-            .collect();
-        let head = if failing.is_empty() {
-            let waiting = self.desired - ready;
-            format!(
-                "{} of {} pods {} not ready yet",
-                capitalized(waiting),
-                self.desired,
-                verb(waiting)
-            )
-        } else {
-            let count = u32::try_from(failing.len()).unwrap_or(u32::MAX);
-            format!(
-                "{} {} {} {}",
-                capitalized(count),
-                plural(count, "pod", "pods"),
-                verb(count),
-                problem(&failing)
-            )
-        };
-        let tail = match (self.stalled(), revision) {
-            (true, Some(number)) => format!(", so the rollout to revision {number} is stuck."),
-            (false, Some(number)) if failing.is_empty() => {
-                format!("; the rollout to revision {number} is in progress.")
-            }
-            _ => ".".into(),
-        };
-        format!("{head}{tail}")
-    }
-}
-
-fn pending_sentence(pending: &Pending) -> String {
-    match pending {
-        Pending::Restarting => "Restarting the rollout: new pods replace the old ones.".into(),
-        Pending::Scaling { replicas } => format!(
-            "Scaling to {replicas} {}.",
-            plural(*replicas, "replica", "replicas")
-        ),
-        Pending::RollingBack { revision } => format!("Rolling back to revision {revision}."),
-    }
-}
-
-fn ready_sentence(desired: u32, revision: Option<u64>) -> String {
-    let on = revision
-        .map(|n| format!(" on revision {n}"))
-        .unwrap_or_default();
-    match desired {
-        0 => "Scaled to zero; no pods are running.".into(),
-        1 => format!("The pod is ready{on}."),
-        n => format!("All {} pods are ready{on}.", number_word(n)),
-    }
-}
-
-fn problem(failing: &[&Pod]) -> String {
-    let phase = failing
-        .first()
-        .map(|pod| pod.phase.as_str())
-        .unwrap_or_default();
-    let shared = failing.iter().all(|pod| pod.phase == phase);
-    match (shared, phase) {
-        (true, CRASH_LOOP) => "crash-looping".into(),
-        (true, phase) if !phase.is_empty() => format!("failing ({phase})"),
-        _ => "failing".into(),
-    }
-}
-
-fn verb(count: u32) -> &'static str {
-    plural(count, "is", "are")
-}
-
-fn plural(count: u32, one: &'static str, many: &'static str) -> &'static str {
-    if count == 1 { one } else { many }
-}
-
-pub fn number_word(n: u32) -> String {
-    usize::try_from(n)
-        .ok()
-        .and_then(|ix| NUMBER_WORDS.get(ix))
-        .map_or_else(|| n.to_string(), |word| (*word).to_owned())
-}
-
-fn capitalized(n: u32) -> String {
-    let word = number_word(n);
-    let mut chars = word.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first.to_uppercase().chain(chars).collect()
-    })
 }
 
 pub fn short_image(image: &str) -> &str {
@@ -644,7 +540,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn crashing(name: &str) -> Pod {
-        pod(name, CRASH_LOOP, Status::Err, false)
+        pod(name, "CrashLoopBackOff", Status::Err, false)
     }
 
     #[test]
@@ -698,18 +594,6 @@ pub(crate) mod tests {
         let w = workload(vec![crashing("a"), running("b"), running("c")], true);
         assert_eq!(w.ready_label(), "2/3 ready");
         assert_eq!(w.status(), Status::Err);
-        assert_eq!(
-            w.sentence(),
-            "One pod is crash-looping, so the rollout to revision 37 is stuck."
-        );
-    }
-
-    #[test]
-    fn several_failing_pods_with_mixed_phases() {
-        let mut oom = crashing("b");
-        oom.phase = "OOMKilled".into();
-        let w = workload(vec![crashing("a"), oom, running("c")], false);
-        assert_eq!(w.sentence(), "Two pods are failing.");
     }
 
     #[test]
@@ -717,23 +601,12 @@ pub(crate) mod tests {
         let starting = pod("a", "Running", Status::Progress, false);
         let w = workload(vec![starting, running("b"), running("c")], false);
         assert_eq!(w.status(), Status::Progress);
-        assert_eq!(
-            w.sentence(),
-            "One of 3 pods is not ready yet; the rollout to revision 37 is in progress."
-        );
     }
 
     #[test]
-    fn healthy_workload_reports_its_revision() {
+    fn healthy_workload_is_ok() {
         let w = workload(vec![running("a"), running("b"), running("c")], false);
         assert_eq!(w.status(), Status::Ok);
-        assert_eq!(w.sentence(), "All three pods are ready on revision 37.");
-        let mut single = workload(vec![running("a")], false);
-        single.desired = 1;
-        assert_eq!(single.sentence(), "The pod is ready on revision 37.");
-        let mut idle = workload(Vec::new(), false);
-        idle.desired = 0;
-        assert_eq!(idle.sentence(), "Scaled to zero; no pods are running.");
     }
 
     #[test]
@@ -741,9 +614,6 @@ pub(crate) mod tests {
         let mut w = workload(vec![crashing("a")], true);
         w.pending = Some(Pending::RollingBack { revision: 36 });
         assert_eq!(w.status(), Status::Progress);
-        assert_eq!(w.sentence(), "Rolling back to revision 36.");
-        w.pending = Some(Pending::Scaling { replicas: 1 });
-        assert_eq!(w.sentence(), "Scaling to 1 replica.");
     }
 
     #[test]

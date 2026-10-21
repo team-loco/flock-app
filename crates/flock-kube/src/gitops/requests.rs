@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use flock_core::flux::{HistoryEntry, Phase, Sentence};
+use flock_core::flux::{HistoryEntry, Phase};
 use flock_core::{FluxAction, FluxKey, FluxObject, Status};
 use jiff::Timestamp;
 
@@ -9,7 +9,6 @@ use super::convert::elapsed;
 
 const WAIT_MAX: Duration = Duration::from_mins(5);
 const REQUESTED: &str = "reconcile requested";
-const WAITING: &str = "Reconciliation requested; waiting for the controller to pick it up.";
 
 #[derive(Debug, Default)]
 pub struct Requests(BTreeMap<FluxKey, Timestamp>);
@@ -45,7 +44,6 @@ impl Requests {
             .map(|r| r.id.clone())
             .unwrap_or_default();
         object.phase = Phase::Reconciling;
-        object.sentence = Sentence::text(WAITING);
         object.history.insert(
             0,
             HistoryEntry {
@@ -81,7 +79,6 @@ mod tests {
                 "apps",
             ),
             phase,
-            sentence: Sentence::default(),
             applied: None,
             last_healthy: None,
             source: None,

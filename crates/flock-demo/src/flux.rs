@@ -4,7 +4,7 @@ use std::time::Duration;
 use flock_core::diagnosis::from_conditions;
 use flock_core::flux::{
     Drift, DriftField, DriftState, DriftedObject, FluxDetail, HelmDetail, HelmRevision,
-    HistoryEntry, ManagedObject, Phase, Revision, Sentence, SourceDetail, Span, SpecRow,
+    HistoryEntry, ManagedObject, Phase, Revision, SourceDetail, SpecRow,
 };
 use flock_core::{Condition, FluxAction, FluxKey, FluxKind, FluxObject, Snapshot, Status, Uid};
 
@@ -21,8 +21,6 @@ const APPS_PAYMENTS: &str = "apps-payments";
 const INFRA_CONTROLLERS: &str = "infra-controllers";
 const INFRA_CONFIGS: &str = "infra-configs";
 const EAST_APPS: [&str; 3] = ["apps-web", "apps-search", "apps-ml"];
-const RETRY_LEAD: &str = "Retrying in ";
-const RETRY_INTERVAL: &str = "2m";
 
 const PROD_US_EAST: &str = "prod-us-east";
 const PROD_EU_WEST: &str = "prod-eu-west";
@@ -102,7 +100,7 @@ fn managed(
     }
 }
 
-fn condition_yaml(phase: Phase, sentence: &Sentence) -> String {
+fn condition_yaml(phase: Phase, message: &str) -> String {
     let ready = if phase.status() == Status::Ok {
         "\"True\""
     } else {
@@ -111,17 +109,17 @@ fn condition_yaml(phase: Phase, sentence: &Sentence) -> String {
     format!(
         "status:\n  conditions:\n  - type: Ready\n    status: {ready}\n    reason: {}\n    message: \"{}\"\n",
         phase.label(),
-        sentence.plain()
+        message
     )
 }
 
-fn object_yaml(key: &FluxKey, api: &str, spec: &str, phase: Phase, sentence: &Sentence) -> String {
+fn object_yaml(key: &FluxKey, api: &str, spec: &str, phase: Phase, message: &str) -> String {
     format!(
         "apiVersion: {api}\nkind: {}\nmetadata:\n  name: {}\n  namespace: {}\nspec:\n{spec}{}",
         key.kind.label(),
         key.name,
         key.namespace,
-        condition_yaml(phase, sentence)
+        condition_yaml(phase, message)
     )
 }
 
@@ -237,10 +235,10 @@ fn kustomization_spec(cluster: &str, path: &str) -> (Vec<SpecRow>, String) {
     (rows, yaml)
 }
 
-fn settled_conditions(phase: Phase, sentence: &Sentence) -> Vec<Condition> {
+fn settled_conditions(phase: Phase, message: &str) -> Vec<Condition> {
     let ready = Condition::new(READY, TRUE)
         .reason(SUCCEEDED)
-        .message(sentence.plain())
+        .message(message)
         .age(Some(ago(3 * HOUR)));
     let waiting = Condition::new(READY, UNKNOWN)
         .reason(PROGRESSING)
@@ -268,13 +266,7 @@ fn payments_path(cluster: &str) -> String {
     format!("./apps/payments/overlays/{cluster}")
 }
 
-fn kustomization(
-    cluster: &str,
-    name: &str,
-    path: &str,
-    phase: Phase,
-    sentence: Sentence,
-) -> FluxObject {
+fn kustomization(cluster: &str, name: &str, path: &str, phase: Phase, message: &str) -> FluxObject {
     let key = key(cluster, FluxKind::Kustomization, FLUX_SYSTEM, name);
     let (spec, spec_yaml) = kustomization_spec(cluster, path);
     let yaml = object_yaml(
@@ -282,9 +274,9 @@ fn kustomization(
         "kustomize.toolkit.fluxcd.io/v1",
         &spec_yaml,
         phase,
-        &sentence,
+        message,
     );
-    let conditions = settled_conditions(phase, &sentence);
+    let conditions = settled_conditions(phase, message);
     FluxObject {
         conditions,
         diagnosis: None,
@@ -293,7 +285,6 @@ fn kustomization(
         source: Some(fleet_infra(cluster)),
         key,
         phase,
-        sentence,
         applied: Some(Revision::new(HEAD, ago(3 * HOUR))),
         last_healthy: Some(Revision::new(HEAD, ago(3 * HOUR))),
         depends_on: Vec::new(),
@@ -312,18 +303,15 @@ fn payments_dependencies(cluster: &str) -> Vec<FluxKey> {
 }
 
 fn apps_payments_east() -> FluxObject {
-    let sentence = Sentence(vec![
-        Span::Object("checkout-api".into()),
-        Span::Text(format!(
-            " did not become ready within the {HEALTH_TIMEOUT} health check. Retrying in 1m48s."
-        )),
-    ]);
+    let message = format!(
+        "checkout-api did not become ready within the {HEALTH_TIMEOUT} health check. Retrying in 1m48s."
+    );
     let mut object = kustomization(
         PROD_US_EAST,
         APPS_PAYMENTS,
         &payments_path(PROD_US_EAST),
         Phase::Failing,
-        sentence,
+        &message,
     );
     let failed = Condition::new(READY, FALSE)
         .reason(HEALTH_CHECK_FAILED)
@@ -355,15 +343,13 @@ fn apps_payments_east() -> FluxObject {
 }
 
 fn healthy_payments(cluster: &str, healthy_after: &str) -> FluxObject {
-    let sentence = Sentence::text(format!(
-        "Applied {HEAD} 3h ago; every object was healthy after {healthy_after}."
-    ));
+    let message = format!("Applied {HEAD} 3h ago; every object was healthy after {healthy_after}.");
     let mut object = kustomization(
         cluster,
         APPS_PAYMENTS,
         &payments_path(cluster),
         Phase::Ready,
-        sentence,
+        &message,
     );
     object.depends_on = payments_dependencies(cluster);
     object.inventory = payments_inventory()
@@ -393,7 +379,7 @@ fn peer_payments() -> Vec<FluxObject> {
     let phase = Phase::Suspended {
         since: Some(ago(2 * DAY)),
     };
-    let sentence = Sentence::text(
+    let message = String::from(
         "Suspended for the change freeze, so Flux applies nothing here. 2 commits behind fleet-infra/main.",
     );
     let mut west = kustomization(
@@ -401,7 +387,7 @@ fn peer_payments() -> Vec<FluxObject> {
         APPS_PAYMENTS,
         &payments_path(PROD_EU_WEST),
         phase,
-        sentence,
+        &message,
     );
     west.applied = Some(Revision::new(PREVIOUS, ago(DAY)));
     west.last_healthy = Some(Revision::new(PREVIOUS, ago(DAY)));
@@ -429,10 +415,8 @@ fn peer_payments() -> Vec<FluxObject> {
 }
 
 fn infra(cluster: &str, name: &str, path: &str) -> FluxObject {
-    let sentence = Sentence::text(format!(
-        "Applied {HEAD} 3h ago; everything it manages is ready."
-    ));
-    let mut object = kustomization(cluster, name, path, Phase::Ready, sentence);
+    let message = format!("Applied {HEAD} 3h ago; everything it manages is ready.");
+    let mut object = kustomization(cluster, name, path, Phase::Ready, &message);
     if name == INFRA_CONFIGS {
         object.depends_on = vec![key(
             cluster,
@@ -454,11 +438,7 @@ fn infra(cluster: &str, name: &str, path: &str) -> FluxObject {
 fn git_source(cluster: &str) -> FluxObject {
     let key = fleet_infra(cluster);
     let phase = Phase::Ready;
-    let sentence = Sentence(vec![
-        Span::Text("Fetched main at ".into()),
-        Span::Revision(HEAD.into()),
-        Span::Text(" 4m ago. The next fetch is due in 1m.".into()),
-    ]);
+    let message = &format!("Fetched main at {HEAD} 4m ago. The next fetch is due in 1m.");
     let url = "ssh://git@github.com/acme/fleet-infra";
     let spec = vec![
         SpecRow::new("url", url),
@@ -474,9 +454,9 @@ fn git_source(cluster: &str) -> FluxObject {
         "source.toolkit.fluxcd.io/v1",
         &spec_yaml,
         phase,
-        &sentence,
+        message,
     );
-    let conditions = settled_conditions(phase, &sentence);
+    let conditions = settled_conditions(phase, message);
     FluxObject {
         conditions,
         diagnosis: None,
@@ -484,7 +464,6 @@ fn git_source(cluster: &str) -> FluxObject {
         uid: Uid::default(),
         key,
         phase,
-        sentence,
         applied: Some(Revision::new(HEAD, ago(3 * HOUR))),
         last_healthy: None,
         source: None,
@@ -526,7 +505,7 @@ fn git_source(cluster: &str) -> FluxObject {
 fn helm_source(cluster: &str) -> FluxObject {
     let key = prometheus_repo(cluster);
     let phase = Phase::Ready;
-    let sentence = Sentence::text("Fetched the chart index 12m ago. The next fetch is due in 18m.");
+    let message = "Fetched the chart index 12m ago. The next fetch is due in 18m.";
     let url = "https://prometheus-community.github.io/helm-charts";
     let index = "index 2026-10-12";
     let spec = vec![
@@ -539,9 +518,9 @@ fn helm_source(cluster: &str) -> FluxObject {
         "source.toolkit.fluxcd.io/v1",
         &spec_yaml,
         phase,
-        &sentence,
+        message,
     );
-    let conditions = settled_conditions(phase, &sentence);
+    let conditions = settled_conditions(phase, message);
     FluxObject {
         conditions,
         diagnosis: None,
@@ -549,7 +528,6 @@ fn helm_source(cluster: &str) -> FluxObject {
         uid: Uid::default(),
         key,
         phase,
-        sentence,
         applied: Some(Revision::new(index, ago(12 * MINUTE))),
         last_healthy: None,
         source: None,
@@ -700,7 +678,7 @@ fn release(
     }
 }
 
-fn helm_release(cluster: &str, version: &str, phase: Phase, sentence: Sentence) -> FluxObject {
+fn helm_release(cluster: &str, version: &str, phase: Phase, message: &str) -> FluxObject {
     let key = key(
         cluster,
         FluxKind::HelmRelease,
@@ -713,9 +691,9 @@ fn helm_release(cluster: &str, version: &str, phase: Phase, sentence: Sentence) 
         "helm.toolkit.fluxcd.io/v2",
         &spec_yaml,
         phase,
-        &sentence,
+        message,
     );
-    let conditions = settled_conditions(phase, &sentence);
+    let conditions = settled_conditions(phase, message);
     FluxObject {
         conditions,
         diagnosis: None,
@@ -723,7 +701,6 @@ fn helm_release(cluster: &str, version: &str, phase: Phase, sentence: Sentence) 
         uid: Uid::default(),
         key,
         phase,
-        sentence,
         applied: Some(Revision::new(version, ago(5 * DAY))),
         last_healthy: Some(Revision::new(PROMETHEUS_OLD, ago(5 * DAY))),
         source: Some(prometheus_repo(cluster)),
@@ -761,23 +738,16 @@ fn helm_release(cluster: &str, version: &str, phase: Phase, sentence: Sentence) 
 }
 
 fn prometheus_ready(cluster: &str) -> FluxObject {
-    let sentence = Sentence::text(format!(
-        "Revision 14 ({PROMETHEUS_OLD}) is deployed and every object it manages is ready."
-    ));
-    helm_release(cluster, PROMETHEUS_OLD, Phase::Ready, sentence)
+    let message =
+        format!("Revision 14 ({PROMETHEUS_OLD}) is deployed and every object it manages is ready.");
+    helm_release(cluster, PROMETHEUS_OLD, Phase::Ready, &message)
 }
 
 fn prometheus_staging() -> FluxObject {
-    let sentence = Sentence(vec![
-        Span::Text(format!(
-            "The upgrade to {PROMETHEUS_NEW} timed out waiting for "
-        )),
-        Span::Object("prometheus-kube-prometheus-stack-prometheus".into()),
-        Span::Text(format!(
-            ": context deadline exceeded. Retry 2 of 3 runs in 4m; revision 14 ({PROMETHEUS_OLD}) is still serving."
-        )),
-    ]);
-    let mut object = helm_release(STAGING, PROMETHEUS_NEW, Phase::Retrying, sentence);
+    let message = format!(
+        "The upgrade to {PROMETHEUS_NEW} timed out waiting for prometheus-kube-prometheus-stack-prometheus: context deadline exceeded. Retry 2 of 3 runs in 4m; revision 14 ({PROMETHEUS_OLD}) is still serving."
+    );
+    let mut object = helm_release(STAGING, PROMETHEUS_NEW, Phase::Retrying, &message);
     let changed = Some(ago(9 * MINUTE));
     let failed = |kind: &str| {
         Condition::new(kind, FALSE)
@@ -924,7 +894,6 @@ pub fn begin(object: &FluxObject, action: FluxAction) -> Option<FluxObject> {
         .unwrap_or_default();
     let mut next = object.clone();
     next.phase = Phase::Reconciling;
-    next.sentence = reconciling_sentence(object, &revision);
     next.history.insert(
         0,
         HistoryEntry {
@@ -938,31 +907,6 @@ pub fn begin(object: &FluxObject, action: FluxAction) -> Option<FluxObject> {
     Some(next)
 }
 
-fn reconciling_sentence(object: &FluxObject, revision: &str) -> Sentence {
-    if object.key.kind.is_source() {
-        return Sentence::text(format!(
-            "Fetching the latest revision; {revision} is current."
-        ));
-    }
-    let waiting = object
-        .inventory
-        .iter()
-        .find(|item| item.status != Status::Ok)
-        .map(|item| item.name.clone());
-    match waiting {
-        Some(name) => Sentence(vec![
-            Span::Text(format!(
-                "Applying {revision}, then waiting up to {HEALTH_TIMEOUT} for "
-            )),
-            Span::Object(name),
-            Span::Text(" to become ready.".into()),
-        ]),
-        None => Sentence::text(format!(
-            "Applying {revision}, then waiting up to {HEALTH_TIMEOUT} for its objects to become ready."
-        )),
-    }
-}
-
 pub fn finish(before: &FluxObject) -> FluxObject {
     let mut next = before.clone();
     let outcome_ok = before.status() == Status::Ok;
@@ -971,7 +915,6 @@ pub fn finish(before: &FluxObject) -> FluxObject {
         .as_ref()
         .map(|r| r.id.clone())
         .unwrap_or_default();
-    next.sentence = restart_countdown(&before.sentence);
     let top = next.history.first_mut();
     match top {
         Some(top) if !outcome_ok || top.message == NO_CHANGES => {
@@ -982,18 +925,6 @@ pub fn finish(before: &FluxObject) -> FluxObject {
         None => next.history.push(no_changes(revision)),
     }
     next
-}
-
-fn restart_countdown(sentence: &Sentence) -> Sentence {
-    let spans = sentence.0.iter().map(|span| match span {
-        Span::Text(text) => match text.find(RETRY_LEAD) {
-            Some(at) => Span::Text(format!("{}{RETRY_LEAD}{RETRY_INTERVAL}.", &text[..at])),
-            None => span.clone(),
-        },
-        Span::Object(_) => span.clone(),
-        Span::Revision(_) => span.clone(),
-    });
-    Sentence(spans.collect())
 }
 
 const NO_CHANGES: &str = "applied · no changes";
@@ -1016,14 +947,12 @@ pub fn suspend(object: &FluxObject) -> Option<FluxObject> {
     next.phase = Phase::Suspended {
         since: Some(Duration::ZERO),
     };
-    next.sentence = Sentence::text("Suspended, so Flux applies nothing here until it is resumed.");
     Some(next)
 }
 
 fn resumed(object: &FluxObject) -> FluxObject {
     let mut next = object.clone();
     next.phase = Phase::Ready;
-    next.sentence = Sentence::text("Resumed. Flux applies the latest revision on its next run.");
     next
 }
 
@@ -1079,10 +1008,6 @@ mod tests {
         let object = payments_east();
         assert_eq!(object.phase, Phase::Failing);
         assert_eq!(object.inventory.len(), 11);
-        assert_eq!(
-            object.sentence.plain(),
-            "checkout-api did not become ready within the 5m health check. Retrying in 1m48s."
-        );
         let counts: Vec<_> = object
             .history
             .iter()
@@ -1117,10 +1042,6 @@ mod tests {
         let running = running.as_ref();
         assert_eq!(running.map(|o| o.phase), Some(Phase::Reconciling));
         assert_eq!(
-            running.map(|o| o.sentence.plain()).as_deref(),
-            Some("Applying a41e07c, then waiting up to 5m for checkout-api to become ready.")
-        );
-        assert_eq!(
             running.map(|o| o.history[0].age_label()).as_deref(),
             Some("now")
         );
@@ -1129,10 +1050,6 @@ mod tests {
         assert_eq!(done.history.len(), before.history.len());
         assert_eq!(done.history[0].count, 19);
         assert_eq!(done.history[0].age, Some(Duration::ZERO));
-        assert_eq!(
-            done.sentence.plain(),
-            "checkout-api did not become ready within the 5m health check. Retrying in 2m."
-        );
     }
 
     #[test]

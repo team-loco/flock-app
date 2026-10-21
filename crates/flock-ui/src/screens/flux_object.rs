@@ -1,29 +1,26 @@
 use crate::kit::SelectableText;
 use flock_core::flux::{
-    FluxDetail, HelmDetail, HelmRevision, HistoryEntry, InventoryFilter, ManagedObject, Span,
-    SpecRow,
+    FluxDetail, HelmDetail, HelmRevision, HistoryEntry, InventoryFilter, ManagedObject, SpecRow,
 };
 use flock_core::{Command, FluxAction, FluxKind, FluxObject, FluxPage, Page, Status, time};
 use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Entity, EventEmitter, FocusHandle,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
-    prelude::FluentBuilder, px, relative,
+    prelude::FluentBuilder, px,
 };
 
 use crate::kit::{
     ActionMenu, Button, CONDITIONS, CodeView, Column, ConditionTable, ConditionText, ConfirmDialog,
     DiffView, InspectorPane, KeyValue, MenuItem, PageHeader, Prose, SectionHeader, SectionLabel,
-    Segmented, StatusGlyph, Table, TableEvent, Toast, WHATS_WRONG, WhatsWrong, confirm,
-    parse_unified, toast,
+    Segmented, StatusGlyph, Table, TableEvent, Toast, WhatsWrong, confirm, parse_unified, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{EDIT_DESCRIPTION, EDIT_YAML};
 use crate::screens::{FullView, full_view_link};
 use crate::theme::{
-    ASIDE_WIDTH, ActiveTheme, FONT_MONO, FONT_SANS, LINE_PROSE, Palette, ROW_DOCUMENT,
-    ROW_TABLE_MIN, RULE, SPACE_2, SPACE_3, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY,
-    TEXT_MONO, TEXT_SMALL,
+    ASIDE_WIDTH, ActiveTheme, FONT_MONO, FONT_SANS, Palette, ROW_DOCUMENT, ROW_TABLE_MIN, RULE,
+    SPACE_2, SPACE_3, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
 };
 
 pub(crate) const FLUX_CONTEXT: &str = "FluxObject";
@@ -164,7 +161,7 @@ impl FluxObjectPage {
             .leading(self.navigation.clone())
             .mono()
             .status(object.status(), object.phase.label())
-            .sentence(Self::compact_status_line(object, cx))
+            .detail(Self::compact_status_line(object))
             .meta(Self::meta(object, cx))
             .footer(full_view_link("flux-full-view", open))
             .into_any_element()
@@ -394,63 +391,25 @@ impl FluxObjectPage {
             .status(object.status(), object.phase.label())
             .action(primary.primary())
             .action(self.menu.clone())
-            .sentence(Self::status_line(object, cx))
+            .detail(Self::status_line(object))
             .meta(Self::meta(object, cx))
             .into_any_element()
     }
 
-    fn status_line(object: &FluxObject, cx: &mut Context<Self>) -> AnyElement {
-        match object.condition_line() {
-            Some(line) => ConditionText::new(line).into_any_element(),
-            None => Self::sentence(object, cx),
+    fn status_line(object: &FluxObject) -> Option<AnyElement> {
+        if let Some(diagnosis) = object.current_diagnosis() {
+            let block = WhatsWrong::new(object.status(), diagnosis.clone());
+            return Some(block.into_any_element());
         }
+        object
+            .condition_line()
+            .map(|line| ConditionText::new(line).into_any_element())
     }
 
-    fn compact_status_line(object: &FluxObject, cx: &mut Context<Self>) -> AnyElement {
-        match object.condition_line() {
-            Some(line) => SelectableText::new(line.compact()).into_any_element(),
-            None => Self::sentence(object, cx),
-        }
-    }
-
-    fn sentence(object: &FluxObject, cx: &mut Context<Self>) -> AnyElement {
-        let this = cx.weak_entity();
-        let cluster = object.key.cluster.clone();
-        let prose = object
-            .sentence
-            .0
-            .iter()
-            .fold(Prose::new("flux-sentence"), |prose, span| match span {
-                Span::Text(text) => prose.text(text.clone()),
-                Span::Revision(id) => {
-                    let sha = id.clone();
-                    let this = this.clone();
-                    prose.link(id.clone(), move |_, cx| {
-                        let command = Command::OpenCommit(sha.clone());
-                        this.update(cx, |_, cx| cx.emit(command)).ok();
-                    })
-                }
-                Span::Object(name) => {
-                    let target = object
-                        .inventory
-                        .iter()
-                        .find(|o| &o.name == name)
-                        .map(|o| o.resource(&cluster));
-                    match target {
-                        Some(resource) => {
-                            let this = this.clone();
-                            prose.link(name.clone(), move |_, cx| {
-                                this.update(cx, |_, cx| {
-                                    cx.emit(Command::OpenResource(resource.clone()));
-                                })
-                                .ok();
-                            })
-                        }
-                        None => prose.inert_link(name.clone()),
-                    }
-                }
-            });
-        prose.into_any_element()
+    fn compact_status_line(object: &FluxObject) -> Option<SelectableText> {
+        object
+            .condition_line()
+            .map(|line| SelectableText::new(line.compact()))
     }
 
     fn meta(object: &FluxObject, cx: &mut Context<Self>) -> AnyElement {
@@ -543,14 +502,6 @@ impl FluxObjectPage {
     }
 
     fn diagnosis_section(object: &FluxObject) -> AnyElement {
-        let whats_wrong = object.current_diagnosis().map(|diagnosis| {
-            div().child(SectionHeader::new(WHATS_WRONG)).child(
-                div()
-                    .px(SPACE_8)
-                    .pb(SPACE_5)
-                    .child(WhatsWrong::new(object.status(), diagnosis.clone())),
-            )
-        });
         let conditions = (!object.conditions.is_empty()).then(|| {
             div().child(SectionHeader::new(CONDITIONS)).child(
                 div()
@@ -559,10 +510,7 @@ impl FluxObjectPage {
                     .child(ConditionTable::new(&object.conditions)),
             )
         });
-        div()
-            .children(whats_wrong)
-            .children(conditions)
-            .into_any_element()
+        div().children(conditions).into_any_element()
     }
 
     fn history_section(&self, palette: &Palette) -> AnyElement {
@@ -648,24 +596,17 @@ impl FluxObjectPage {
             .enumerate()
             .map(|(ix, peer)| peer_row(ix, peer, &this, palette))
             .collect();
-        let verdict = page.verdict.map(|verdict| {
-            let this = this.clone();
-            div()
-                .px(SPACE_6)
-                .pt(SPACE_3)
-                .line_height(relative(LINE_PROSE))
-                .text_color(palette.fg2)
-                .child(
-                    Prose::new("flux-verdict")
-                        .text(format!("{} ", verdict.sentence()))
-                        .link(COMPARE, move |_, cx| {
-                            this.update(cx, |_, cx| {
-                                cx.emit(Command::SelectPage(Page::Changes));
-                            })
-                            .ok();
-                        }),
-                )
-        });
+        let comparing = this.clone();
+        let compare = div()
+            .px(SPACE_6)
+            .pt(SPACE_3)
+            .child(Prose::new("flux-compare").link(COMPARE, move |_, cx| {
+                comparing
+                    .update(cx, |_, cx| {
+                        cx.emit(Command::SelectPage(Page::Changes));
+                    })
+                    .ok();
+            }));
         let dependencies: Vec<AnyElement> = page
             .dependencies
             .iter()
@@ -705,7 +646,7 @@ impl FluxObjectPage {
                     aside_block(palette)
                         .child(aside_label("Other clusters"))
                         .children(peers)
-                        .children(verdict),
+                        .child(compare),
                 )
             })
             .when(!dependencies.is_empty(), |aside| {

@@ -21,7 +21,7 @@ pub struct PageHeader {
     status: Option<(Status, SharedString)>,
     actions: Vec<AnyElement>,
     leading: Option<AnyElement>,
-    sentence: Option<AnyElement>,
+    detail: Option<AnyElement>,
     meta: Option<AnyElement>,
     footer: Option<AnyElement>,
 }
@@ -35,7 +35,7 @@ impl PageHeader {
             status: None,
             actions: Vec::new(),
             leading: None,
-            sentence: None,
+            detail: None,
             meta: None,
             footer: None,
         }
@@ -66,8 +66,8 @@ impl PageHeader {
         self
     }
 
-    pub fn sentence(mut self, sentence: impl IntoElement) -> Self {
-        self.sentence = Some(sentence.into_any_element());
+    pub fn detail(mut self, detail: Option<impl IntoElement>) -> Self {
+        self.detail = detail.map(IntoElement::into_any_element);
         self
     }
 
@@ -127,13 +127,13 @@ impl RenderOnce for PageHeader {
             .border_b(RULE)
             .border_color(line)
             .child(top)
-            .when_some(self.sentence, |header, sentence| {
+            .when_some(self.detail, |header, detail| {
                 header.child(
                     div()
                         .text_size(TEXT_UI)
                         .line_height(relative(LINE_PROSE))
                         .text_color(fg2)
-                        .child(sentence),
+                        .child(detail),
                 )
             })
             .when_some(self.meta, |header, meta| {

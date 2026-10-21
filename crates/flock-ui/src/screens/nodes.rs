@@ -21,8 +21,8 @@ use super::{NODE_KIND, ScreenEvent};
 use crate::kit::{
     Button, CONDITIONS, CapacityMeter, Column, ConditionTable, ConfirmDialog, EVENTS, EventList,
     FilterBar, FilterEvent, IconButton, Inspector, KeyValue, MenuItem, MetaLine, Meter, MiniMeter,
-    Presence, SectionLabel, SelectableText, StatusText, Table, TableEvent, WHATS_WRONG, WhatsWrong,
-    chip_label, confirm, reason_cell, reason_tooltip, slide_in, slide_out,
+    Presence, SectionLabel, SelectableText, StatusText, Table, TableEvent, WhatsWrong, chip_label,
+    confirm, reason_cell, reason_tooltip, slide_in, slide_out,
 };
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
@@ -325,15 +325,15 @@ impl NodesScreen {
             self.related.iter().find(|related| related.target == target)
         });
         let related = inspector_section(related, &pick, cx);
-        let mut inspector = Inspector::new(INSPECTOR_ID, node.name.clone())
+        let inspector = Inspector::new(INSPECTOR_ID, node.name.clone())
             .mono()
             .width(INSPECTOR_NODE)
             .status(node.status, node.state.clone())
+            .condition(
+                node.diagnosis()
+                    .map(|diagnosis| WhatsWrong::new(node.status, diagnosis)),
+            )
             .actions(div().flex().gap(SPACE_3).children(primary).child(close));
-        if let Some(diagnosis) = node.diagnosis() {
-            inspector =
-                inspector.section(Some(WHATS_WRONG), WhatsWrong::new(node.status, diagnosis));
-        }
         inspector
             .section(Some(CONDITIONS), ConditionTable::new(&node.conditions))
             .section(Some(EVENTS), EventList::new(events))

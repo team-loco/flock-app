@@ -1,4 +1,3 @@
-use crate::kit::SelectableText;
 use flock_core::changes::LineChange;
 use flock_core::compare::{Cell, Comparison, Field, SpecDiff};
 use flock_core::overview::plural;
@@ -183,12 +182,7 @@ impl CompareScreen {
         div()
             .flex()
             .flex_col()
-            .child(
-                PageHeader::new(comparison.name.clone())
-                    .mono()
-                    .sentence(SelectableText::new(comparison.sentence()))
-                    .meta(meta),
-            )
+            .child(PageHeader::new(comparison.name.clone()).mono().meta(meta))
             .child(heads)
             .children(fields.into_iter().map(|f| field_row(f, palette)))
             .child(

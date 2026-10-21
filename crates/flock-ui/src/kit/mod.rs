@@ -34,8 +34,8 @@ pub use button::{Button, ButtonSize, ButtonVariant, Checkbox, IconButton, Segmen
 pub use chart::{CapacityMeter, LineChart, Meter, MiniMeter, Series, StackedBar};
 pub use code::CodeView;
 pub use diagnosis::{
-    CONDITIONS, ConditionTable, ConditionText, EVENTS, EventList, WHATS_WRONG, WhatsWrong,
-    reason_cell, reason_tooltip,
+    CONDITIONS, ConditionTable, ConditionText, EVENTS, EventList, WhatsWrong, reason_cell,
+    reason_tooltip,
 };
 pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};
@@ -66,7 +66,7 @@ pub use presence::{Entrance, Motion, Presence, slide_in, slide_out, swap_in};
 pub use prose::Prose;
 pub use section::ClickableSection;
 pub use select::{Select, SelectEvent};
-pub use selectable::{SelectAllText, Selectable, SelectableText};
+pub use selectable::{SelectAllText, Selectable, SelectableText, SelectableWords};
 pub use split::Split;
 #[cfg(test)]
 pub(crate) use status::STATUSES;

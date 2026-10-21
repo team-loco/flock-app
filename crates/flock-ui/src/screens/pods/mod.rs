@@ -32,7 +32,7 @@ use crate::kit::{
     Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, EVENTS, Entrance,
     EventList, FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER,
     Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, ShowAll, StatusText, Table,
-    TableEvent, Terminal, TextFieldState, WHATS_WRONG, WhatsWrong, chip_label, confirm, swap_in,
+    TableEvent, Terminal, TextFieldState, WhatsWrong, chip_label, confirm, swap_in,
 };
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
 use crate::screens::{
@@ -40,9 +40,8 @@ use crate::screens::{
     set_namespace_options,
 };
 use crate::theme::{
-    ActiveTheme, FONT_MONO, FONT_SANS, ICON, INSPECTOR_POD, LINE_PROSE, Palette, RULE, SPACE_2,
-    SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI,
-    WHATS_WRONG_BAR,
+    ActiveTheme, FONT_MONO, FONT_SANS, ICON, INSPECTOR_POD, Palette, RULE, SPACE_2, SPACE_3,
+    SPACE_4, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI, WHATS_WRONG_BAR,
 };
 
 const INSPECTOR_ID: &str = "pod-inspector";
@@ -76,6 +75,13 @@ const LOGS_FOR: &str = "Logs for";
 const LOGS_FOR_SELECTED: &str = "Logs for selected pods";
 const SELECTED_PODS: &str = "selected pods";
 const CLEAR_SELECTION: &str = "Clear selection";
+const SHELL: &str = "Shell";
+const LOGS_BAR: &str = "pods-logs-bar";
+const CLEAR_SELECTION_SLOT: &str = "pods-clear-selection-slot";
+const CONTAINER_HEAD: &str = "pod-container-head";
+const CONTAINER_STATE: &str = "pod-container-state";
+const NO_RUNNING_CONTAINER: &str =
+    "No container is running, so there is nothing to open a shell in";
 const MARK_HINT: &str = "⇧-click rows to add or remove pods";
 const SELECTOR_HINT: &str = "Follows every pod that matches the label filter, including new ones";
 const NO_SELECTION: &str = "Select a pod to see its containers, conditions and events.";
@@ -329,42 +335,57 @@ impl PodsScreen {
         Some((target, label))
     }
 
-    fn logs_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (target, label) = self.logs_target(cx)?;
+    fn logs_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let target = self.logs_target(cx);
         let palette = *cx.palette();
-        let marked = matches!(target, LogTarget::Pods { .. });
-        let open = Button::new("pods-logs-selected", format!("{LOGS_FOR} {label}"))
+        let marked = matches!(target, Some((LogTarget::Pods { .. }, _)));
+        let selector = target.is_some() && !marked;
+        let label = target.as_ref().map_or_else(
+            || LOGS_FOR_SELECTED.to_owned(),
+            |(_, label)| format!("{LOGS_FOR} {label}"),
+        );
+        let open = Button::new("pods-logs-selected", label)
             .small()
-            .on_click(cx.listener(move |_, _, _, cx| open_logs(target.clone(), cx)));
-        let clear = marked.then(|| {
-            Button::new("pods-clear-selection", CLEAR_SELECTION)
-                .small()
-                .ghost()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.table.update(cx, Table::clear_marks);
-                }))
-        });
-        let hint = if marked { MARK_HINT } else { SELECTOR_HINT };
-        Some(
-            div()
-                .flex()
-                .flex_none()
-                .items_center()
-                .gap(SPACE_4)
-                .px(SPACE_8)
-                .py(SPACE_3)
-                .border_b(RULE)
-                .border_color(palette.line)
-                .child(open)
-                .children(clear)
-                .child(
-                    div()
-                        .text_size(TEXT_SMALL)
-                        .text_color(palette.mute)
-                        .child(hint),
-                )
-                .into_any_element(),
-        )
+            .disabled(target.is_none())
+            .on_click(cx.listener(move |_, _, _, cx| {
+                if let Some((target, _)) = &target {
+                    open_logs(target.clone(), cx);
+                }
+            }));
+        let clear = Button::new("pods-clear-selection", CLEAR_SELECTION)
+            .small()
+            .ghost()
+            .disabled(!marked)
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.table.update(cx, Table::clear_marks);
+            }));
+        let hint = if selector { SELECTOR_HINT } else { MARK_HINT };
+        div()
+            .debug_selector(|| LOGS_BAR.into())
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(SPACE_4)
+            .px(SPACE_8)
+            .py(SPACE_3)
+            .border_b(RULE)
+            .border_color(palette.line)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(TEXT_SMALL)
+                    .text_color(palette.mute)
+                    .child(hint),
+            )
+            .child(open)
+            .child(
+                div()
+                    .debug_selector(|| CLEAR_SELECTION_SLOT.into())
+                    .child(div().when(!marked, Styled::invisible).child(clear)),
+            )
+            .into_any_element()
     }
 
     fn cluster_pods(&self) -> Vec<&Pod> {
@@ -609,9 +630,18 @@ impl PodsScreen {
     }
 
     fn pod_header(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let shell = Button::new("pod-shell", "Shell")
+        let running = pod
+            .containers
+            .iter()
+            .any(|container| container.state == ContainerState::Running);
+        let shell = Button::new("pod-shell", SHELL)
             .primary()
+            .disabled(!running)
+            .when(!running, |shell| shell.tooltip(NO_RUNNING_CONTAINER))
             .on_click(cx.listener(|this, _, window, cx| this.open_terminal(window, cx)));
+        let whats_wrong = pod
+            .diagnosis()
+            .map(|diagnosis| WhatsWrong::new(pod.status, diagnosis));
         let header = section(palette)
             .gap(SPACE_3)
             .child(
@@ -631,12 +661,7 @@ impl PodsScreen {
                     .child(pod.name.clone()),
             )
             .child(StatusText::new(pod.status, pod.reason.clone()))
-            .child(
-                div()
-                    .text_color(palette.fg2)
-                    .line_height(gpui::relative(LINE_PROSE))
-                    .child(SelectableText::new(pod.sentence())),
-            );
+            .children(whats_wrong);
         header.flex_none().into_any_element()
     }
 
@@ -646,15 +671,9 @@ impl PodsScreen {
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        let whats_wrong = pod.diagnosis().map(|diagnosis| {
-            section(palette)
-                .child(SectionLabel::new(WHATS_WRONG))
-                .child(WhatsWrong::new(pod.status, diagnosis))
-        });
         div()
             .flex()
             .flex_col()
-            .children(whats_wrong)
             .child(Self::facts(pod, palette, cx))
             .child(Self::containers_section(pod, palette, cx))
             .child(Self::conditions(pod, conditions_open, palette, cx))
@@ -824,7 +843,9 @@ impl PodsScreen {
             .border_color(palette.line)
             .child(
                 div()
+                    .debug_selector(|| CONTAINER_HEAD.into())
                     .flex()
+                    .flex_wrap()
                     .items_baseline()
                     .gap(SPACE_4)
                     .font_family(FONT_MONO)
@@ -836,15 +857,14 @@ impl PodsScreen {
                     )
                     .child(
                         div()
-                            .min_w_0()
-                            .truncate()
+                            .debug_selector(|| CONTAINER_STATE.into())
                             .text_color(state_color)
                             .child(container.state_label()),
                     )
-                    .child(div().flex_1())
                     .child(
                         div()
                             .flex_none()
+                            .ml_auto()
                             .text_size(TEXT_SMALL)
                             .text_color(restarts_color)
                             .child(container.restarts_label()),
@@ -1261,7 +1281,7 @@ impl Render for PodsScreen {
             .flex()
             .flex_col()
             .child(self.filter.clone())
-            .children(self.logs_bar(cx))
+            .child(self.logs_bar(cx))
             .child(
                 div()
                     .flex_1()

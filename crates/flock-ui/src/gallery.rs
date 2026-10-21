@@ -356,12 +356,15 @@ impl Gallery {
                 Button::new("reconcile", "Reconcile")
                     .primary()
                     .shortcut("⌘R")
-                    .on_click(|_, _, cx| toast(Toast::new(Status::Progress, "Reconciling apps-payments").key("reconcile"), cx)),
+                    .on_click(|_, _, cx| {
+                        toast(
+                            Toast::new(Status::Progress, "Reconciling apps-payments")
+                                .key("reconcile"),
+                            cx,
+                        )
+                    }),
             )
             .action(self.more.clone())
-            .sentence(
-                "One Deployment is not ready: checkout-api is crash-looping, so health checks time out after 5m.",
-            )
             .meta(
                 div()
                     .flex()
