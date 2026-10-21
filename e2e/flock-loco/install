@@ -36,6 +36,7 @@ fi
 image_tag="sha-$(git -C "${LOCO_DIR}" rev-parse HEAD)"
 
 "${kubectl[@]}" apply -f "${LOCO_DIR}/manifests/namespaces/namespaces.yaml"
+"${kubectl[@]}" apply -f "${HERE}/pod-cpu-policy.yaml"
 
 core_chart="${LOCO_DIR}/charts/loco-core"
 gateway_version="$(mise exec -- yq '.dependencies[] | select(.name == "gateway-helm") | .version' "${core_chart}/Chart.yaml")"
