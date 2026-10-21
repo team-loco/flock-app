@@ -203,11 +203,10 @@ impl RenderOnce for Kbd {
             .py(RULE)
             .rounded(RADIUS)
             .border(RULE)
-            .border_color(palette.line2)
-            .bg(palette.raise)
+            .border_color(palette.line)
             .font_family(FONT_MONO)
             .text_size(TEXT_LABEL)
-            .text_color(palette.fg2)
+            .text_color(palette.mute)
             .child(self.keys)
     }
 }
