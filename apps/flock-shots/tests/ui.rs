@@ -4370,4 +4370,18 @@ fn the_pod_error_block_sits_above_the_details_and_copies_its_exact_text() -> any
     Ok(())
 }
 
+#[test]
+fn a_raw_message_keeps_its_size_when_hovered_and_selected() -> anyhow::Result<()> {
+    use gpui::{point, px};
+    let mut ui = Ui::open(Screen::Pods)?;
+    let resting = bounds_of(&mut ui, "error-block-0-message")?;
+    ui.hover("error-block-0-message")?;
+    assert_eq!(bounds_of(&mut ui, "error-block-0-message")?, resting);
+    let from = resting.origin + point(px(SELECT_INSET), px(SELECT_INSET));
+    let to = point(resting.right(), resting.bottom()) - point(px(SELECT_INSET), px(SELECT_INSET));
+    ui.drag_between(from, to)?;
+    assert_eq!(bounds_of(&mut ui, "error-block-0-message")?, resting);
+    Ok(())
+}
+
 const SELECT_INSET: f32 = 4.;

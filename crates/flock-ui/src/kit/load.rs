@@ -8,7 +8,7 @@ use gpui::{
     prelude::FluentBuilder,
 };
 
-use super::{Button, FilterBar, StatusText};
+use super::{Button, FilterBar, RawMessage, StatusText};
 use crate::theme::{
     self, ActiveTheme, CHART_HEIGHT, Palette, ROW_TABLE, RULE, SKELETON_CHART_WIDTH,
     SKELETON_GRADIENT_ANGLE, SKELETON_GRADIENT_END, SKELETON_GRADIENT_START, SKELETON_METER_HEIGHT,
@@ -277,9 +277,14 @@ impl RenderOnce for EmptyState {
     }
 }
 
+enum Reason {
+    Note(SharedString),
+    Raw(SharedString),
+}
+
 #[derive(IntoElement)]
 pub struct ErrorState {
-    reason: SharedString,
+    reason: Reason,
     retry: Button,
 }
 
@@ -287,14 +292,27 @@ impl ErrorState {
     pub fn new(reason: &str, retry: Button) -> Self {
         let words: Vec<&str> = reason.split_whitespace().collect();
         Self {
-            reason: words.join(" ").into(),
+            reason: Reason::Note(words.join(" ").into()),
+            retry,
+        }
+    }
+
+    pub fn raw(message: &str, retry: Button) -> Self {
+        Self {
+            reason: Reason::Raw(SharedString::from(message.to_owned())),
             retry,
         }
     }
 }
 
 impl RenderOnce for ErrorState {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let reason = match self.reason {
+            Reason::Note(note) => StatusText::new(Status::Err, note).into_any_element(),
+            Reason::Raw(message) => RawMessage::new(message)
+                .color(cx.palette().err)
+                .into_any_element(),
+        };
         div()
             .debug_selector(|| "error-state".to_owned())
             .flex()
@@ -303,7 +321,7 @@ impl RenderOnce for ErrorState {
             .gap(SPACE_5)
             .px(SPACE_8)
             .pt(SPACE_8)
-            .child(StatusText::new(Status::Err, self.reason))
+            .child(reason)
             .child(self.retry)
     }
 }

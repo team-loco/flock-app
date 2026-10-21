@@ -6,19 +6,20 @@ use flock_core::pods::PodEvent;
 use gpui::{
     AnyElement, App, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement,
     RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder, relative, svg,
+    prelude::FluentBuilder, svg,
 };
 
 use super::diagnosis::EVENTS;
+use super::message::RawMessage;
 use super::selectable::{SelectableText, SelectableWords};
 use super::status::StatusText;
 use super::text::SectionLabel;
 use super::tooltip::Tooltip;
 use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::theme::{
-    ActiveTheme, ERROR_BAR, EVENT_AGE, FONT_MONO, GLYPH_SLOT, LINE_PROSE, PANEL_HEADER, Palette,
-    RADIUS, RULE, SECTION_HEADER, SECTION_INDENT, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5,
-    SPACE_6, TEXT_BODY, TEXT_LABEL, TEXT_SMALL, TEXT_UI,
+    ActiveTheme, ERROR_BAR, EVENT_AGE, FONT_MONO, GLYPH_SLOT, PANEL_HEADER, Palette, RADIUS, RULE,
+    SECTION_HEADER, SECTION_INDENT, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6,
+    TEXT_BODY, TEXT_LABEL, TEXT_SMALL, TEXT_UI,
 };
 
 pub const EVENTS_EMPTY: &str = "No events in the last 1h";
@@ -331,10 +332,7 @@ impl RenderOnce for ErrorBlock {
             div()
                 .debug_selector(move || message_selector)
                 .min_w_0()
-                .text_size(TEXT_BODY)
-                .text_color(palette.fg)
-                .line_height(relative(LINE_PROSE))
-                .child(SelectableWords::new(message))
+                .child(RawMessage::new(message).color(palette.fg))
         });
         let object = (!object.is_empty()).then(|| {
             div()
@@ -524,14 +522,8 @@ impl RenderOnce for EventRow {
                 .text_color(palette.mute)
                 .child(format!("{COUNT_PREFIX}{}", event.count))
         });
-        let message = (!event.message.is_empty()).then(|| {
-            div()
-                .min_w_0()
-                .text_size(TEXT_BODY)
-                .text_color(palette.fg2)
-                .line_height(relative(LINE_PROSE))
-                .child(SelectableWords::new(event.message))
-        });
+        let message = (!event.message.is_empty())
+            .then(|| div().min_w_0().child(RawMessage::new(event.message)));
         let row = div()
             .flex()
             .gap(SPACE_4)

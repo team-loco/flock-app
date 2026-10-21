@@ -65,7 +65,7 @@ fn message(
         let retry = Button::new("metrics-retry", RETRY).on_click(cx.listener(|_, _, _, cx| {
             cx.emit(ScreenEvent::Navigate(Page::ClusterOverview));
         }));
-        chart.message(ErrorState::new(reason, retry))
+        chart.message(ErrorState::raw(reason, retry))
     } else {
         let cluster = data.cluster.clone();
         let settings = Button::new("metrics-settings", SET_METRICS_SOURCE)

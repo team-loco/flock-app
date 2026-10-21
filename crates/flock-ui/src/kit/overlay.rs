@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use flock_core::Status;
 use gpui::{
-    Anchor, AnchoredPositionMode, Animation, AnimationExt, App, AppContext, Context, ElementId,
-    Entity, FocusHandle, Focusable, FontWeight, Global, InteractiveElement, IntoElement,
+    Anchor, AnchoredPositionMode, Animation, AnimationExt, AnyElement, App, AppContext, Context,
+    ElementId, Entity, FocusHandle, Focusable, FontWeight, Global, InteractiveElement, IntoElement,
     KeyDownEvent, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
     Subscription, Window, WindowId, anchored, deferred, div, ease_out_quint, point,
     prelude::FluentBuilder, relative,
@@ -13,6 +13,7 @@ use gpui::{
 
 use super::button::{Button, IconButton};
 use super::input::{TextField, TextFieldState};
+use super::message::RawMessage;
 use super::popover;
 use super::status::StatusGlyph;
 use crate::theme::{
@@ -202,6 +203,18 @@ pub fn toast_titles(cx: &App) -> Vec<SharedString> {
         .iter()
         .map(|shown| shown.toast.title.clone())
         .collect()
+}
+
+fn toast_detail(toast: &Toast, palette: &Palette) -> Option<AnyElement> {
+    let detail = toast.detail.clone()?;
+    if toast.status == Status::Err {
+        return Some(RawMessage::new(detail).into_any_element());
+    }
+    let note = div()
+        .text_size(TEXT_SMALL)
+        .text_color(palette.fg2)
+        .child(detail);
+    Some(note.into_any_element())
 }
 
 pub fn toast_details(cx: &App) -> Vec<Option<SharedString>> {
@@ -478,13 +491,8 @@ impl Overlays {
                     .gap(SPACE_2)
                     .min_w_0()
                     .child(div().text_size(TEXT_BODY).child(toast.title.clone()))
-                    .when_some(toast.detail.clone(), |text, detail| {
-                        text.child(
-                            div()
-                                .text_size(TEXT_SMALL)
-                                .text_color(palette.fg2)
-                                .child(detail),
-                        )
+                    .when_some(toast_detail(toast, &palette), |text, detail| {
+                        text.child(detail)
                     })
                     .when(!actions.is_empty(), |text| {
                         text.child(div().flex().gap(SPACE_4).pt(SPACE_2).children(actions))
