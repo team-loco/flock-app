@@ -824,6 +824,32 @@ fn overview_sections_navigate_to_their_lists() -> anyhow::Result<()> {
 }
 
 #[test]
+fn overview_expiring_follows_the_horizon_and_opens_certificates() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    scroll_overview_to_the_end(&mut ui)?;
+    assert!(ui.bounds("overview-expiring-2").is_some());
+    assert!(ui.bounds("overview-expiring-3").is_none());
+    assert!(ui.bounds("overview-fact-support").is_none());
+    ui.click("overview-expiring-horizon-3")?;
+    assert!(ui.bounds("overview-expiring-3").is_some());
+    assert!(ui.bounds("overview-expiring-more").is_some());
+    assert!(ui.bounds("overview-fact-support").is_some());
+    ui.click("overview-expiring-horizon-0")?;
+    assert!(ui.bounds("overview-expiring-1").is_some());
+    assert!(ui.bounds("overview-expiring-2").is_none());
+    assert!(ui.bounds("overview-fact-kubelet-skew").is_some());
+    ui.click("overview-expiring-0")?;
+    assert_eq!(
+        opened(&ui),
+        Some((
+            "Certificate.cert-manager.io".to_owned(),
+            "wildcard-onloco".to_owned()
+        ))
+    );
+    Ok(())
+}
+
+#[test]
 fn overview_sections_fill_their_cells_between_the_rules() -> anyhow::Result<()> {
     use flock_ui::theme::RULE;
 

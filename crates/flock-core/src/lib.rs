@@ -12,6 +12,7 @@ pub mod diagnosis;
 pub mod edit;
 pub mod emptiness;
 pub mod events;
+pub mod expiry;
 pub mod filter;
 pub mod flock;
 pub mod flux;

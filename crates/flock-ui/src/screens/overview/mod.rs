@@ -13,6 +13,7 @@ mod workloads;
 use flock_core::cluster::{Namespace, NamespaceSort};
 use flock_core::cluster_changes::{ClusterChange, newest_first};
 use flock_core::control_plane::ControlPlane;
+use flock_core::expiry::{Expiring, Horizon, SupportEnd};
 use flock_core::node_pools::{KubeletSkew, NodePool};
 use flock_core::nodes::NodeSummary;
 use flock_core::overview::{
@@ -62,6 +63,8 @@ struct OverviewData {
     pools: Vec<NodePool>,
     skew: Option<KubeletSkew>,
     network: NetworkFacts,
+    expiring: Vec<Expiring>,
+    support: Option<SupportEnd>,
     utilization: Vec<Utilization>,
     workloads: Vec<WorkloadHealth>,
     tops: PodTops,
@@ -99,6 +102,8 @@ impl OverviewData {
                 .as_deref()
                 .and_then(|version| KubeletSkew::of(&detail.nodes, version)),
             network: detail.overview.network,
+            expiring: detail.overview.expiring.clone(),
+            support: detail.overview.support.clone(),
             utilization: detail.overview.utilization.clone(),
             workloads: detail.workload_health(),
             tops: detail.overview.tops.clone(),
@@ -114,6 +119,7 @@ pub struct OverviewScreen {
     paused: Option<OverviewData>,
     live: bool,
     range: TimeRange,
+    horizon: Horizon,
     sort: NamespaceSort,
     drill: bool,
     code: Option<String>,
@@ -131,6 +137,7 @@ impl OverviewScreen {
             paused: None,
             live: true,
             range: TimeRange::default(),
+            horizon: Horizon::default(),
             sort: NamespaceSort::default(),
             drill: false,
             code: None,
@@ -258,6 +265,11 @@ impl OverviewScreen {
         cx.notify();
     }
 
+    fn select_horizon(&mut self, horizon: Horizon, cx: &mut Context<Self>) {
+        self.horizon = horizon;
+        cx.notify();
+    }
+
     fn sort_by(&mut self, sort: NamespaceSort, cx: &mut Context<Self>) {
         self.sort = sort;
         cx.notify();
@@ -296,7 +308,7 @@ impl Render for OverviewScreen {
             .collect();
         let facts_band: Vec<AnyElement> =
             std::iter::once(control_plane::render(&data, self.drill, &palette, cx))
-                .chain(facts::render(&data, &palette, cx))
+                .chain(facts::render(&data, self.horizon, &palette, cx))
                 .collect();
         let sections = [
             Some(header::render(&data, &palette, cx)),

@@ -16,6 +16,7 @@ use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomRe
 
 use crate::cluster_changes::{self, Change, Observed};
 use crate::detail::{self, PodIndex, capacity};
+use crate::expiry::{self, Found};
 use crate::flux::{self, FluxHealth};
 use crate::lists::{self, watched_lists};
 use crate::manager::{ClusterHandle, ConnectionStatus};
@@ -54,6 +55,7 @@ pub struct Extras {
     pub prometheus: Option<Prometheus>,
     pub observed: Observed,
     pub control_plane: crate::control_plane::State,
+    pub expiring: Vec<Found>,
 }
 
 impl Extras {
@@ -286,6 +288,7 @@ fn cluster_detail(
         now,
     };
     let related = related::related(handle, &scope, selection.inspected);
+    let info = handle.info();
     ClusterDetail {
         overview: Overview {
             metrics_source,
@@ -296,6 +299,8 @@ fn cluster_detail(
             utilization,
             tops: pod_tops(id, pods, now),
             network,
+            expiring: expiry::expiring(&extras.expiring, now),
+            support: expiry::support(info.provider, info.version.as_deref(), now),
             unready_services,
             changes: object_changes(id, handle, extras, parts, now),
             control_plane: extras.control_plane.view(&TimeZone::system()),

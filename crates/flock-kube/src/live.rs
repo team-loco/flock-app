@@ -105,6 +105,7 @@ enum Fetched {
     PodUsage(ContextRef, Option<Vec<PodUsage>>),
     Prometheus(ContextRef, Option<Prometheus>),
     ControlPlane(ContextRef, Box<Sampled>),
+    Expiry(ContextRef, Vec<crate::expiry::Found>),
     Yaml(u64, ResourceRef, inspect::Inspected),
     Comparison(u64, Box<Comparison>),
 }
@@ -118,6 +119,7 @@ struct Connected {
     pod_usage_task: Option<TaskGuard>,
     prometheus_task: Option<TaskGuard>,
     control_plane_task: Option<TaskGuard>,
+    expiry_task: Option<TaskGuard>,
 }
 
 impl Connected {
@@ -135,6 +137,7 @@ impl Connected {
             pod_usage_task: None,
             prometheus_task: None,
             control_plane_task: None,
+            expiry_task: None,
         }
     }
 }
@@ -514,6 +517,7 @@ impl Live {
             Page::ClusterOverview => {
                 self.poll_prometheus();
                 self.poll_control_plane();
+                self.poll_expiry();
             }
             Page::Namespaces => self.poll_pod_usage(),
             Page::Pods => self.poll_pod_usage(),
@@ -557,6 +561,28 @@ impl Live {
             let usage = tokio::time::timeout(timeout, handle.pod_usage(None)).await;
             let usage = usage.ok().and_then(Result::ok);
             let _ = fetched.send(Fetched::PodUsage(key, usage)).await;
+        }));
+    }
+
+    fn poll_expiry(&mut self) {
+        let timeout = self.settings.check_timeout;
+        let fetched = self.fetched.clone();
+        let Some(key) = self.selected_key() else {
+            return;
+        };
+        let Some(cluster) = self.clusters.get_mut(&key) else {
+            return;
+        };
+        let Ok(client) = cluster.handle.client() else {
+            return;
+        };
+        let certificates = crate::expiry::certificate_resource(&cluster.handle);
+        let id = cluster.id.clone();
+        cluster.expiry_task = Some(TaskGuard::spawn(async move {
+            let found = crate::expiry::fetch(client, id, certificates);
+            if let Ok(found) = tokio::time::timeout(timeout, found).await {
+                let _ = fetched.send(Fetched::Expiry(key, found)).await;
+            }
         }));
     }
 
@@ -689,6 +715,11 @@ impl Live {
                         .extras
                         .control_plane
                         .record(*sampled, Timestamp::now(), interval);
+                }
+            }
+            Fetched::Expiry(key, found) => {
+                if let Some(cluster) = self.clusters.get_mut(&key) {
+                    cluster.extras.expiring = found;
                 }
             }
             Fetched::Comparison(window, comparison) => {
@@ -1665,7 +1696,10 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
             _ = usage_tick.tick() => live.poll_usage(),
             _ = history_tick.tick() => live.save_histories(),
             _ = control_plane_tick.tick() => live.on_overviews(Live::poll_control_plane),
-            _ = prometheus_tick.tick() => live.on_overviews(Live::poll_prometheus),
+            _ = prometheus_tick.tick() => {
+                live.on_overviews(Live::poll_prometheus);
+                live.on_overviews(Live::poll_expiry);
+            }
             command = commands.recv() => {
                 let Ok(command) = command else { live.save_histories(); return };
                 live.apply(&command);
@@ -2055,6 +2089,7 @@ mod tests {
                     pod_usage_task: None,
                     prometheus_task: None,
                     control_plane_task: None,
+                    expiry_task: None,
                 },
             );
         }
@@ -2212,6 +2247,7 @@ mod tests {
                 pod_usage_task: None,
                 prometheus_task: None,
                 control_plane_task: None,
+                expiry_task: None,
             },
         );
         let pages = [
@@ -2263,6 +2299,7 @@ mod tests {
                     pod_usage_task: None,
                     prometheus_task: None,
                     control_plane_task: None,
+                    expiry_task: None,
                 },
             );
         }
