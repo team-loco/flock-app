@@ -361,7 +361,7 @@ impl Gallery {
                             Toast::new(Status::Progress, "Reconciling apps-payments")
                                 .key("reconcile"),
                             cx,
-                        )
+                        );
                     }),
             )
             .action(self.more.clone())
