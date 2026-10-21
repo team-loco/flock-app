@@ -1043,6 +1043,19 @@ fn the_pod_shell_button_starts_a_shell_in_the_terminal_tab() -> anyhow::Result<(
 }
 
 #[test]
+fn the_workload_shell_action_and_shortcut_start_a_shell() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    ui.click("workload-actions")?;
+    ui.click("workload-actions-item-2")?;
+    assert!(ui.bounds("workload-close-shell").is_some());
+    ui.click("workload-close-shell")?;
+    ui.click("dock-tab-0")?;
+    ui.press("ctrl-`")?;
+    assert!(ui.bounds("workload-close-shell").is_some());
+    Ok(())
+}
+
+#[test]
 fn flux_pages_list_their_objects_and_open_one_on_double_click() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     for page in [Page::Kustomizations, Page::HelmReleases, Page::Sources] {
