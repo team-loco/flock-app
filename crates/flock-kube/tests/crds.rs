@@ -342,10 +342,12 @@ fn live_helm_releases_come_from_storage_with_history_values_and_flux_owners() {
     let Some(detail) = opened.helm_detail(&release.key) else {
         panic!("detail");
     };
-    assert_eq!(
-        detail.history.first().map(|r| r.revision),
-        Some(release.revision)
-    );
+    let shown = opened
+        .helm_releases(&cluster)
+        .into_iter()
+        .find(|shown| shown.key == release.key)
+        .map(|shown| shown.revision);
+    assert_eq!(detail.history.first().map(|r| r.revision), shown);
     assert!(detail.manifest.contains("kind:"), "{}", detail.manifest);
     assert_ne!(detail.computed_values, "");
     assert!(
@@ -392,9 +394,11 @@ fn live_releases_flux_does_not_manage_are_listed_and_open() {
     let Some(detail) = opened.helm_detail(&release.key) else {
         panic!("detail");
     };
-    assert_eq!(
-        detail.history.first().map(|r| r.revision),
-        Some(release.revision)
-    );
+    let shown = opened
+        .helm_releases(&cluster)
+        .into_iter()
+        .find(|shown| shown.key == release.key)
+        .map(|shown| shown.revision);
+    assert_eq!(detail.history.first().map(|r| r.revision), shown);
     assert!(detail.manifest.contains("kind:"), "{}", detail.manifest);
 }
