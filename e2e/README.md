@@ -125,7 +125,7 @@ from `mise.toml` the way Loco's own `e2e/run.sh` does on kind:
 
 | Scenario | State | Flock screens |
 | --- | --- | --- |
-| 30 `ws-<id>` workspaces, 60 Applications (`web` + `api`) | 46 Ready with 1–2 replicas (Loco's 100m CPU minimum bounds the node) and staged env Secrets | Applications, Workloads, Pods |
+| 30 `ws-<id>` workspaces, 60 Applications (`web` + `api`) | 46 Ready with 1–2 replicas (Loco's validator forces a 100m CPU request per replica; `e2e/flock-loco/pod-cpu-policy.yaml` rewrites the pod request to 1m so the scenario fits a 4-vCPU CI node) and staged env Secrets | Applications, Workloads, Pods |
 | `flock.dev/expect=Failed` Applications | 6 CrashLoopBackOff (missing health path), 3 ImagePullBackOff, 2 root image (CreateContainerConfigError) | Applications, Problems, Pods |
 | `flock.dev/expect=Deploying` Applications | waiting for an env Secret revision that is never staged | Applications |
 | `flock.dev/expect=Rollout` (`planet-express` web) | 4 replicas with a 180 s startup grace, re-rolled on every `up` and `e2e:test`, so a rollout is in progress for several minutes | Applications, Deployment |
