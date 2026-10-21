@@ -249,23 +249,21 @@ pub struct WorkloadHealth {
 impl WorkloadHealth {
     pub fn of(kind: ResourceKind, rows: &[Resource]) -> Self {
         let count = |wanted: Status| rows.iter().filter(|r| r.status == wanted).count();
-        let total = rows.len();
+        Self::counted(kind, rows.len(), count)
+    }
+
+    pub fn counted(kind: ResourceKind, total: usize, count: impl Fn(Status) -> usize) -> Self {
         let ready = count(Status::Ok);
+        let not_ready = total.saturating_sub(ready);
         let (ok, bad, ok_word, bad_word, bad_status) = match kind {
-            ResourceKind::Deployment => (
-                ready,
-                total - ready,
-                "available",
-                "unavailable",
-                Status::Err,
-            ),
-            ResourceKind::StatefulSet => (ready, total - ready, "ready", "not ready", Status::Err),
-            ResourceKind::DaemonSet => (ready, total - ready, "ready", "not ready", Status::Err),
+            ResourceKind::Deployment => (ready, not_ready, "available", "unavailable", Status::Err),
+            ResourceKind::StatefulSet => (ready, not_ready, "ready", "not ready", Status::Err),
+            ResourceKind::DaemonSet => (ready, not_ready, "ready", "not ready", Status::Err),
             ResourceKind::Job => (ready, count(Status::Err), "complete", "failed", Status::Err),
             ResourceKind::CronJob => {
                 let suspended = count(Status::Suspended);
                 (
-                    total - suspended,
+                    total.saturating_sub(suspended),
                     suspended,
                     "scheduled",
                     "suspended",

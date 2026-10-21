@@ -555,12 +555,6 @@ mod tests {
     }
 
     #[test]
-    fn status_bar_flux_total_matches_design() {
-        let flux = flock_core::gitops::flux_ready(&snapshot().clusters);
-        assert_eq!((flux.ready, flux.total), (72, 75));
-    }
-
-    #[test]
     fn unreachable_clusters_have_no_metrics() {
         let snapshot = snapshot();
         let without: Vec<&str> = snapshot

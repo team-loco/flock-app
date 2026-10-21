@@ -1008,6 +1008,16 @@ fn scroll_overview_to_the_end(ui: &mut Ui) -> anyhow::Result<()> {
     ui.scroll("overview-scroll", delta)
 }
 
+const OVERVIEW_NAMESPACES_TOP: f32 = 200.;
+
+fn show_overview_namespaces(ui: &mut Ui) -> anyhow::Result<()> {
+    let head = ui
+        .bounds("overview-ns-sort-0")
+        .context("the namespaces section is laid out")?;
+    let delta = gpui::point(gpui::px(0.), gpui::px(OVERVIEW_NAMESPACES_TOP) - head.top());
+    ui.scroll("overview-scroll", delta)
+}
+
 fn opened(ui: &Ui) -> Option<(String, String)> {
     ui.state()
         .location()
@@ -1051,10 +1061,12 @@ fn overview_problem_counts_open_their_list_on_the_rows_that_need_attention() -> 
         Some(ALL_NAMESPACES)
     );
     let mut ui = Ui::open(Screen::Cluster)?;
+    show_overview_namespaces(&mut ui)?;
     ui.click("overview-ns-sort-2")?;
     ui.click("overview-ns-0")?;
     let namespace = opened(&ui);
     let mut ui = Ui::open(Screen::Cluster)?;
+    show_overview_namespaces(&mut ui)?;
     ui.click("overview-ns-sort-2")?;
     ui.click("overview-ns-0-failing")?;
     assert!(namespace.is_some());
@@ -1075,15 +1087,35 @@ fn overview_problem_counts_open_their_list_on_the_rows_that_need_attention() -> 
 }
 
 #[test]
+fn the_overview_opens_on_its_cards_then_the_cpu_and_memory_charts() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let cards = ui
+        .bounds("overview-capacity-Memory")
+        .context("the memory card renders")?;
+    let charts = ui
+        .bounds("utilization-chart")
+        .context("the charts render")?;
+    let namespaces = ui
+        .bounds("overview-ns-0")
+        .context("the namespaces render")?;
+    assert!(cards.bottom() <= charts.top());
+    assert!(charts.bottom() <= namespaces.top());
+    Ok(())
+}
+
+#[test]
 fn overview_namespace_headers_resort_the_top_namespaces() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
+    show_overview_namespaces(&mut ui)?;
     ui.click("overview-ns-0")?;
     assert_eq!(opened(&ui), Some(("Namespace".into(), "search".into())));
     let mut ui = Ui::open(Screen::Cluster)?;
+    show_overview_namespaces(&mut ui)?;
     ui.click("overview-ns-sort-0")?;
     ui.click("overview-ns-0")?;
     assert_eq!(opened(&ui), Some(("Namespace".into(), "analytics".into())));
     let mut ui = Ui::open(Screen::Cluster)?;
+    show_overview_namespaces(&mut ui)?;
     ui.click("overview-ns-sort-1")?;
     ui.click("overview-ns-0")?;
     assert_eq!(
@@ -1091,6 +1123,7 @@ fn overview_namespace_headers_resort_the_top_namespaces() -> anyhow::Result<()> 
         Some(("Namespace".into(), "kube-system".into()))
     );
     let mut ui = Ui::open(Screen::Cluster)?;
+    show_overview_namespaces(&mut ui)?;
     ui.click("overview-ns-all")?;
     assert_eq!(ui.state().location().page, Page::Namespaces);
     Ok(())
@@ -2809,7 +2842,6 @@ fn empty_utilization_opens_the_selected_clusters_metrics_settings() -> anyhow::R
     assert!(ui.bounds("chart-y-axis").is_none());
     assert!(ui.bounds("chart-x-axis").is_none());
     let origin = ui.state().location().cluster.clone();
-    scroll_overview_to_the_end(&mut ui)?;
     ui.click("metrics-settings")?;
     assert_eq!(ui.state().location().page, Page::ClusterSettings);
     assert!(origin.is_some());
@@ -3401,6 +3433,37 @@ fn a_namespace_page_opens_what_needs_attention_its_contents_and_its_events() -> 
     );
     ui.click("pane-0-back")?;
     assert_eq!(ui.state().location(), &namespace);
+    Ok(())
+}
+
+#[test]
+fn namespace_tile_problem_counts_open_their_list_on_the_rows_that_need_attention()
+-> anyhow::Result<()> {
+    let payments = Some(flock_core::settings::NamespaceSelection::Named(
+        "payments".into(),
+    ));
+    let drills = [
+        ("namespace-tile-pods-1-failing", Page::Pods, "Pod"),
+        (
+            "namespace-tile-deployments-1-unavailable",
+            Page::Deployments,
+            "Deployment",
+        ),
+        (
+            "namespace-tile-services-1-endpoints-not-ready",
+            Page::Services,
+            "Service",
+        ),
+    ];
+    for (selector, page, list) in drills {
+        let mut ui = Ui::open(Screen::Namespace)?;
+        ui.click(selector)?;
+        assert_eq!(needs_attention_in(&ui, page, list), payments, "{selector}");
+    }
+    let mut ui = Ui::open(Screen::Namespace)?;
+    ui.click("namespace-tile-statefulsets")?;
+    assert_eq!(ui.state().location().page, Page::StatefulSets);
+    assert_eq!(picked(&ui, "prod-us-east", "StatefulSet"), payments);
     Ok(())
 }
 
@@ -4055,6 +4118,22 @@ fn cluster_problems_group_by_cause_and_rows_open_the_object() -> anyhow::Result<
         .context("the row opens its object")?;
     assert_eq!(opened.cluster, ClusterId::new("prod-us-east"));
     assert_eq!(state.location().page, page_for_kind(&opened.kind));
+    Ok(())
+}
+
+#[test]
+fn the_status_bar_shows_only_the_problem_counts_and_the_kubernetes_version() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let problems = ui
+        .bounds("status-problems")
+        .context("the problem counts render")?;
+    let version = ui
+        .bounds("status-version")
+        .context("a cluster page shows its Kubernetes version")?;
+    assert_eq!(version.left() - problems.right(), flock_ui::theme::SPACE_8);
+    let mut ui = Ui::open(Screen::Flock)?;
+    assert!(ui.bounds("status-problems").is_some());
+    assert!(ui.bounds("status-version").is_none());
     Ok(())
 }
 
