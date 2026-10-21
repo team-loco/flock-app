@@ -1269,7 +1269,7 @@ fn the_workload_shell_action_and_shortcut_start_a_shell() -> anyhow::Result<()> 
 }
 
 #[test]
-fn flux_pages_list_their_objects_and_open_one_on_double_click() -> anyhow::Result<()> {
+fn flux_pages_list_their_objects_and_open_one_on_click() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     for page in [Page::Kustomizations, Page::HelmReleases, Page::Sources] {
         let selector: &'static str = format!("nav-{}", page.label().to_lowercase()).leak();
@@ -1280,7 +1280,7 @@ fn flux_pages_list_their_objects_and_open_one_on_double_click() -> anyhow::Resul
             "{page:?} shows no Flux objects"
         );
     }
-    ui.double_click("flux-list-row-0")?;
+    ui.click("flux-list-row-0")?;
     let opened = ui.state().location().flux_object.clone();
     assert_eq!(opened.map(|key| key.kind.page()), Some(Page::Sources));
     Ok(())
@@ -3564,15 +3564,54 @@ fn workload_and_flux_pages_show_error_blocks_in_the_panel_not_under_the_name() -
 }
 
 #[test]
-fn opening_a_namespace_row_shows_its_page() -> anyhow::Result<()> {
+fn clicking_a_namespace_row_shows_its_page() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Namespaces)?;
-    ui.double_click("namespaces-row-0")?;
+    ui.click("namespaces-row-0")?;
     let opened = ui
         .state()
         .location()
         .detail()
         .map(|target| target.kind.clone());
     assert_eq!(opened.as_deref(), Some("Namespace"));
+    Ok(())
+}
+
+#[test]
+fn arrow_keys_move_through_linked_lists_and_enter_opens_the_row() -> anyhow::Result<()> {
+    for (screen, page) in [
+        (Screen::Namespaces, Page::Namespaces),
+        (Screen::Kustomizations, Page::Kustomizations),
+        (Screen::HelmReleases, Page::Releases),
+    ] {
+        let mut ui = Ui::open(screen)?;
+        ui.press("cmd-e")?;
+        ui.press("down")?;
+        ui.press("down")?;
+        let location = ui.state().location().clone();
+        assert_eq!(
+            location.page, page,
+            "{screen:?} left the list on an arrow key"
+        );
+        assert!(location.detail().is_none() && location.flux_object.is_none());
+        assert!(location.helm.is_none());
+        ui.press("enter")?;
+        let opened = ui.state().location().clone();
+        let detail = opened.detail().is_some();
+        let flux = opened.flux_object.is_some();
+        let helm = opened.helm.is_some();
+        assert!(detail || flux || helm, "{screen:?} did not open on Enter");
+    }
+    Ok(())
+}
+
+#[test]
+fn clicking_a_flux_inventory_row_opens_the_resource() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Kustomization)?;
+    ui.click("flux-inventory-row-0")?;
+    let state = ui.state();
+    let resource = state.location().detail().is_some();
+    let workload = state.workload().is_some();
+    assert!(resource || workload, "the inventory row did not open");
     Ok(())
 }
 
@@ -4022,7 +4061,7 @@ fn helm_releases_open_their_history_values_and_flux_owner() -> anyhow::Result<()
     ui.type_text("airflow")?;
     assert!(ui.bounds("helm-releases-row-1").is_none());
     ui.press("escape")?;
-    ui.double_click("helm-releases-row-0")?;
+    ui.click("helm-releases-row-0")?;
     let location = ui.state().location().clone();
     let opened = location.helm.map(|key| key.name);
     assert_eq!(opened.as_deref(), Some("kube-prometheus-stack"));
