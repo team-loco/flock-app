@@ -1,6 +1,6 @@
 use flock_core::crd::Definition;
 use flock_core::emptiness::Noun;
-use flock_core::{ClusterId, ClusterSummary, Counts};
+use flock_core::{ClusterId, ClusterSummary};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, IntoElement,
     ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
@@ -77,8 +77,8 @@ impl DefinitionsScreen {
         gpui::Focusable::focus_handle(&self.table, cx)
     }
 
-    pub fn header_note(&self) -> (Counts, String) {
-        (Counts::default(), self.rows.len().to_string())
+    pub fn header_note(&self) -> String {
+        self.rows.len().to_string()
     }
 
     pub fn set(

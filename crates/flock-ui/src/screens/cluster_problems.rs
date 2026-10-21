@@ -1,8 +1,7 @@
-use flock_core::home::problems_badge;
 use flock_core::overview::plural;
 use flock_core::problem_groups::{self, Cause, Marker, Occurrence, Trait, WINDOW};
 use flock_core::time::age;
-use flock_core::{ClusterId, ClusterSummary, Command, Counts, Snapshot, Status};
+use flock_core::{ClusterId, ClusterSummary, Command, Snapshot, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div,
@@ -36,7 +35,6 @@ const CAUSES_ID: &str = "problem-causes";
 
 pub struct ClusterProblemsScreen {
     cluster: Option<ClusterId>,
-    badge: Counts,
     causes: Vec<Cause>,
     markers: Vec<Vec<Marker>>,
     selected: Option<(String, String)>,
@@ -71,7 +69,6 @@ impl ClusterProblemsScreen {
         .detach();
         Self {
             cluster: None,
-            badge: Counts::default(),
             causes: Vec::new(),
             markers: Vec::new(),
             selected: None,
@@ -88,8 +85,8 @@ impl ClusterProblemsScreen {
         gpui::Focusable::focus_handle(&self.table, cx)
     }
 
-    pub fn header_note(&self) -> (Counts, String) {
-        (self.badge, plural(self.causes.len(), "cause", "causes"))
+    pub fn header_note(&self) -> String {
+        plural(self.causes.len(), "cause", "causes")
     }
 
     pub fn set(&mut self, cluster: &ClusterSummary, snapshot: &Snapshot, cx: &mut Context<Self>) {
@@ -104,7 +101,6 @@ impl ClusterProblemsScreen {
             .filter(|p| p.target.cluster == cluster.id)
             .cloned()
             .collect();
-        self.badge = problems_badge(&problems);
         self.causes = problem_groups::causes(&cluster.id, &snapshot.pods, &problems);
         let kept = self
             .selected

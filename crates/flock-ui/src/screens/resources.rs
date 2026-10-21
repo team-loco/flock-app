@@ -344,7 +344,7 @@ impl ResourcesScreen {
         &self.filter
     }
 
-    pub fn header_note(&self) -> (Counts, String) {
+    pub fn header_note(&self) -> String {
         note(&self.rows, self.namespace.as_deref())
     }
 
@@ -703,19 +703,18 @@ fn cell_column(ix: usize, title: &'static str, width: Cell) -> Column<Resource> 
     }
 }
 
-fn note(rows: &[Resource], namespace: Option<&str>) -> (Counts, String) {
+fn note(rows: &[Resource], namespace: Option<&str>) -> String {
     let shown: Vec<&Resource> = rows
         .iter()
         .filter(|row| namespace.is_none_or(|namespace| row.namespace == namespace))
         .collect();
     let counts = Counts::of(shown.iter().map(|row| row.status));
     let flagged = counts.flagged();
-    let text = if flagged > 0 {
+    if flagged > 0 {
         format!("{flagged} of {} need attention", shown.len())
     } else {
         shown.len().to_string()
-    };
-    (counts, text)
+    }
 }
 
 #[cfg(test)]
@@ -744,11 +743,9 @@ mod tests {
             row("web", Status::Ok),
             row("payments", Status::Err),
         ];
-        let (counts, text) = note(&rows, Some("web"));
-        assert_eq!(counts, Counts::total(2).with_err(1));
-        assert_eq!(text, "1 of 2 need attention");
-        assert_eq!(note(&rows, None).1, "2 of 3 need attention");
-        assert_eq!(note(&rows, Some("search")).1, "0");
+        assert_eq!(note(&rows, Some("web")), "1 of 2 need attention");
+        assert_eq!(note(&rows, None), "2 of 3 need attention");
+        assert_eq!(note(&rows, Some("search")), "0");
     }
 
     #[test]

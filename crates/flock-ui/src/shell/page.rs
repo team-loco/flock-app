@@ -2,7 +2,7 @@ use flock_core::history::Location;
 use flock_core::overview::plural;
 use flock_core::tabs::TabId;
 use flock_core::watch::WatchState;
-use flock_core::{Command, Counts, Page, ResourceRef};
+use flock_core::{Command, Page, ResourceRef};
 use gpui::{
     AnyElement, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
     MouseButton, ParentElement, StatefulInteractiveElement, Styled, Subscription, Window, div,
@@ -27,7 +27,6 @@ use crate::theme::{
 };
 
 const LIVE: &str = "live";
-const SEPARATOR: &str = "· ";
 const UNAVAILABLE_REASON: &str =
     "It was removed from Flock or its kubeconfig context is gone, so this tab has nothing to show.";
 const SHOW_ALL_CLUSTERS: &str = "Show all clusters";
@@ -462,11 +461,8 @@ impl Shell {
         let cluster = self.cluster_of(location);
         let noted = note.is_some();
         let status: Option<Vec<(String, gpui::Hsla)>> = match (cluster, note) {
-            (Some(_), Some((counts, text))) => Some(note_parts(&counts, text, palette)),
-            (Some(cluster), None) => {
-                let text = format!("{} {}", cluster.status.glyph(), cluster.state);
-                Some(vec![(text, palette.status(cluster.status))])
-            }
+            (Some(_), Some(text)) => Some(vec![(text, palette.mute)]),
+            (Some(_), None) => None,
             (None, _) if location.page == Page::GitOps => None,
             (None, _) => Some(vec![(LIVE.to_owned(), palette.mute)]),
         };
@@ -594,19 +590,4 @@ fn fill(screen: impl IntoElement) -> AnyElement {
         .h_full()
         .child(screen)
         .into_any_element()
-}
-
-fn note_parts(counts: &Counts, text: String, palette: &Palette) -> Vec<(String, gpui::Hsla)> {
-    let mut parts: Vec<(String, gpui::Hsla)> = counts
-        .badges()
-        .into_iter()
-        .map(|(status, n)| (format!("{} {n}", status.glyph()), palette.status(status)))
-        .collect();
-    let text = if parts.is_empty() {
-        text
-    } else {
-        format!("{SEPARATOR}{text}")
-    };
-    parts.push((text, palette.mute));
-    parts
 }

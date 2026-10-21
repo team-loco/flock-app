@@ -33,7 +33,7 @@ pub mod workload;
 
 use flock_core::emptiness::{Emptiness, Noun};
 use flock_core::resources::NamespaceCount;
-use flock_core::{ClusterSummary, Command, Counts, Page, ResourceKind, ResourceRef, Snapshot};
+use flock_core::{ClusterSummary, Command, Page, ResourceKind, ResourceRef, Snapshot};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, FocusHandle, IntoElement, SharedString,
     Subscription, Window,
@@ -444,7 +444,7 @@ impl ClusterPages {
             .then(|| OverviewScreen::header_controls(&self.overview, cx).into_any_element())
     }
 
-    pub fn header_note(&self, page: Page, has_detail: bool, cx: &App) -> Option<(Counts, String)> {
+    pub fn header_note(&self, page: Page, has_detail: bool, cx: &App) -> Option<String> {
         if page == Page::FluxGraph {
             return Some(self.graph.read(cx).header_note());
         }
