@@ -10,6 +10,7 @@ pub struct ClusterItem {
     pub status: Status,
     pub meta: String,
     pub meta_status: Status,
+    pub available: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,9 +29,9 @@ impl MenuBar {
             .map(cluster_counts)
             .fold(Counts::default(), |sum, c| sum + c);
         let badge = if counts.err > 0 {
-            format!("{}{}", Status::Err.glyph(), counts.err)
+            counts.err.to_string()
         } else if counts.warn > 0 {
-            format!("{}{}", Status::Warn.glyph(), counts.warn)
+            counts.warn.to_string()
         } else {
             String::new()
         };
@@ -62,23 +63,17 @@ fn cluster_counts(cluster: &ClusterSummary) -> Counts {
 
 fn item(cluster: &ClusterSummary) -> ClusterItem {
     let badges = cluster.problems.badges();
-    let (meta, meta_status) = if !badges.is_empty() {
-        let parts: Vec<String> = badges
-            .iter()
-            .map(|(status, n)| format!("{}{n}", status.glyph()))
-            .collect();
-        (parts.join(" "), cluster.problems.status())
-    } else if cluster.status == Status::Ok {
-        (String::new(), Status::Ok)
-    } else {
-        (cluster.state.to_lowercase(), cluster.status)
-    };
+    let parts: Vec<String> = badges
+        .iter()
+        .map(|(status, n)| format!("{}{n}", status.glyph()))
+        .collect();
     ClusterItem {
         id: cluster.id.clone(),
         name: cluster.name.clone(),
         status: cluster.status,
-        meta,
-        meta_status,
+        meta: parts.join(" "),
+        meta_status: cluster.problems.status(),
+        available: cluster.is_connected(),
     }
 }
 
@@ -122,26 +117,28 @@ mod tests {
         }
     }
 
-    fn metas(menu: &MenuBar) -> Vec<(&str, &str, Status)> {
+    fn metas(menu: &MenuBar) -> Vec<(&str, &str, bool)> {
         menu.clusters
             .iter()
-            .map(|c| (c.name.as_str(), c.meta.as_str(), c.meta_status))
+            .map(|c| (c.name.as_str(), c.meta.as_str(), c.available))
             .collect()
     }
 
     #[test]
-    fn clusters_list_in_order_with_problem_counts_or_their_state() {
+    fn clusters_list_in_order_with_problem_counts_and_no_state_text() {
         let menu = MenuBar::new(&design_fleet(), false);
         assert_eq!(
             metas(&menu),
             vec![
-                ("prod-us-east", "✕2 ▲3", Status::Err),
-                ("prod-eu-west", "", Status::Ok),
-                ("staging", "▲2", Status::Warn),
-                ("qa-gke", "auth expired", Status::Err),
-                ("edge-k3s", "offline", Status::Offline),
+                ("prod-us-east", "✕2 ▲3", true),
+                ("prod-eu-west", "", true),
+                ("staging", "▲2", true),
+                ("qa-gke", "", true),
+                ("edge-k3s", "", false),
             ]
         );
+        assert_eq!(menu.clusters[0].meta_status, Status::Err);
+        assert_eq!(menu.clusters[2].meta_status, Status::Warn);
         assert_eq!(menu.clusters[4].status, Status::Offline);
         assert_eq!(menu.clusters[0].id, ClusterId::new("prod-us-east"));
     }
@@ -149,13 +146,29 @@ mod tests {
     #[test]
     fn badge_counts_errors_first_and_a_failing_cluster_counts_once() {
         let mut snapshot = design_fleet();
-        assert_eq!(MenuBar::new(&snapshot, false).badge, "✕3");
+        assert_eq!(MenuBar::new(&snapshot, false).badge, "3");
         snapshot.clusters.retain(|c| c.status != Status::Err);
-        assert_eq!(MenuBar::new(&snapshot, false).badge, "▲2");
+        assert_eq!(MenuBar::new(&snapshot, false).badge, "2");
         snapshot.clusters.retain(|c| c.status != Status::Warn);
         let calm = MenuBar::new(&snapshot, false);
         assert_eq!(calm.badge, "");
         assert!(!calm.dimmed);
+    }
+
+    #[test]
+    fn a_cluster_missing_from_kubeconfig_is_unavailable_without_state_text() {
+        let missing = cluster(
+            "kind-loco-cluster-local",
+            Status::Offline,
+            "Not in kubeconfig",
+            Counts::default(),
+        );
+        let snapshot = Snapshot {
+            clusters: vec![missing],
+            ..Snapshot::default()
+        };
+        let menu = MenuBar::new(&snapshot, false);
+        assert_eq!(metas(&menu), vec![("kind-loco-cluster-local", "", false)]);
     }
 
     #[test]

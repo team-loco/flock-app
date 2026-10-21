@@ -28,7 +28,7 @@ const ICON: &[u8] = include_bytes!("../../resources/MenuBarIcon.png");
 const ICON_SIZE: NSSize = NSSize::new(18.0, 16.0);
 const GLYPH_FONT_SIZE: f64 = 10.0;
 const META_FONT_SIZE: f64 = 11.0;
-const MENU_FONT_SIZE: f64 = 0.0;
+const DEFAULT_FONT_SIZE: f64 = 0.0;
 const META_TAB: f64 = 240.0;
 const GLYPH_GAP: &str = "  ";
 const TAB: &str = "\t";
@@ -73,6 +73,11 @@ impl Item {
             }
             button.setImage(image.as_deref());
             button.setImagePosition(NSCellImagePosition::ImageLeft);
+            let size = NSFont::menuBarFontOfSize(DEFAULT_FONT_SIZE).pointSize();
+            let digits = NSFont::monospacedDigitSystemFontOfSize_weight(size, unsafe {
+                NSFontWeightRegular
+            });
+            button.setFont(Some(&digits));
             button.setToolTip(Some(&NSString::from_str(TOOLTIP)));
         }
         Self { item, mtm }
@@ -141,23 +146,24 @@ fn cluster_title(cluster: &flock_core::menubar::ClusterItem) -> Retained<NSAttri
         NSFont::monospacedSystemFontOfSize_weight(GLYPH_FONT_SIZE, unsafe { NSFontWeightRegular });
     let meta_font =
         NSFont::monospacedSystemFontOfSize_weight(META_FONT_SIZE, unsafe { NSFontWeightRegular });
-    let menu_font = NSFont::menuFontOfSize(MENU_FONT_SIZE);
-    let glyph = run(
-        cluster.status.glyph(),
-        &mono,
-        Some(&status_colour(cluster.status)),
-    );
+    let menu_font = NSFont::menuFontOfSize(DEFAULT_FONT_SIZE);
+    let disabled = (!cluster.available).then(NSColor::disabledControlTextColor);
+    let glyph_colour = disabled
+        .clone()
+        .unwrap_or_else(|| status_colour(cluster.status));
+    let glyph = run(cluster.status.glyph(), &mono, Some(&glyph_colour));
     title.appendAttributedString(&glyph);
     let gap = run(GLYPH_GAP, &menu_font, None);
     title.appendAttributedString(&gap);
-    let name_colour = (cluster.status == Status::Offline).then(NSColor::secondaryLabelColor);
-    let name = run(&cluster.name, &menu_font, name_colour.as_deref());
+    let name = run(&cluster.name, &menu_font, disabled.as_deref());
     title.appendAttributedString(&name);
     if !cluster.meta.is_empty() {
         let tab = run(TAB, &menu_font, None);
         title.appendAttributedString(&tab);
-        let colour = status_colour(cluster.meta_status);
-        let meta = run(&cluster.meta, &meta_font, Some(&colour));
+        let meta_colour = disabled
+            .clone()
+            .unwrap_or_else(|| status_colour(cluster.meta_status));
+        let meta = run(&cluster.meta, &meta_font, Some(&meta_colour));
         title.appendAttributedString(&meta);
     }
     let style = NSMutableParagraphStyle::new();

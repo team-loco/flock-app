@@ -127,3 +127,4 @@ Spec column points at `design/`.
 | QA23 | v2 dogfood QA: live Problems page groups pods by cause, overview namespaces get pod usage, Expiring & drift header wraps beside the drill-in, `Ui::save_png` replays restored tabs | claude | qa-v2 | done |
 | TBL1 | table column dividers visible in light and dark; namespace CPU/memory in m/Mi below one core/GiB (#321); Namespace page event messages clamp to two lines with the full text on hover (#322) | claude | table-polish | done |
 | REL2 | Related shows HPAs, HTTPRoutes (when the Gateway API is installed) and PersistentVolumes from watches started while an object is open; PV and HPA detail pages (#256) | claude | related-watches | done |
+| MENUBAR3 | Menu bar status item shows a plain monospaced-digit count; unavailable cluster rows render grayed with no state text (#355) | claude | menubar-status-polish | done |
