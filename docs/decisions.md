@@ -57,8 +57,8 @@ Settled; change only with a new entry that says why.
     Disconnect, Remove from Flock). Selecting a cluster only moves navigation; every added
     cluster stays connected. The LOCO section shows only on clusters where `infra.loco.io` is
     detected. Inspectors (nodes, pods, resources, workload) slide and fade in and out
-    (`theme::INSPECTOR_IN`, `INSPECTOR_OUT`, `INSPECTOR_SWAP`, ease-out) and replay the fade when
-    the selection changes.
+    (`theme::INSPECTOR_IN`, `INSPECTOR_OUT`, `INSPECTOR_SWAP`, ease-out) only when they open or
+    close; selecting another row while one is open swaps the content in place.
 19. **App settings** (#112): `flock_core::AppSettings` is the one model (theme, refresh presets,
     notifications), saved as `settings.json` in the Flock data dir with the same set-aside handling
     as `clusters.json`. The app owns the file; the UI holds the live value in a global and applies

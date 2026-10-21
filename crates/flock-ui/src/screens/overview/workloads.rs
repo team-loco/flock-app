@@ -1,7 +1,7 @@
 use flock_core::Status;
 use gpui::{AnyElement, Context, IntoElement, ParentElement, SharedString, Styled, div};
 
-use super::{OverviewData, OverviewScreen, mono};
+use super::{OverviewData, OverviewScreen, mono, problem_link};
 use crate::kit::{ClickableSection, SectionLabel, StackedBar};
 use crate::theme::{
     OVERVIEW_WORKLOAD_BAD, OVERVIEW_WORKLOAD_KIND, OVERVIEW_WORKLOAD_OK, OVERVIEW_WORKLOAD_ROW,
@@ -29,7 +29,16 @@ pub(super) fn render(
                 (w.bad_status, weight(w.bad)),
             ])
             .thin();
-            let bad = w.bad_label.clone().unwrap_or_default();
+            let bad = mono(w.bad_label.clone().unwrap_or_default(), bad_color)
+                .flex_none()
+                .w(OVERVIEW_WORKLOAD_BAD)
+                .text_size(TEXT_MONO);
+            let bad = if w.bad > 0 {
+                let activate = OverviewScreen::attention(page, None, cx);
+                problem_link(format!("{id}-bad"), bad, activate).into_any_element()
+            } else {
+                bad.into_any_element()
+            };
             let row = div()
                 .flex()
                 .items_center()
@@ -48,12 +57,7 @@ pub(super) fn render(
                         .w(OVERVIEW_WORKLOAD_OK)
                         .text_size(TEXT_MONO),
                 )
-                .child(
-                    mono(bad, bad_color)
-                        .flex_none()
-                        .w(OVERVIEW_WORKLOAD_BAD)
-                        .text_size(TEXT_MONO),
-                )
+                .child(bad)
                 .child(div().flex_1().min_w_0().child(bar));
             let section = ClickableSection::new(SharedString::from(id))
                 .padding(SPACE_8, gpui::Pixels::ZERO)

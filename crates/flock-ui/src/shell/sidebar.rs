@@ -22,15 +22,12 @@ const COLLAPSE_TOOLTIP: &str = "Collapse sidebar  ⌘B";
 const EXPAND_TOOLTIP: &str = "Expand sidebar  ⌘B";
 
 impl Shell {
-    pub(super) fn sidebar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let palette = *cx.palette();
         let open = self.state.sidebar_open;
-        let cursor = self
-            .keys
-            .sidebar_focus
-            .is_focused(window)
-            .then(|| self.keys.nav_cursor.unwrap_or(self.state.location().page));
-        let content = open.then(|| self.sidebar_open(cursor, &palette, cx));
+        self.forget_stale_nav_cursor();
+        let highlight = self.sidebar_highlight(window);
+        let content = open.then(|| self.sidebar_open(highlight, &palette, cx));
         let (from, to) = if open {
             (Pixels::ZERO, SIDEBAR)
         } else {
@@ -131,7 +128,7 @@ impl Shell {
 
     fn sidebar_open(
         &self,
-        cursor: Option<Page>,
+        highlight: Page,
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -145,14 +142,7 @@ impl Shell {
             if let Some(label) = section.label {
                 items.push(section_head(label, palette).into_any_element());
             }
-            items.extend(section_rows(
-                section,
-                self.state.location().page,
-                cursor,
-                &counts,
-                palette,
-                cx,
-            ));
+            items.extend(section_rows(section, highlight, &counts, palette, cx));
         }
         let collapse = icon_button("collapse-sidebar", CHEVRON_LEFT, COLLAPSE_TOOLTIP, palette)
             .on_click(cx.listener(|this, _, _, cx| this.dispatch(Command::ToggleSidebar, cx)));
@@ -216,8 +206,7 @@ fn top_strip(palette: &Palette) -> gpui::Div {
 
 fn section_rows(
     section: &NavSection,
-    current: Page,
-    cursor: Option<Page>,
+    highlight: Page,
     counts: &BTreeMap<Page, Counts>,
     palette: &Palette,
     cx: &mut Context<Shell>,
@@ -226,7 +215,7 @@ fn section_rows(
         .pages
         .iter()
         .map(|&page| {
-            let selected = page == cursor.unwrap_or(current);
+            let selected = page == highlight;
             let selector = format!("nav-{}", page.label().to_lowercase());
             let badges = counts
                 .get(&page)

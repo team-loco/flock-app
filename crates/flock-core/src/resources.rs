@@ -4,6 +4,7 @@ use std::time::Duration;
 use crate::diagnosis::{self, Condition, Diagnosis};
 use crate::events::Event;
 use crate::filter::{FilterSpec, StatusFilter, TextFilter};
+use crate::pods::PodFilter;
 use crate::{Page, Status, Uid};
 
 const READY_COLUMN: &str = "Ready";
@@ -112,6 +113,26 @@ impl ResourceKind {
 pub const POD_LIST: &str = "Pod";
 pub const EVENT_LIST: &str = "Event";
 
+pub fn namespace_list(page: Page) -> Option<&'static str> {
+    match page {
+        Page::Pods => Some(POD_LIST),
+        Page::Events => Some(EVENT_LIST),
+        page => ResourceKind::for_page(page).map(ResourceKind::name),
+    }
+}
+
+pub fn attention_chip(page: Page) -> usize {
+    let position = match page {
+        Page::Pods => PodFilter::ALL
+            .iter()
+            .position(|f| *f == PodFilter::Attention),
+        _ => StatusFilter::ALL
+            .iter()
+            .position(|f| *f == StatusFilter::Attention),
+    };
+    position.unwrap_or_default()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NamespaceCount {
     pub name: String,
@@ -207,6 +228,22 @@ pub fn filter_counts(rows: &[Resource]) -> Vec<(StatusFilter, usize)> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn namespaced_lists_remember_their_namespace_under_their_kind() {
+        assert_eq!(namespace_list(Page::Pods), Some(POD_LIST));
+        assert_eq!(namespace_list(Page::Deployments), Some("Deployment"));
+        assert_eq!(namespace_list(Page::Nodes), None);
+        assert_eq!(namespace_list(Page::Namespaces), None);
+    }
+
+    #[test]
+    fn the_attention_chip_points_at_needs_attention_in_every_list() {
+        let pods = PodFilter::ALL.get(attention_chip(Page::Pods)).copied();
+        assert_eq!(pods, Some(PodFilter::Attention));
+        let nodes = StatusFilter::at(attention_chip(Page::Nodes));
+        assert_eq!(nodes, StatusFilter::Attention);
+    }
 
     pub(crate) fn resource(namespace: &str, name: &str, status: Status) -> Resource {
         Resource {

@@ -553,6 +553,12 @@ impl Ui {
         self.cx.read_entity(&self.shell, read)
     }
 
+    pub fn read_in_window<R>(&mut self, read: impl FnOnce(&Shell, &Window, &App) -> R) -> R {
+        let shell = self.shell.clone();
+        self.cx
+            .update(|window, cx| read(shell.read(cx), window, cx))
+    }
+
     pub fn restore(&mut self, tabs: &SavedWindow) -> anyhow::Result<()> {
         let shell = self.shell.clone();
         self.cx.update(|window, cx| {

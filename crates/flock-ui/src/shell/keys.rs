@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use flock_core::history::Location;
 use flock_core::palette::COMMAND_PREFIX;
 use flock_core::tabs::Cycle;
 use flock_core::{Command, Page};
@@ -20,10 +21,16 @@ use crate::screens::workload::WorkloadScreen;
 
 pub(super) const SIDEBAR_CONTEXT: &str = "FlockSidebar";
 
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct NavCursor {
+    page: Page,
+    shown: Location,
+}
+
 pub(super) struct Keyboard {
     pub(super) refocus: bool,
     pub(super) sidebar_focus: FocusHandle,
-    pub(super) nav_cursor: Option<Page>,
+    nav_cursor: Option<NavCursor>,
     pub(super) nav_type_ahead: TypeAhead,
 }
 
@@ -204,9 +211,33 @@ impl Shell {
         if !self.state.sidebar_open {
             self.dispatch(Command::ToggleSidebar, cx);
         }
-        self.keys.nav_cursor = Some(self.state.location().page);
+        self.move_nav_cursor(self.state.location().page);
         window.focus(&self.keys.sidebar_focus, cx);
         cx.notify();
+    }
+
+    fn move_nav_cursor(&mut self, page: Page) {
+        let shown = self.state.location().clone();
+        self.keys.nav_cursor = Some(NavCursor { page, shown });
+    }
+
+    pub(super) fn forget_stale_nav_cursor(&mut self) {
+        if self.nav_cursor().is_none() {
+            self.keys.nav_cursor = None;
+        }
+    }
+
+    fn nav_cursor(&self) -> Option<Page> {
+        let cursor = self.keys.nav_cursor.as_ref()?;
+        (&cursor.shown == self.state.location()).then_some(cursor.page)
+    }
+
+    pub fn sidebar_highlight(&self, window: &Window) -> Page {
+        let shown = self.state.location().page;
+        if !self.keys.sidebar_focus.is_focused(window) {
+            return shown;
+        }
+        self.nav_cursor().unwrap_or(shown)
     }
 
     pub(super) fn nav_pages(&self) -> Vec<Page> {
@@ -227,8 +258,7 @@ impl Shell {
         let keystroke = &event.keystroke;
         let pages = self.nav_pages();
         let current = self
-            .keys
-            .nav_cursor
+            .nav_cursor()
             .or(Some(self.state.location().page))
             .and_then(|page| pages.iter().position(|p| *p == page));
         let opens =
@@ -254,7 +284,7 @@ impl Shell {
         };
         cx.stop_propagation();
         if let Some(page) = target.and_then(|ix| pages.get(ix).copied()) {
-            self.keys.nav_cursor = Some(page);
+            self.move_nav_cursor(page);
             cx.notify();
         }
     }

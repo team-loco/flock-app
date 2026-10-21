@@ -11,7 +11,8 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    Column, EmptyState, FilterBar, FilterEvent, SectionLabel, StatusGlyph, Table, TableEvent,
+    Column, EmptyState, FilterBar, FilterEvent, InspectorPane, SectionLabel, StatusGlyph, Table,
+    TableEvent,
 };
 use crate::theme::{
     AFFECTED_NAMESPACE_WIDTH, AFFECTED_NODE_WIDTH, AFFECTED_OBJECT_MIN, AFFECTED_SINCE_WIDTH,
@@ -31,6 +32,7 @@ const MARK: &str = "┆";
 const AXIS: [&str; 4] = ["6h ago", "4h ago", "2h ago", "now"];
 const OBJECT_ONE: &str = "object";
 const OBJECT_MANY: &str = "objects";
+const CAUSES_ID: &str = "problem-causes";
 
 pub struct ClusterProblemsScreen {
     cluster: Option<ClusterId>,
@@ -160,16 +162,17 @@ impl ClusterProblemsScreen {
                 this.pick(ix, cx);
             }))
         });
-        div()
-            .id("problem-causes")
-            .flex_none()
-            .w(PROBLEM_CAUSES_WIDTH)
-            .h_full()
+        let list = div()
+            .id(CAUSES_ID)
+            .size_full()
             .overflow_y_scroll()
             .bg(palette.panel)
             .border_r(RULE)
             .border_color(palette.line)
-            .children(rows)
+            .children(rows);
+        InspectorPane::new(CAUSES_ID, list)
+            .width(PROBLEM_CAUSES_WIDTH)
+            .trailing_handle()
             .into_any_element()
     }
 

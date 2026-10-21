@@ -11,6 +11,7 @@ mod tabs;
 use flock_core::history::Location;
 use flock_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use flock_core::resource::short_kind;
+use flock_core::settings::NamespaceSelection;
 use flock_core::{
     AddClusterStep, AppState, ClusterId, ClusterSummary, Command, Page, Preferences, Sender,
     Status, Update,
@@ -360,6 +361,24 @@ impl Shell {
                 self.dispatch(Command::SelectPage(Page::Events), cx);
                 self.focused_screens().pages.show_event(key.clone(), cx);
             }
+            ScreenEvent::NeedsAttention { page, namespace } => {
+                self.show_attention(*page, namespace.as_deref(), cx);
+            }
+        }
+    }
+
+    fn show_attention(&mut self, page: Page, namespace: Option<&str>, cx: &mut Context<Self>) {
+        let location = self.state.location().clone();
+        let list = flock_core::resources::namespace_list(page);
+        if let (Some(list), Some(cluster)) = (list, location.cluster.clone()) {
+            let mut preferences = self.preferences_of(&location);
+            preferences.select_namespace(list, NamespaceSelection::of(namespace));
+            self.dispatch(Command::SetPreferences(cluster, preferences), cx);
+        }
+        self.dispatch(Command::SelectPage(page), cx);
+        let chip = flock_core::resources::attention_chip(page);
+        if let Some(bar) = self.filter_bar(cx) {
+            bar.update(cx, |bar, cx| bar.select_chip(chip, cx));
         }
     }
 

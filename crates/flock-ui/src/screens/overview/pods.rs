@@ -2,7 +2,10 @@ use flock_core::overview::{plural, thousands};
 use flock_core::{Page, ResourceRef};
 use gpui::{AnyElement, Context, Hsla, IntoElement, ParentElement, SharedString, Styled, div};
 
-use super::{OverviewData, OverviewScreen, mono, row_link, section, section_head, status_color};
+use super::{
+    OverviewData, OverviewScreen, head_row, meta_text, mono, problem_link, row_link, section,
+    status_color,
+};
 use crate::kit::Link;
 use crate::theme::{Palette, SPACE_2, SPACE_5, TEXT_CONTROL, TEXT_LABEL, TEXT_MONO};
 
@@ -19,6 +22,7 @@ struct Top {
     id: &'static str,
     title: &'static str,
     meta: String,
+    problems: u32,
     columns: (&'static str, &'static str),
     empty: &'static str,
     rows: Vec<Row>,
@@ -64,7 +68,14 @@ fn row(
 fn top(top: Top, palette: &Palette, cx: &mut Context<OverviewScreen>) -> AnyElement {
     let all = Link::new(SharedString::from(format!("{}-all", top.id)), ALL)
         .on_click(cx.listener(|_, _, _, cx| cx.emit(super::ScreenEvent::Navigate(Page::Pods))));
-    let head = section_head(top.title, Some(top.meta), Some(all), palette);
+    let meta = meta_text(top.meta, palette);
+    let meta = if top.problems > 0 {
+        let activate = OverviewScreen::attention(Page::Pods, None, cx);
+        problem_link(format!("{}-meta", top.id), meta, activate).into_any_element()
+    } else {
+        meta.into_any_element()
+    };
+    let head = head_row(top.title, Some(meta), Some(all));
     let columns = div()
         .flex()
         .pb(SPACE_2)
@@ -126,6 +137,7 @@ pub(super) fn render(
             id: "overview-restarts",
             title: "Pods · most container restarts",
             meta: restarted,
+            problems: 0,
             columns: ("Pod · container · last termination", "Restarts"),
             empty: "No container has restarted.",
             rows: restarts,
@@ -134,6 +146,7 @@ pub(super) fn render(
             id: "overview-pending",
             title: "Pods · Pending longest",
             meta: format!("{} Pending", thousands(data.pods.pending)),
+            problems: data.pods.pending,
             columns: ("Pod · last FailedScheduling message", "Pending for"),
             empty: "No pods are pending.",
             rows: pending,

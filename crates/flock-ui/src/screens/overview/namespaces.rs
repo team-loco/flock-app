@@ -6,7 +6,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, div, relative,
 };
 
-use super::{OverviewData, OverviewScreen, mono, row_link, section, section_head};
+use super::{OverviewData, OverviewScreen, mono, problem_link, row_link, section, section_head};
 use crate::kit::Link;
 use crate::theme::{
     FONT_MONO, OVERVIEW_COUNT_WIDTH, OVERVIEW_NAMESPACE_MIN, OVERVIEW_NAMESPACE_ROW,
@@ -134,6 +134,20 @@ fn restarts_color(restarts: u32, palette: &Palette) -> Hsla {
     }
 }
 
+fn failing_cell(
+    ix: usize,
+    namespace: &Namespace,
+    figure: Div,
+    cx: &mut Context<OverviewScreen>,
+) -> Div {
+    if namespace.problems.err == 0 {
+        return cell(Cell::Count, figure);
+    }
+    let activate = OverviewScreen::attention(Page::Namespaces, None, cx);
+    let link = problem_link(format!("overview-ns-{ix}-failing"), figure, activate);
+    cell(Cell::Count, div().child(link))
+}
+
 fn row(
     ix: usize,
     namespace: &Namespace,
@@ -159,7 +173,7 @@ fn row(
             mono(namespace.name.clone(), palette.fg).truncate(),
         ),
         cell(Cell::Count, mono(thousands(namespace.pods), palette.fg2)),
-        cell(Cell::Count, mono(failing_label, failing_color)),
+        failing_cell(ix, namespace, mono(failing_label, failing_color), cx),
         cell(
             Cell::Usage,
             usage(

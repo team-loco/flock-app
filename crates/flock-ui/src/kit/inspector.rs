@@ -177,10 +177,26 @@ struct ResizeState {
     drag: Option<(Pixels, Pixels)>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Handle {
+    Leading,
+    Trailing,
+}
+
+impl Handle {
+    fn dragged(self, initial: Pixels, start: Pixels, now: Pixels) -> Pixels {
+        match self {
+            Self::Leading => initial + start - now,
+            Self::Trailing => initial + now - start,
+        }
+    }
+}
+
 #[derive(IntoElement)]
 pub struct InspectorPane {
     kind: SharedString,
     width: Pixels,
+    handle: Handle,
     content: AnyElement,
 }
 
@@ -189,6 +205,7 @@ impl InspectorPane {
         Self {
             kind: kind.into(),
             width: INSPECTOR,
+            handle: Handle::Leading,
             content: content.into_any_element(),
         }
     }
@@ -197,11 +214,17 @@ impl InspectorPane {
         self.width = clamp_inspector_width(width);
         self
     }
+
+    pub fn trailing_handle(mut self) -> Self {
+        self.handle = Handle::Trailing;
+        self
+    }
 }
 
 impl RenderOnce for InspectorPane {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let width = stored_width(&self.kind, self.width, cx);
+        let handle = self.handle;
         let state = window.use_keyed_state(
             (ElementId::Name(self.kind.clone()), "resize"),
             cx,
@@ -224,7 +247,8 @@ impl RenderOnce for InspectorPane {
                         return;
                     };
                     if event.dragging() {
-                        save_width(&kind, initial + start - event.position.x, false, cx);
+                        let dragged = handle.dragged(initial, start, event.position.x);
+                        save_width(&kind, dragged, false, cx);
                         window.refresh();
                     } else {
                         moving.update(cx, |state, _| state.drag = None);
@@ -240,7 +264,8 @@ impl RenderOnce for InspectorPane {
                     }
                     let drag = releasing.update(cx, |state, _| state.drag.take());
                     if let Some((start, initial)) = drag {
-                        save_width(&kind, initial + start - event.position.x, true, cx);
+                        let dragged = handle.dragged(initial, start, event.position.x);
+                        save_width(&kind, dragged, true, cx);
                         window.refresh();
                     }
                 });
@@ -255,7 +280,10 @@ impl RenderOnce for InspectorPane {
             .id("inspector-resize")
             .debug_selector(move || selector.clone())
             .absolute()
-            .left_0()
+            .map(|edge| match handle {
+                Handle::Leading => edge.left_0(),
+                Handle::Trailing => edge.right_0(),
+            })
             .top_0()
             .bottom_0()
             .w(SPLITTER)
@@ -295,6 +323,19 @@ mod tests {
         assert_eq!(clamp_inspector_width(px(10000.)), INSPECTOR_MAX);
         assert_eq!(clamp_inspector_width(px(f32::NAN)), INSPECTOR);
         assert_eq!(clamp_inspector_width(px(480.)), px(480.));
+    }
+
+    #[test]
+    fn dragging_widens_the_pane_away_from_its_handle() {
+        let initial = px(360.);
+        assert_eq!(
+            Handle::Leading.dragged(initial, px(500.), px(450.)),
+            px(410.)
+        );
+        assert_eq!(
+            Handle::Trailing.dragged(initial, px(500.), px(550.)),
+            px(410.)
+        );
     }
 
     #[gpui::test]

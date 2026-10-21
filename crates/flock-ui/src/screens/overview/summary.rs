@@ -4,7 +4,7 @@ use gpui::{
     AnyElement, Context, Div, Hsla, InteractiveElement, IntoElement, ParentElement, Styled, div,
 };
 
-use super::{OverviewData, OverviewScreen, mono};
+use super::{Activate, OverviewData, OverviewScreen, mono, problem_link};
 use crate::kit::{ClickableSection, Meter, SectionLabel, StackedBar};
 use crate::theme::{
     FONT_MONO, Palette, RULE, SPACE_3, SPACE_4, SPACE_5, SPACE_8, TEXT_BODY, TEXT_SMALL,
@@ -30,15 +30,44 @@ fn title(label: &'static str, figure: String, detail: Option<String>, palette: &
         .children(detail)
 }
 
-fn notes(parts: Vec<(String, Hsla)>, palette: &Palette) -> Div {
+struct Note {
+    text: String,
+    color: Hsla,
+    drill: Option<(String, Activate)>,
+}
+
+impl Note {
+    fn new(text: String, color: Hsla) -> Self {
+        Self {
+            text,
+            color,
+            drill: None,
+        }
+    }
+
+    fn problem(mut self, id: String, count: u32, activate: Activate) -> Self {
+        if count > 0 {
+            self.drill = Some((id, activate));
+        }
+        self
+    }
+}
+
+fn notes(parts: Vec<Note>, palette: &Palette) -> Div {
     let last = parts.len().saturating_sub(1);
-    let spans = parts.into_iter().enumerate().map(|(ix, (text, color))| {
-        let text = if ix < last {
-            format!("{text}{SEPARATOR}")
-        } else {
-            text
+    let spans = parts.into_iter().enumerate().flat_map(|(ix, note)| {
+        let span = div().text_color(note.color).child(note.text);
+        let span = match note.drill {
+            Some((id, activate)) => problem_link(id, span, activate).into_any_element(),
+            None => span.into_any_element(),
         };
-        div().text_color(color).child(text)
+        let separator = (ix < last).then(|| {
+            div()
+                .text_color(note.color)
+                .child(SEPARATOR)
+                .into_any_element()
+        });
+        std::iter::once(span).chain(separator)
     });
     div()
         .flex()
@@ -51,9 +80,25 @@ fn notes(parts: Vec<(String, Hsla)>, palette: &Palette) -> Div {
         .children(spans)
 }
 
-fn counted(count: usize, label: &str, color: Hsla) -> (String, Hsla) {
-    let count = u32::try_from(count).unwrap_or(u32::MAX);
-    (format!("{} {label}", thousands(count)), color)
+fn figure(count: impl TryInto<u32>) -> u32 {
+    count.try_into().unwrap_or(u32::MAX)
+}
+
+fn counted(count: u32, label: &str, color: Hsla) -> Note {
+    Note::new(format!("{} {label}", thousands(count)), color)
+}
+
+fn flagged(
+    count: u32,
+    label: &str,
+    color: Hsla,
+    page: Page,
+    cx: &mut Context<OverviewScreen>,
+) -> Note {
+    let id = format!("overview-{}-{}", page.label(), label).to_lowercase();
+    let id = id.replace(' ', "-");
+    let activate = OverviewScreen::attention(page, None, cx);
+    counted(count, label, color).problem(id, count, activate)
 }
 
 fn clickable(
@@ -85,15 +130,16 @@ fn nodes(data: &OverviewData, palette: &Palette, cx: &mut Context<OverviewScreen
         (Status::Err, weight(health.err)),
     ]);
     let nodes = &data.nodes;
-    let mut parts = vec![counted(nodes.ready, "ready", palette.mute)];
-    if nodes.not_ready > 0 {
-        parts.push(counted(nodes.not_ready, "not ready", palette.err));
-    }
-    if nodes.disk_pressure > 0 {
-        parts.push(counted(nodes.disk_pressure, "DiskPressure", palette.warn));
-    }
-    if nodes.cordoned > 0 {
-        parts.push(counted(nodes.cordoned, "cordoned", palette.warn));
+    let mut parts = vec![counted(figure(nodes.ready), "ready", palette.mute)];
+    let flags = [
+        (nodes.not_ready, "not ready", palette.err),
+        (nodes.disk_pressure, "DiskPressure", palette.warn),
+        (nodes.cordoned, "cordoned", palette.warn),
+    ];
+    for (count, label, color) in flags {
+        if count > 0 {
+            parts.push(flagged(figure(count), label, color, Page::Nodes, cx));
+        }
     }
     let detail = (nodes.pools > 0).then(|| plural(nodes.pools, "pool", "pools"));
     let title = title("Nodes", nodes.total.to_string(), detail, palette);
@@ -117,9 +163,9 @@ fn pods(data: &OverviewData, palette: &Palette, cx: &mut Context<OverviewScreen>
     .rest(weight(free));
     let figure = format!("{} / {}", thousands(pods.total()), thousands(capacity));
     let parts = vec![
-        (format!("{} running", thousands(pods.running)), palette.mute),
-        (format!("{} pending", thousands(pods.pending)), palette.warn),
-        (format!("{} failing", thousands(pods.failing)), palette.err),
+        counted(pods.running, "running", palette.mute),
+        flagged(pods.pending, "pending", palette.warn, Page::Pods, cx),
+        flagged(pods.failing, "failing", palette.err, Page::Pods, cx),
     ];
     let body = [
         title("Pods", figure, None, palette).into_any_element(),
@@ -136,12 +182,12 @@ fn capacity(label: &'static str, capacity: &Capacity, palette: &Palette) -> AnyE
         .limit(capacity.limits)
         .color(palette.acc);
     let parts = vec![
-        (format!("used {}", percent(used)), palette.mute),
-        (
+        Note::new(format!("used {}", percent(used)), palette.mute),
+        Note::new(
             format!("{REQUEST_GLYPH} req {}", percent(capacity.requests)),
             palette.fg2,
         ),
-        (
+        Note::new(
             format!("{LIMIT_GLYPH} lim {}", percent(capacity.limits)),
             palette.warn,
         ),
