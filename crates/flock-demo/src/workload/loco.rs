@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use flock_core::pods::PodEvent;
 use flock_core::workload::{
-    ContainerSpec, ContainerStatus, EnvResolution, EnvSource, EnvVar, Event, Pod, Port, Probe,
+    ContainerSpec, ContainerStatus, EnvResolution, EnvSource, EnvVar, Pod, Port, Probe,
     ProbeAction, Resources, Revision,
 };
 use flock_core::{ClusterId, ResourceRef, Status, Uid, Workload, WorkloadKind};
@@ -62,7 +63,7 @@ pub fn checkout() -> Workload {
         }],
         history_pending: false,
         containers: vec![container()],
-        events: vec![Event {
+        events: vec![PodEvent {
             age,
             status: Status::Err,
             reason: REASON.into(),

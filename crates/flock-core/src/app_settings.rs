@@ -17,6 +17,7 @@ const CHANNEL: u32 = 0xFF;
 pub struct AppSettings {
     pub show_in_menu_bar: bool,
     pub inspector_widths: BTreeMap<String, u16>,
+    pub open_sections: BTreeMap<String, bool>,
     pub theme: ThemeChoice,
     pub primary: Highlight,
     pub secondary: Highlight,
@@ -30,6 +31,7 @@ impl Default for AppSettings {
         Self {
             show_in_menu_bar: true,
             inspector_widths: BTreeMap::default(),
+            open_sections: BTreeMap::default(),
             theme: ThemeChoice::default(),
             primary: Highlight::default(),
             secondary: Highlight::default(),
@@ -371,6 +373,7 @@ mod tests {
                 paused: true,
             },
             inspector_widths: BTreeMap::from([("resource-inspector".to_owned(), 640)]),
+            open_sections: BTreeMap::from([("pod-inspector-events".to_owned(), true)]),
             updates: Updates {
                 automatic: false,
                 interval: CheckInterval::Hours24,

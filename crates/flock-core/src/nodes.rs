@@ -3,7 +3,9 @@ use std::time::Duration;
 
 use crate::diagnosis::{self, Condition, Diagnosis};
 use crate::filter::{FilterSpec, TextFilter};
+use crate::issue::{Issue, named};
 use crate::overview::{Commitment, plural};
+use crate::related::NODE;
 use crate::{Status, Uid};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -86,6 +88,12 @@ impl Node {
         diagnosis::node(&self.conditions).or_else(|| {
             (!self.schedulable).then(|| Diagnosis::new(SCHEDULING_DISABLED, CORDONED_MESSAGE))
         })
+    }
+
+    pub fn issue(&self) -> Option<Issue> {
+        let diagnosis = self.diagnosis()?;
+        let object = named(NODE, &self.name, None);
+        Some(Issue::from_diagnosis(self.status, &diagnosis, object))
     }
 
     pub fn is_ready(&self) -> bool {

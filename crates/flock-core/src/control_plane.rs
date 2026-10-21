@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::Status;
+use crate::issue::{Issue, object_line};
 use crate::overview::thousands;
 
 const MILLIS_PER_SECOND: f64 = 1e3;
@@ -13,6 +14,8 @@ const BILLION: f64 = 1e9;
 const WARN_ERROR_RATIO: f64 = 0.01;
 const SLOW_WEBHOOK_SHARE: f64 = 0.25;
 const SERVER_ERROR_CLASS: char = '5';
+const API_SERVICE: &str = "APIService";
+const UNAVAILABLE: &str = "Available=False";
 pub const ETCD_CHECK: &str = "etcd";
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -124,9 +127,12 @@ pub struct SlowWebhook {
 
 impl SlowWebhook {
     pub fn detail(&self) -> String {
+        format!("{} {}", self.name, self.timing())
+    }
+
+    pub fn timing(&self) -> String {
         format!(
-            "{} p99 {} (timeout {})",
-            self.name,
+            "p99 {} (timeout {})",
             latency(self.p99),
             latency(self.timeout)
         )
@@ -192,6 +198,21 @@ impl Traffic {
 }
 
 impl ControlPlane {
+    pub fn issues(&self) -> Vec<Issue> {
+        let services = self.unavailable_services.iter().map(|service| {
+            let object = object_line([
+                Some(format!("{API_SERVICE} {}", service.name)),
+                Some(UNAVAILABLE.to_owned()),
+            ]);
+            Issue::new(Status::Err, service.reason.clone(), String::new(), object)
+        });
+        let webhooks = self.slow_webhooks().into_iter().map(|webhook| {
+            let timing = webhook.timing();
+            Issue::new(Status::Warn, webhook.name, timing, webhook.configuration)
+        });
+        services.chain(webhooks).collect()
+    }
+
     pub fn slow_webhooks(&self) -> Vec<SlowWebhook> {
         let (Some(traffic), Some(webhooks)) = (self.traffic.ready(), self.webhooks.ready()) else {
             return Vec::new();
@@ -344,6 +365,25 @@ mod tests {
             Some("validate.kyverno.svc-fail".into())
         );
         assert_eq!(ControlPlane::default().slow_webhooks(), Vec::new());
+        let plane = ControlPlane {
+            unavailable_services: vec![ApiService {
+                name: "v1beta1.metrics.k8s.io".into(),
+                reason: "FailedDiscoveryCheck".into(),
+            }],
+            ..plane
+        };
+        let issues = plane.issues();
+        let reasons: Vec<&str> = issues.iter().map(|i| i.reason.as_str()).collect();
+        assert_eq!(
+            reasons,
+            ["FailedDiscoveryCheck", "validate.kyverno.svc-fail"]
+        );
+        assert_eq!(
+            issues[0].object,
+            "APIService v1beta1.metrics.k8s.io · Available=False"
+        );
+        assert_eq!(issues[1].message, "p99 2.8 s (timeout 10.0 s)");
+        assert_eq!(ControlPlane::default().issues(), Vec::new());
     }
 
     #[test]

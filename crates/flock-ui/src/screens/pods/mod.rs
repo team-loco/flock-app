@@ -8,7 +8,7 @@ use flock_core::filter::label_values;
 use flock_core::multilog::LabelSelector;
 use flock_core::pods::{
     Container, ContainerState, FailingElsewhere, OWNER_ARROW, Pod, PodFilter, PodPhase, PodQuery,
-    Resources, Termination, Usage, filter_counts, nav_counts, owner_segment,
+    Resources, Termination, Usage, filter_counts, nav_counts, owner_segment, restarts_label,
 };
 use flock_core::related::Related;
 use flock_core::resources::{NamespaceCount, POD_LIST, namespace_counts};
@@ -20,19 +20,18 @@ use flock_core::{
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, WeakEntity, Window, div, prelude::FluentBuilder, px, svg,
+    Subscription, WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 
 mod streams;
 
 use streams::{LogSession, ShellSession, TERMINAL_ID};
 
-use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::kit::{
-    Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, EVENTS, Entrance,
-    EventList, FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER,
-    Link, LogView, MenuItem, SectionLabel, Select, SelectEvent, ShowAll, StatusText, Table,
-    TableEvent, Terminal, TextFieldState, WhatsWrong, chip_label, confirm, swap_in,
+    Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, Entrance, ErrorBlocks,
+    FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link,
+    LogView, MenuItem, PanelSection, Select, SelectEvent, ShowAll, StatusText, Table, TableEvent,
+    Terminal, TextFieldState, chip_label, confirm, swap_in,
 };
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
 use crate::screens::{
@@ -40,12 +39,11 @@ use crate::screens::{
     set_namespace_options,
 };
 use crate::theme::{
-    ActiveTheme, FONT_MONO, FONT_SANS, ICON, INSPECTOR_POD, Palette, RULE, SPACE_2, SPACE_3,
-    SPACE_4, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL, TEXT_UI, WHATS_WRONG_BAR,
+    ActiveTheme, FONT_MONO, INSPECTOR_POD, Palette, RULE, SECTION_HEADER, SPACE_2, SPACE_3,
+    SPACE_4, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
 };
 
 const INSPECTOR_ID: &str = "pod-inspector";
-const CONDITIONS_TOGGLE: &str = "pod-conditions-toggle";
 const FAILING_ELSEWHERE: &str = "pod-failing-elsewhere";
 const OWNER_LINK: &str = "pod-owner";
 const NAME_MIN: Pixels = px(180.);
@@ -69,7 +67,10 @@ const SEPARATOR: &str = " · ";
 
 const MISSING: &str = "—";
 const NO_RESOURCES: &str = "none";
-const LAST_TERMINATION: &str = "Last termination";
+const DETAILS: &str = "Details";
+const CONTAINERS: &str = "Containers";
+const VOLUMES: &str = "Volumes";
+const POD_HEADER: &str = "pod-header";
 const LOGS_BEFORE_RESTART: &str = "Logs before restart →";
 const LOGS_FOR: &str = "Logs for";
 const LOGS_FOR_SELECTED: &str = "Logs for selected pods";
@@ -96,7 +97,6 @@ pub struct PodsScreen {
     related: Vec<Related>,
     container: Option<String>,
     instance: LogInstance,
-    conditions_open: bool,
     elsewhere: Entity<ElsewhereLink>,
     log: Option<LogSession>,
     shell: Option<ShellSession>,
@@ -210,7 +210,6 @@ impl PodsScreen {
             related: Vec::new(),
             container: None,
             instance: LogInstance::Current,
-            conditions_open: false,
             elsewhere,
             log: None,
             shell: None,
@@ -500,11 +499,6 @@ impl PodsScreen {
         }
     }
 
-    fn toggle_conditions(&mut self, cx: &mut Context<Self>) {
-        self.conditions_open = !self.conditions_open;
-        cx.notify();
-    }
-
     fn show_all_namespaces(&mut self, cx: &mut Context<Self>) {
         self.namespace
             .update(cx, |select, cx| select.set_selected(0, cx));
@@ -587,14 +581,12 @@ impl PodsScreen {
                 let _ = screen.update(cx, |_, cx| cx.emit(Command::OpenResource(target)));
             }
         });
-        let related = section(&palette)
-            .child(SectionLabel::new(RELATED))
-            .child(inspector_section(related, &pick, cx));
-        let conditions_open = self.conditions_open;
+        let related =
+            PanelSection::new(INSPECTOR_ID, RELATED).child(inspector_section(related, &pick, cx));
         let (header, body) = match self.selected_pod() {
             Some(pod) => (
                 Some(Self::pod_header(pod, &palette, cx)),
-                Self::pod_details(pod, conditions_open, &palette, cx)
+                Self::pod_details(pod, &palette, cx)
                     .child(related)
                     .into_any_element(),
             ),
@@ -636,50 +628,52 @@ impl PodsScreen {
             .any(|container| container.state == ContainerState::Running);
         let shell = Button::new("pod-shell", SHELL)
             .primary()
+            .small()
             .disabled(!running)
             .when(!running, |shell| shell.tooltip(NO_RUNNING_CONTAINER))
             .on_click(cx.listener(|this, _, window, cx| this.open_terminal(window, cx)));
-        let whats_wrong = pod
-            .diagnosis()
-            .map(|diagnosis| WhatsWrong::new(pod.status, diagnosis));
-        let header = section(palette)
-            .gap(SPACE_3)
+        div()
+            .debug_selector(|| POD_HEADER.into())
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(SPACE_4)
+            .min_h(SECTION_HEADER)
+            .pl(SPACE_6)
+            .pr(SPACE_4)
+            .py(SPACE_2)
+            .border_b(RULE)
+            .border_color(palette.line)
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .gap(SPACE_4)
-                    .child(SectionLabel::new("Pod"))
-                    .child(div().flex_1())
-                    .child(shell),
-            )
-            .child(
-                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
                     .font_family(FONT_MONO)
-                    .text_size(TEXT_UI)
+                    .text_size(TEXT_BODY)
                     .font_weight(FontWeight::MEDIUM)
-                    .child(pod.name.clone()),
+                    .child(SelectableText::new(pod.name.clone())),
             )
-            .child(StatusText::new(pod.status, pod.reason.clone()))
-            .children(whats_wrong);
-        header.flex_none().into_any_element()
+            .child(shell)
+            .into_any_element()
     }
 
-    fn pod_details(
-        pod: &Pod,
-        conditions_open: bool,
-        palette: &Palette,
-        cx: &mut Context<Self>,
-    ) -> gpui::Div {
+    fn pod_details(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> gpui::Div {
+        let labels: Vec<String> = pod
+            .labels
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect();
         div()
             .flex()
             .flex_col()
-            .child(Self::facts(pod, palette, cx))
+            .child(ErrorBlocks::new(pod.issue().into_iter().collect()))
+            .child(PanelSection::new(INSPECTOR_ID, DETAILS).child(Self::facts(pod, palette, cx)))
+            .child(PanelSection::labels(INSPECTOR_ID, labels))
             .child(Self::containers_section(pod, palette, cx))
-            .child(Self::conditions(pod, conditions_open, palette, cx))
-            .child(events(pod, palette))
-            .child(labels(pod, palette))
-            .child(volumes(pod, palette))
+            .child(conditions(pod, palette))
+            .child(PanelSection::events(INSPECTOR_ID, pod.events.clone()).closed())
+            .child(volumes(pod))
     }
 
     fn facts(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
@@ -688,18 +682,16 @@ impl PodsScreen {
         let ready = div()
             .text_color(palette.status(pod.status))
             .child(format!("{} containers", pod.ready_label()));
-        section(palette).child(
-            KeyValue::new()
-                .label_width(INSPECTOR_LABEL)
-                .text("Namespace", pod.namespace.clone())
-                .text("Node", or_missing(pod.node.clone()))
-                .text("Pod IP", or_missing(pod.ip.clone()))
-                .row("Ready", ready)
-                .row("Controlled by", owner)
-                .text("QoS", pod.qos.label())
-                .text("Service account", or_missing(pod.service_account.clone()))
-                .text("Created", created),
-        )
+        KeyValue::new()
+            .label_width(INSPECTOR_LABEL)
+            .text("Namespace", pod.namespace.clone())
+            .text("Node", or_missing(pod.node.clone()))
+            .text("Pod IP", or_missing(pod.ip.clone()))
+            .row("Ready", ready)
+            .row("Controlled by", owner)
+            .text("QoS", pod.qos.label())
+            .text("Service account", or_missing(pod.service_account.clone()))
+            .text("Created", created)
     }
 
     fn owner_chain(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -730,54 +722,30 @@ impl PodsScreen {
             .into_any_element()
     }
 
-    fn conditions(
-        pod: &Pod,
-        open: bool,
-        palette: &Palette,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let all_true = pod.conditions.iter().all(Condition::is_true);
-        let summary_color = if all_true { palette.ok } else { palette.fg2 };
-        let chevron = if open { CHEVRON_DOWN } else { CHEVRON_RIGHT };
-        let toggle = div()
-            .debug_selector(|| CONDITIONS_TOGGLE.into())
-            .id(CONDITIONS_TOGGLE)
-            .flex()
-            .items_center()
-            .gap(SPACE_4)
-            .cursor_pointer()
-            .on_click(cx.listener(|this, _, _, cx| this.toggle_conditions(cx)))
-            .child(SectionLabel::new(CONDITIONS))
-            .child(
-                div()
-                    .font_family(FONT_MONO)
-                    .text_size(TEXT_SMALL)
-                    .text_color(summary_color)
-                    .child(true_label(&pod.conditions)),
-            )
-            .child(div().flex_1())
-            .child(svg().path(chevron).size(ICON).text_color(palette.mute));
-        section(palette).child(toggle).when(open, |section| {
-            section.child(ConditionTable::new(&pod.conditions))
-        })
-    }
-
-    fn containers_section(
-        pod: &Pod,
-        palette: &Palette,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn containers_section(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> PanelSection {
         let rows: Vec<AnyElement> = pod
             .containers
             .iter()
             .enumerate()
             .map(|(ix, container)| Self::container_row(pod, ix, container, palette, cx))
             .collect();
-        let label = format!("Containers{SEPARATOR}{}", pod.containers.len());
-        section(palette)
-            .gap(SPACE_3)
-            .child(SectionLabel::new(label))
-            .children(rows)
+        let restarted = pod
+            .containers
+            .iter()
+            .any(|container| container.last_termination.is_some());
+        let count = pod.containers.len().to_string();
+        let section = PanelSection::new(INSPECTOR_ID, CONTAINERS);
+        let section = if restarted {
+            section
+                .count(format!(
+                    "{count}{SEPARATOR}{}",
+                    restarts_label(pod.restarts())
+                ))
+                .count_color(palette.warn)
+        } else {
+            section.count(count)
+        };
+        section.child(div().flex().flex_col().gap(SPACE_6).children(rows))
     }
 
     fn container_row(
@@ -816,31 +784,22 @@ impl PodsScreen {
             (ContainerState::Terminated, Status::Ok) => palette.mute,
             (_, status) => palette.status(status),
         };
-        let restarts_color = if container.restarts > 0 {
-            palette.warn
-        } else {
-            palette.mute
-        };
         let fields = container_fields(container, ports, palette);
         let name = container.name.clone();
-        let before_restart = Link::new(
-            gpui::ElementId::NamedInteger("pod-logs-before-restart".into(), ix as u64),
-            LOGS_BEFORE_RESTART,
-        )
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.show_previous_logs(name.clone(), cx);
-        }));
-        let last = container
-            .last_termination
-            .as_ref()
-            .map(|last| last_termination(last, before_restart, palette));
+        let before_restart = container.last_termination.as_ref().map(|_| {
+            let link = Link::new(
+                gpui::ElementId::NamedInteger("pod-logs-before-restart".into(), ix as u64),
+                LOGS_BEFORE_RESTART,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.show_previous_logs(name.clone(), cx);
+            }));
+            div().pl(CONTAINER_LABEL + SPACE_5).child(link)
+        });
         div()
             .flex()
             .flex_col()
             .gap(SPACE_3)
-            .pt(SPACE_3)
-            .border_t(RULE)
-            .border_color(palette.line)
             .child(
                 div()
                     .debug_selector(|| CONTAINER_HEAD.into())
@@ -860,18 +819,10 @@ impl PodsScreen {
                             .debug_selector(|| CONTAINER_STATE.into())
                             .text_color(state_color)
                             .child(container.state_label()),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .ml_auto()
-                            .text_size(TEXT_SMALL)
-                            .text_color(restarts_color)
-                            .child(container.restarts_label()),
                     ),
             )
             .child(fields)
-            .children(last)
+            .children(before_restart)
             .into_any_element()
     }
 }
@@ -881,6 +832,11 @@ fn container_fields(container: &Container, ports: Vec<AnyElement>, palette: &Pal
         Some(label) => value(label, palette.fg),
         None => value(NO_RESOURCES, palette.mute),
     };
+    let restarts_color = if container.restarts > 0 {
+        palette.warn
+    } else {
+        palette.mute
+    };
     let probes = container
         .probes_label()
         .map(|probes| value(probes, palette.fg2));
@@ -889,8 +845,17 @@ fn container_fields(container: &Container, ports: Vec<AnyElement>, palette: &Pal
         .as_ref()
         .and_then(Termination::run)
         .map(|run| value(run, palette.fg));
-    let fields = KeyValue::new()
-        .label_width(CONTAINER_LABEL)
+    let mut fields = KeyValue::new().label_width(CONTAINER_LABEL).row(
+        "restarts",
+        value(container.restarts.to_string(), restarts_color),
+    );
+    if let Some(last) = &container.last_termination {
+        fields = fields.row("last exit", value(last.detail(), palette.warn));
+        if let Some(run) = last.run() {
+            fields = fields.row("last run", value(run, palette.fg2));
+        }
+    }
+    let fields = fields
         .row("image", value(container.image.clone(), palette.fg))
         .row("requests", resources(&container.requests))
         .row("limits", resources(&container.limits));
@@ -917,47 +882,14 @@ fn value(text: impl Into<SharedString>, color: gpui::Hsla) -> AnyElement {
         .into_any_element()
 }
 
-fn last_termination(last: &Termination, logs: Link, palette: &Palette) -> AnyElement {
-    let reason = Some(last.reason.clone()).filter(|reason| !reason.is_empty());
-    let summary = div()
-        .flex()
-        .flex_wrap()
-        .children(reason.map(|reason| {
-            div()
-                .text_color(palette.warn)
-                .child(format!("{reason}{SEPARATOR}"))
-        }))
-        .child(div().text_color(palette.fg).child(last.detail()));
-    let span = last
-        .span()
-        .map(|span| div().text_color(palette.mute).child(span));
-    div()
-        .flex()
-        .flex_col()
-        .gap(SPACE_2)
-        .px(SPACE_4)
-        .py(SPACE_3)
-        .border_l(WHATS_WRONG_BAR)
-        .border_color(palette.warn)
-        .bg(palette.warnbg)
-        .font_family(FONT_MONO)
-        .text_size(TEXT_SMALL)
-        .child(SectionLabel::new(LAST_TERMINATION))
-        .child(summary)
-        .children(span)
-        .child(div().font_family(FONT_SANS).text_size(TEXT_UI).child(logs))
-        .into_any_element()
-}
-
-fn section(palette: &Palette) -> gpui::Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap(SPACE_4)
-        .px(SPACE_6)
-        .py(SPACE_5)
-        .border_b(RULE)
-        .border_color(palette.line)
+fn conditions(pod: &Pod, palette: &Palette) -> PanelSection {
+    let all_true = pod.conditions.iter().all(Condition::is_true);
+    let color = if all_true { palette.ok } else { palette.mute };
+    PanelSection::new(INSPECTOR_ID, CONDITIONS)
+        .count(true_label(&pod.conditions))
+        .count_color(color)
+        .closed()
+        .child(ConditionTable::new(&pod.conditions))
 }
 
 fn missing(palette: &Palette) -> AnyElement {
@@ -971,40 +903,14 @@ fn or_missing(value: Option<String>) -> SharedString {
     value.map_or_else(|| MISSING.into(), SharedString::from)
 }
 
-fn labels(pod: &Pod, palette: &Palette) -> impl IntoElement {
-    let items = pod.labels.iter().map(|(key, value)| {
-        div()
-            .min_w_0()
-            .max_w_full()
-            .font_family(FONT_MONO)
-            .text_size(TEXT_SMALL)
-            .text_color(palette.fg2)
-            .child(SelectableText::new(format!("{key}={value}")))
-    });
-    section(palette).child(SectionLabel::new("Labels")).child(
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_x(SPACE_5)
-            .gap_y(SPACE_2)
-            .children(items),
-    )
-}
-
-fn volumes(pod: &Pod, palette: &Palette) -> impl IntoElement {
+fn volumes(pod: &Pod) -> PanelSection {
     let rows = pod.volumes.iter().fold(
         KeyValue::new().label_width(INSPECTOR_LABEL),
         |grid, volume| grid.text(volume.name.clone(), volume.source.clone()),
     );
-    section(palette)
-        .child(SectionLabel::new("Volumes"))
+    PanelSection::new(INSPECTOR_ID, VOLUMES)
+        .count(pod.volumes.len().to_string())
         .child(rows)
-}
-
-fn events(pod: &Pod, palette: &Palette) -> impl IntoElement {
-    section(palette)
-        .child(SectionLabel::new(EVENTS))
-        .child(EventList::new(pod.events.clone()))
 }
 
 fn open_logs(target: LogTarget, cx: &mut Context<PodsScreen>) {

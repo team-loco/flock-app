@@ -5,7 +5,6 @@ pub mod changes;
 pub mod cluster;
 pub mod cluster_changes;
 pub mod compare;
-pub mod condition_line;
 pub mod control_plane;
 pub mod crd;
 pub mod diagnosis;
@@ -23,6 +22,7 @@ pub mod helm;
 pub mod history;
 pub mod home;
 pub mod id;
+pub mod issue;
 #[cfg(feature = "loco")]
 pub mod loco;
 pub mod logparse;

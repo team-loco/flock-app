@@ -19,10 +19,10 @@ use gpui::{
 
 use super::{NODE_KIND, ScreenEvent};
 use crate::kit::{
-    Button, CONDITIONS, CapacityMeter, Column, ConditionTable, ConfirmDialog, EVENTS, EventList,
-    FilterBar, FilterEvent, IconButton, Inspector, KeyValue, MenuItem, MetaLine, Meter, MiniMeter,
-    Presence, SectionLabel, SelectableText, StatusText, Table, TableEvent, WhatsWrong, chip_label,
-    confirm, reason_cell, reason_tooltip, slide_in, slide_out,
+    Button, CONDITIONS, CapacityMeter, Column, ConditionTable, ConfirmDialog, FilterBar,
+    FilterEvent, IconButton, Inspector, KeyValue, MenuItem, MetaLine, Meter, MiniMeter,
+    PanelSection, Presence, SectionLabel, SelectableText, StatusText, Table, TableEvent,
+    chip_label, confirm, reason_cell, reason_tooltip, slide_in, slide_out,
 };
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
@@ -329,19 +329,16 @@ impl NodesScreen {
             .mono()
             .width(INSPECTOR_NODE)
             .status(node.status, node.state.clone())
-            .condition(
-                node.diagnosis()
-                    .map(|diagnosis| WhatsWrong::new(node.status, diagnosis)),
-            )
+            .issues(node.issue())
             .actions(div().flex().gap(SPACE_3).children(primary).child(close));
         inspector
             .section(Some(CONDITIONS), ConditionTable::new(&node.conditions))
-            .section(Some(EVENTS), EventList::new(events))
+            .panel(PanelSection::events(INSPECTOR_ID, events))
             .section(None, facts.into_any_element())
             .section(Some("Capacity"), capacity.into_any_element())
             .section(Some(RELATED), related)
             .section(Some("Taints"), label_list(&node.taints, palette))
-            .section(Some("Labels"), label_list(&node.labels, palette))
+            .panel(PanelSection::labels(INSPECTOR_ID, node.labels.clone()))
             .into_any_element()
     }
 }

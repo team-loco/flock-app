@@ -1,29 +1,23 @@
-use crate::kit::SelectableText;
-use std::ops::Range;
-
-use flock_core::workload::{Event, Pod};
+use flock_core::pods::PodEvent;
+use flock_core::workload::Pod;
 use flock_core::{
     Command, ExecEvent, ExecRequest, ExecTarget, LogLevel, LogRequest, LogTarget, ResourceRef,
     Sink, Source, TermSize, Workload,
 };
 use gpui::{
-    AnyElement, AppContext as _, Context, Entity, Focusable, IntoElement, ParentElement, Pixels,
-    Styled, Subscription, Window, div, px, uniform_list,
+    AnyElement, AppContext as _, Context, Entity, Focusable, InteractiveElement, IntoElement,
+    ParentElement, StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
 use super::{WorkloadScreen, logs_tab_label};
 use crate::kit::confirm;
-use crate::kit::status_symbols;
 use crate::kit::{
-    Button, Dock, DockState, DockTab, InputEvent, Level, LogLine, LogView, Segmented, Terminal,
-    TerminalEvent, TextField, TextFieldState,
+    Button, Dock, DockState, DockTab, EventList, InputEvent, Level, LogLine, LogView, Segmented,
+    Terminal, TerminalEvent, TextField, TextFieldState,
 };
 use crate::screens::multilog::MultiLogs;
 use crate::screens::no_shell::{DEBUG_IMAGE, confirm_debug, no_shell_state, start_debug_button};
-use crate::theme::{
-    ActiveTheme, FONT_MONO, LOG_LINE, Palette, SPACE_3, SPACE_4, SPACE_5, SPACE_6, TEXT_GLYPH,
-    TEXT_MONO,
-};
+use crate::theme::{ActiveTheme, SPACE_3, SPACE_4, SPACE_6};
 
 pub const LOGS: usize = 0;
 pub const TERMINAL: usize = 2;
@@ -42,10 +36,7 @@ const NO_SHELL_ID: &str = "workload-no-shell";
 const START_DEBUG_ID: &str = "workload-start-debug";
 const POD_KIND: &str = "Pod";
 
-const EVENT_AGE: Pixels = px(48.);
-const EVENT_GLYPH: Pixels = px(14.);
-const EVENT_REASON: Pixels = px(150.);
-const EVENT_COUNT: Pixels = px(72.);
+const EVENTS_PANE: &str = "workload-events";
 
 pub struct ExecSession {
     input: async_channel::Sender<Vec<u8>>,
@@ -445,7 +436,7 @@ impl WorkloadScreen {
             (Some(pod), Some(container)) => logs_tab_label(pod, &container),
             _ => String::new(),
         };
-        let events = Self::events_pane(workload.events.len(), cx);
+        let events = Self::events_pane(workload.events.clone(), cx);
         let logs_tab = match self.all_pods.as_ref().map(|(view, _)| view.clone()) {
             Some(view) => DockTab::new(LOGS_LABEL)
                 .detail(ALL_PODS_DETAIL)
@@ -481,91 +472,18 @@ impl WorkloadScreen {
         no_shell_state(NO_SHELL_ID, start).into_any_element()
     }
 
-    fn events_pane(count: usize, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn events_pane(events: Vec<PodEvent>, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let palette = *cx.palette();
-        let list = uniform_list("workload-events", count, cx.processor(Self::render_events))
-            .flex_1()
-            .min_h_0();
         div()
+            .id(EVENTS_PANE)
+            .debug_selector(|| EVENTS_PANE.into())
             .size_full()
-            .flex()
-            .flex_col()
-            .py(SPACE_3)
+            .overflow_y_scroll()
+            .px(SPACE_6)
+            .py(SPACE_4)
             .bg(palette.editor)
-            .font_family(FONT_MONO)
-            .text_size(TEXT_MONO)
-            .child(list)
+            .child(EventList::new(events))
     }
-
-    fn render_events(
-        &mut self,
-        range: Range<usize>,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        let palette = *cx.palette();
-        let events = self
-            .workload
-            .as_ref()
-            .map(|w| w.events.as_slice())
-            .unwrap_or_default();
-        range
-            .filter_map(|ix| events.get(ix).map(|event| event_row(event, &palette)))
-            .collect()
-    }
-}
-
-fn event_row(event: &Event, palette: &Palette) -> AnyElement {
-    div()
-        .flex()
-        .items_center()
-        .gap(SPACE_5)
-        .w_full()
-        .h(LOG_LINE)
-        .px(SPACE_6)
-        .whitespace_nowrap()
-        .child(
-            div()
-                .w(EVENT_AGE)
-                .flex_none()
-                .text_color(palette.mute)
-                .child(flock_core::time::age(event.age)),
-        )
-        .child(
-            div()
-                .w(EVENT_GLYPH)
-                .flex_none()
-                .text_size(TEXT_GLYPH)
-                .text_color(palette.status(event.status))
-                .child(status_symbols(event.status.glyph())),
-        )
-        .child(
-            div()
-                .w(EVENT_REASON)
-                .flex_none()
-                .truncate()
-                .text_color(palette.fg)
-                .child(event.reason.clone()),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_color(palette.fg2)
-                .child(SelectableText::new(event.message.clone())),
-        )
-        .child(
-            div()
-                .w(EVENT_COUNT)
-                .flex_none()
-                .flex()
-                .justify_end()
-                .pr(SPACE_4)
-                .text_color(palette.mute)
-                .child(flock_core::units::times(event.count)),
-        )
-        .into_any_element()
 }
 
 #[cfg(test)]

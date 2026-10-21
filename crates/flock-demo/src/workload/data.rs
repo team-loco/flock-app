@@ -1,8 +1,9 @@
 use std::time::Duration;
 
+use flock_core::pods::PodEvent;
 use flock_core::workload::{
-    Commit, ContainerSpec, ContainerStatus, EnvResolution, EnvSource, EnvVar, Event, Exit, Pod,
-    Port, Probe, ProbeAction, Resources, Revision,
+    Commit, ContainerSpec, ContainerStatus, EnvResolution, EnvSource, EnvVar, Exit, Pod, Port,
+    Probe, ProbeAction, Resources, Revision,
 };
 use flock_core::{ClusterId, Condition, ResourceRef, Status, Uid, Workload, WorkloadKind};
 
@@ -370,8 +371,8 @@ fn envoy_container() -> ContainerSpec {
     }
 }
 
-fn event(age: u64, status: Status, reason: &str, message: &str, count: u32) -> Event {
-    Event {
+fn event(age: u64, status: Status, reason: &str, message: &str, count: u32) -> PodEvent {
+    PodEvent {
         age: secs(age),
         status,
         reason: reason.into(),
@@ -380,7 +381,7 @@ fn event(age: u64, status: Status, reason: &str, message: &str, count: u32) -> E
     }
 }
 
-fn events() -> Vec<Event> {
+fn events() -> Vec<PodEvent> {
     let pods_age = POD_AGE;
     vec![
         event(

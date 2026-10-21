@@ -1054,9 +1054,11 @@ mod tests {
         let Some(degraded) = &api.degraded else {
             panic!("degraded missing");
         };
+        let issue = degraded.issue(api.phase.status(), &api.name);
+        assert_eq!(issue.reason, "CreateContainerConfigError");
         assert_eq!(
-            degraded.summary(),
-            "Degraded · CreateContainerConfigError · since 10m"
+            issue.object,
+            format!("Application {} · since 10m", api.name)
         );
         assert_eq!(
             api.resources.as_ref().map(Resources::summary).as_deref(),

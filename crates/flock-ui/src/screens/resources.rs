@@ -21,10 +21,10 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, EVENTS, EmptyState,
-    EventList, FilterBar, FilterEvent, IconButton, Inspector, MenuItem, Presence, Select,
-    SelectEvent, ShowAll, Skeleton, Table, TableEvent, WhatsWrong, chip_label, confirm,
-    reason_cell, reason_tooltip, slide_in, slide_out,
+    Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, EmptyState, FilterBar,
+    FilterEvent, IconButton, Inspector, MenuItem, PanelSection, Presence, Select, SelectEvent,
+    ShowAll, Skeleton, Table, TableEvent, chip_label, confirm, reason_cell, reason_tooltip,
+    slide_in, slide_out,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
@@ -549,17 +549,13 @@ impl ResourcesScreen {
             .mono()
             .width(inspector_width(self.kind))
             .status(row.status, subtitle)
-            .condition(
-                row.diagnosis
-                    .clone()
-                    .map(|diagnosis| WhatsWrong::new(row.status, diagnosis)),
-            )
+            .issues(row.issue(self.kind.name()))
             .actions(actions);
         if !row.conditions.is_empty() {
             inspector = inspector.section(Some(CONDITIONS), ConditionTable::new(&row.conditions));
         }
         inspector
-            .section(Some(EVENTS), EventList::new(events))
+            .panel(PanelSection::events(INSPECTOR_ID, events))
             .section(Some(RELATED), related)
             .section(Some(YAML), yaml)
             .into_any_element()

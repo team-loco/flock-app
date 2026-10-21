@@ -4,12 +4,16 @@ use std::time::Duration;
 
 use crate::diagnosis::{self, Condition, Diagnosis};
 use crate::filter::{FilterSpec, StatusFilter, TextFilter};
+use crate::issue::{Issue, object_line};
+use crate::overview::plural;
 use crate::related::{DEPLOYMENT, REPLICA_SET, deployment_name};
 use crate::resource::short_kind;
 use crate::{ClusterId, Counts, ResourceRef, Status, Uid, time, units};
 
 pub const POD_KIND: &str = "Pod";
 const RESTARTS_ERR: u32 = 5;
+const RESTART_ONE: &str = "restart";
+const RESTART_MANY: &str = "restarts";
 const SHORT_NAME_MIN: usize = 4;
 const SEPARATOR: &str = " · ";
 const ARROW: &str = " → ";
@@ -122,12 +126,10 @@ pub struct Termination {
 
 impl Termination {
     pub fn detail(&self) -> String {
+        let reason = (!self.reason.is_empty()).then(|| self.reason.clone());
         let exit = format!("exit {}", self.exit_code);
         let ago = self.ago.map(|ago| format!("{} ago", time::age(ago)));
-        std::iter::once(exit)
-            .chain(ago)
-            .collect::<Vec<_>>()
-            .join(SEPARATOR)
+        object_line([reason, Some(exit), ago])
     }
 
     pub fn run(&self) -> Option<String> {
@@ -140,10 +142,6 @@ impl Termination {
                 .collect::<Vec<_>>()
                 .join(SEPARATOR),
         )
-    }
-
-    pub fn span(&self) -> Option<String> {
-        self.run().map(|run| format!("ran {run}"))
     }
 }
 
@@ -190,10 +188,7 @@ impl Container {
     }
 
     pub fn restarts_label(&self) -> String {
-        match self.restarts {
-            1 => "1 restart".to_owned(),
-            n => format!("{n} restarts"),
-        }
+        restarts_label(self.restarts)
     }
 
     pub fn probes_label(&self) -> Option<String> {
@@ -369,6 +364,24 @@ impl Pod {
             .or_else(|| failing(Status::Warn))
             .or_else(|| Some(Diagnosis::new(self.reason.clone(), String::new())))
     }
+
+    pub fn issue(&self) -> Option<Issue> {
+        let diagnosis = self.diagnosis()?;
+        let object = pod_object(&self.name, self.restarts());
+        Some(Issue::from_diagnosis(self.status, &diagnosis, object))
+    }
+}
+
+pub fn restarts_label(count: u32) -> String {
+    let count = usize::try_from(count).unwrap_or(usize::MAX);
+    plural(count, RESTART_ONE, RESTART_MANY)
+}
+
+pub fn pod_object(name: &str, restarts: u32) -> String {
+    object_line([
+        Some(format!("{POD_KIND} {name}")),
+        (restarts > 0).then(|| restarts_label(restarts)),
+    ])
 }
 
 pub fn owner_segment(owner: &ResourceRef) -> String {
@@ -611,6 +624,21 @@ mod tests {
     }
 
     #[test]
+    fn only_a_pod_with_a_problem_has_an_issue_naming_it_and_its_restarts() {
+        let issue = crashing().issue();
+        assert_eq!(
+            issue.as_ref().map(|i| i.reason.as_str()),
+            Some("CrashLoopBackOff")
+        );
+        assert_eq!(
+            issue.map(|i| i.object).as_deref(),
+            Some("Pod checkout-api-7f9c6d-x2lqp · 14 restarts")
+        );
+        assert_eq!(healthy("web-0", "shop").issue(), None);
+        assert_eq!(restarts_label(1), "1 restart");
+    }
+
+    #[test]
     fn diagnosis_prefers_failing_containers_then_conditions() {
         let mut pod = crashing();
         pod.containers[0].message = "OOMKilled, exit 137".into();
@@ -836,11 +864,7 @@ mod tests {
             ago: Some(Duration::from_hours(15)),
             ran: Some(Duration::from_mins(6 * 60 + 6)),
         };
-        assert_eq!(last.detail(), "exit 1 · 15h ago");
-        assert_eq!(
-            last.span().as_deref(),
-            Some("ran 2026-10-19 16:31 → 2026-10-20 02:37 · 6h 6m")
-        );
+        assert_eq!(last.detail(), "Error · exit 1 · 15h ago");
         let unknown = Termination {
             exit_code: 137,
             ..Termination::default()
@@ -850,7 +874,7 @@ mod tests {
             Some("2026-10-19 16:31 → 2026-10-20 02:37 · 6h 6m")
         );
         assert_eq!(unknown.detail(), "exit 137");
-        assert_eq!(unknown.span(), None);
+        assert_eq!(unknown.run(), None);
     }
 
     #[test]

@@ -1,13 +1,18 @@
 use std::time::Duration;
 
-use crate::condition_line::ConditionLine;
-use crate::diagnosis::Condition;
+use crate::diagnosis::{Condition, needs_diagnosis};
+use crate::issue::{Issue, failing_condition, object_line};
+use crate::pods::{PodEvent, pod_object};
 use crate::{ResourceRef, Status, Uid, time, units};
 
 pub const PROGRESS_DEADLINE: &str = "ProgressDeadlineExceeded";
 const NONE: &str = "—";
 const FIELD_SEPARATOR: &str = " · ";
 const LIMIT_SEPARATOR: &str = " / ";
+const NOT_IN: &str = "not in";
+const HAS: &str = "has";
+const NOT_FOUND: &str = "not found";
+const OPTIONAL: &str = "optional:";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum WorkloadKind {
@@ -80,7 +85,7 @@ pub struct Workload {
     pub revisions: Vec<Revision>,
     pub history_pending: bool,
     pub containers: Vec<ContainerSpec>,
-    pub events: Vec<Event>,
+    pub events: Vec<PodEvent>,
 }
 
 impl Workload {
@@ -95,11 +100,20 @@ impl Workload {
             .any(|condition| condition.reason == PROGRESS_DEADLINE)
     }
 
-    pub fn condition_line(&self) -> Option<ConditionLine> {
+    pub fn issues(&self) -> Vec<Issue> {
         if self.pending.is_some() {
-            return None;
+            return Vec::new();
         }
-        ConditionLine::pick(&self.conditions)
+        let kind = self.kind.kind();
+        let name = &self.target.name;
+        let condition = failing_condition(&self.conditions)
+            .map(|condition| Issue::from_condition(kind, name, condition));
+        let pods = self
+            .pods
+            .iter()
+            .filter(|pod| needs_diagnosis(pod.status))
+            .map(|pod| pod.issue(&self.events));
+        condition.into_iter().chain(pods).collect()
     }
 
     pub fn ready_label(&self) -> String {
@@ -238,6 +252,16 @@ impl Pod {
     pub fn age_label(&self) -> String {
         time::age(self.age)
     }
+
+    fn issue(&self, events: &[PodEvent]) -> Issue {
+        let message = events
+            .iter()
+            .find(|event| needs_diagnosis(event.status) && event.message.contains(&self.name))
+            .map(|event| event.message.clone())
+            .unwrap_or_default();
+        let object = pod_object(&self.name, self.restarts());
+        Issue::new(self.status, self.phase.clone(), message, object)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -258,9 +282,9 @@ pub struct Exit {
 impl Exit {
     pub fn label(&self) -> String {
         format!(
-            "{} ({}) · {} ago",
-            self.code,
+            "{} · exit {} · {} ago",
             self.reason,
+            self.code,
             time::age(self.ago)
         )
     }
@@ -399,6 +423,15 @@ impl EnvSource {
         }
     }
 
+    fn key(&self) -> Option<(&str, &'static str)> {
+        match self {
+            Self::Value(_) => None,
+            Self::SecretKey { key, .. } => Some((key, "secret")),
+            Self::ConfigMapKey { key, .. } => Some((key, "configmap")),
+            Self::Field(_) => None,
+        }
+    }
+
     fn object(&self) -> Option<String> {
         match self {
             Self::Value(_) => None,
@@ -435,38 +468,25 @@ impl EnvVar {
     }
 
     pub fn note(&self) -> Option<String> {
-        let object = self.source.object().unwrap_or_default();
         match &self.resolution {
             EnvResolution::Literal => None,
             EnvResolution::Resolved => None,
-            EnvResolution::MissingKey { optional, keys } => Some(format!(
-                "Key not found, {} {object} has: {}.",
-                consequence(*optional),
-                keys.join(", ")
-            )),
-            EnvResolution::MissingObject { optional } => Some(format!(
-                "{object} does not exist, {}",
-                consequence(*optional)
-            )),
+            EnvResolution::MissingKey { optional, keys } => {
+                let (key, kind) = self.source.key()?;
+                Some(object_line([
+                    Some(format!("key {key} {NOT_IN} {kind}")),
+                    Some(format!("{OPTIONAL} {optional}")),
+                    (!keys.is_empty()).then(|| format!("{HAS} {}", keys.join(", "))),
+                ]))
+            }
+            EnvResolution::MissingObject { optional } => Some(object_line([
+                self.source
+                    .object()
+                    .map(|object| format!("{object} {NOT_FOUND}")),
+                Some(format!("{OPTIONAL} {optional}")),
+            ])),
         }
     }
-}
-
-fn consequence(optional: bool) -> &'static str {
-    if optional {
-        "so the var is empty (optional: true)."
-    } else {
-        "so the container cannot start."
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Event {
-    pub age: Duration,
-    pub status: Status,
-    pub reason: String,
-    pub message: String,
-    pub count: u32,
 }
 
 #[cfg(test)]
@@ -660,7 +680,7 @@ pub(crate) mod tests {
             reason: "Error".into(),
             ago: Duration::from_secs(120),
         };
-        assert_eq!(exit.label(), "1 (Error) · 2m ago");
+        assert_eq!(exit.label(), "Error · exit 1 · 2m ago");
     }
 
     #[test]
@@ -680,9 +700,7 @@ pub(crate) mod tests {
         assert_eq!(var.source.label(), "← secret stripe / webhook_secret");
         assert_eq!(
             var.note().as_deref(),
-            Some(
-                "Key not found, so the var is empty (optional: true). secret/stripe has: api-key, webhook-secret."
-            )
+            Some("key webhook_secret not in secret · optional: true · has api-key, webhook-secret")
         );
         let gone = EnvVar {
             resolution: EnvResolution::MissingObject { optional: false },
@@ -690,7 +708,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             gone.note().as_deref(),
-            Some("secret/stripe does not exist, so the container cannot start.")
+            Some("secret/stripe not found · optional: false")
         );
     }
 
@@ -772,15 +790,29 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_status_line_is_the_condition_unless_an_action_is_pending() {
-        let mut w = workload(vec![crashing("a")], true);
+    fn issues_lead_with_the_failing_condition_then_failing_pods_unless_an_action_is_pending() {
+        let mut w = workload(vec![crashing("a"), running("b")], true);
+        w.events = vec![PodEvent {
+            status: Status::Err,
+            reason: "BackOff".into(),
+            message: "Back-off restarting failed container api in pod a".into(),
+            count: 14,
+            age: Duration::from_secs(120),
+        }];
         assert!(w.stalled());
+        let issues = w.issues();
+        let reasons: Vec<&str> = issues.iter().map(|i| i.reason.as_str()).collect();
+        assert_eq!(reasons, ["ProgressDeadlineExceeded", "CrashLoopBackOff"]);
         assert_eq!(
-            w.condition_line().map(|line| line.compact()).as_deref(),
-            Some("Progressing=False · ProgressDeadlineExceeded")
+            issues[0].object,
+            "Deployment checkout-api · Progressing=False"
+        );
+        assert_eq!(
+            issues[1].message,
+            "Back-off restarting failed container api in pod a"
         );
         w.pending = Some(Pending::Restarting);
-        assert_eq!(w.condition_line(), None);
-        assert!(!workload(Vec::new(), false).stalled());
+        assert_eq!(w.issues(), Vec::new());
+        assert_eq!(workload(vec![running("b")], false).issues(), Vec::new());
     }
 }

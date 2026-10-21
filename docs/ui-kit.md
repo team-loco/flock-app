@@ -555,17 +555,41 @@ Values outside 0..=1 (or 0..=max) are clamped; NaN reads as 0.
 ## Inspector
 
 The side panel next to a list (`panel` background, rule on the left, scrolls on its own). A header
-with the title, an optional status line and actions, then sections separated by rules.
+with the title, an optional status line and actions, error blocks when something is wrong, then
+collapsible sections.
 
 ```rust
 Inspector::new("node-inspector", "ip-10-4-31-12")
     .mono()
     .status(Status::Warn, "SchedulingDisabled")
-    .actions(div().flex().gap(SPACE_3).child(primary).child(self.menu.clone()).child(close))
-    .section(None, KeyValue::new().row("zone", "us-east-1c"))
-    .section(Some("Conditions"), conditions)
+    .actions(div().flex().gap(SPACE_3).child(primary).child(close))
+    .issues(node.issue())                  // ErrorBlocks; nothing when empty
+    .section(None, KeyValue::new().row("zone", "us-east-1c"))   // plain block
+    .section(Some("Conditions"), conditions)                    // PanelSection
+    .panel(PanelSection::events("node-inspector", events))
     .width(px(480.))                       // default `theme::INSPECTOR` (360)
 ```
+
+### Panel sections, error blocks, labels and events
+
+Every side panel, including custom layouts, uses the same pieces from `kit/panel.rs`:
+
+```rust
+PanelSection::new("pod-inspector", "Containers")   // id pod-inspector-containers
+    .count("1 · 1 restart").count_color(palette.warn)
+    .trailing(Link::new("all", "All →"))           // right of the header, does not toggle
+    .closed()                                      // default when nothing is saved
+    .child(body)
+PanelSection::events(panel, events)                // "N · last 1h", EventList body
+PanelSection::labels(panel, labels)                // count + LabelChips
+ErrorBlocks::new(issues).on_open(|ix, window, cx| ..)  // top of a panel
+issue_stack(issues)                                // the same blocks inside a header (split panes)
+EventRow::new(event).on_click("namespace-event-0", ..)
+```
+
+The header toggles on click (`{id}-toggle`, body `{id}-body`) and the state is saved in
+`AppSettings::open_sections` under the section id. Error blocks carry `error-block-{ix}`; an empty
+event list renders `events-empty` ("No events in the last 1h").
 
 Drag the left edge to resize between `theme::INSPECTOR_MIN` and `INSPECTOR_MAX`; double-click
 resets to the builder width. Width is saved per inspector id in the existing app settings (`settings.json` in the Flock data

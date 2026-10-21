@@ -2,10 +2,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
+use flock_core::pods::PodEvent;
 use flock_core::stream::Sink;
 use flock_core::workload::{
-    Commit, ContainerSpec, ContainerStatus, EnvResolution, EnvSource, EnvVar, Event, Exit, Pod,
-    Port, Probe, ProbeAction, Resources, Revision,
+    Commit, ContainerSpec, ContainerStatus, EnvResolution, EnvSource, EnvVar, Exit, Pod, Port,
+    Probe, ProbeAction, Resources, Revision,
 };
 use flock_core::{Condition, ResourceRef, Uid, Workload, WorkloadKind};
 use futures::{StreamExt, stream};
@@ -401,9 +402,9 @@ pub fn events(
     pods: &BTreeSet<String>,
     raw: &[Arc<core::Event>],
     now: Timestamp,
-) -> Vec<Event> {
+) -> Vec<PodEvent> {
     let namespace = target.namespace.as_deref();
-    let mut rows: Vec<Event> = raw
+    let mut rows: Vec<PodEvent> = raw
         .iter()
         .filter(|e| e.involved_object.namespace.as_deref() == namespace)
         .filter(|e| {
@@ -415,7 +416,7 @@ pub fn events(
         })
         .map(|e| {
             let row = detail::event(e, now);
-            Event {
+            PodEvent {
                 age: row.age,
                 status: row.status,
                 reason: row.reason,
@@ -779,9 +780,7 @@ mod tests {
         );
         assert_eq!(
             spec.env[1].note().as_deref(),
-            Some(
-                "Key not found, so the container cannot start. secret/stripe has: webhook-secret."
-            )
+            Some("key webhook_secret not in secret · optional: false · has webhook-secret")
         );
     }
 

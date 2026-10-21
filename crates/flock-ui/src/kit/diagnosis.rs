@@ -1,105 +1,21 @@
-use flock_core::condition_line::{ConditionLine, LineText};
-use flock_core::pods::PodEvent;
 use flock_core::{Condition, Diagnosis, Status};
 use gpui::{
-    AnyElement, App, FontWeight, HighlightStyle, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, SharedString, Styled, Window, div, prelude::FluentBuilder, relative,
+    AnyElement, App, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
+    Styled, Window, div, relative,
 };
 
-use super::selectable::{SelectableText, SelectableWords};
+use super::selectable::SelectableText;
 use super::status::StatusGlyph;
 use crate::theme::{
     ActiveTheme, CONDITION_AGE, CONDITION_VALUE, FONT_MONO, GLYPH_SLOT, LINE_PROSE, SPACE_1,
-    SPACE_3, SPACE_4, SPACE_5, TEXT_LABEL, TEXT_MONO, TEXT_SMALL, WHATS_WRONG_BAR,
+    SPACE_3, SPACE_4, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
 };
 
 pub const CONDITIONS: &str = "Conditions";
 pub const EVENTS: &str = "Events";
 const NO_CONDITIONS: &str = "No conditions reported.";
-const NO_EVENTS: &str = "No recent events.";
 const MISSING: &str = "—";
 const HEADERS: [&str; 3] = ["Type", "Status", "Age"];
-
-#[derive(IntoElement)]
-pub struct ConditionText {
-    line: ConditionLine,
-}
-
-impl ConditionText {
-    pub fn new(line: ConditionLine) -> Self {
-        Self { line }
-    }
-}
-
-impl RenderOnce for ConditionText {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let palette = cx.palette();
-        let LineText {
-            text,
-            head,
-            separator,
-        } = self.line.full();
-        let head_style = HighlightStyle {
-            color: Some(palette.status(self.line.status)),
-            ..HighlightStyle::default()
-        };
-        let separator_style = HighlightStyle {
-            color: Some(palette.mute),
-            ..HighlightStyle::default()
-        };
-        let highlights = std::iter::once((head, head_style))
-            .chain(separator.map(|range| (range, separator_style)));
-        div()
-            .font_family(FONT_MONO)
-            .text_size(TEXT_MONO)
-            .child(SelectableText::new(text).highlights(highlights))
-    }
-}
-
-#[derive(IntoElement)]
-pub struct WhatsWrong {
-    status: Status,
-    diagnosis: Diagnosis,
-}
-
-impl WhatsWrong {
-    pub fn new(status: Status, diagnosis: Diagnosis) -> Self {
-        Self { status, diagnosis }
-    }
-}
-
-impl RenderOnce for WhatsWrong {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let palette = cx.palette();
-        let color = palette.status(self.status);
-        let fg = palette.fg;
-        let message = self.diagnosis.message;
-        div()
-            .debug_selector(|| "whats-wrong".into())
-            .flex()
-            .flex_col()
-            .gap(SPACE_3)
-            .pl(SPACE_5)
-            .border_l(WHATS_WRONG_BAR)
-            .border_color(color)
-            .child(
-                div()
-                    .font_family(FONT_MONO)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(color)
-                    .child(SelectableText::new(self.diagnosis.reason)),
-            )
-            .when(!message.is_empty(), |block| {
-                block.child(
-                    div()
-                        .min_w_0()
-                        .text_color(fg)
-                        .line_height(relative(LINE_PROSE))
-                        .child(SelectableWords::new(message)),
-                )
-            })
-    }
-}
 
 #[derive(IntoElement)]
 pub struct ConditionTable {
@@ -212,75 +128,6 @@ impl RenderOnce for ConditionTable {
             .flex_col()
             .gap(SPACE_4)
             .child(header)
-            .children(rows)
-            .into_any_element()
-    }
-}
-
-#[derive(IntoElement)]
-pub struct EventList {
-    events: Vec<PodEvent>,
-}
-
-impl EventList {
-    pub fn new(events: Vec<PodEvent>) -> Self {
-        Self { events }
-    }
-}
-
-impl RenderOnce for EventList {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let palette = *cx.palette();
-        if self.events.is_empty() {
-            return div()
-                .text_color(palette.mute)
-                .child(NO_EVENTS)
-                .into_any_element();
-        }
-        let rows: Vec<AnyElement> = self
-            .events
-            .into_iter()
-            .map(|event| {
-                let when = SharedString::from(format!(
-                    "{} · {}",
-                    flock_core::units::times(event.count),
-                    flock_core::time::age(event.age)
-                ));
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(SPACE_1)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(SPACE_3)
-                            .font_family(FONT_MONO)
-                            .text_size(TEXT_MONO)
-                            .child(StatusGlyph::new(event.status))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(SelectableText::new(event.reason)),
-                            )
-                            .child(div().flex_none().text_color(palette.mute).child(when)),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .text_color(palette.fg2)
-                            .line_height(relative(LINE_PROSE))
-                            .child(SelectableText::new(event.message)),
-                    )
-                    .into_any_element()
-            })
-            .collect();
-        div()
-            .debug_selector(|| "object-events".into())
-            .flex()
-            .flex_col()
-            .gap(SPACE_5)
             .children(rows)
             .into_any_element()
     }

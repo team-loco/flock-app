@@ -14,23 +14,23 @@ use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, div,
-    prelude::FluentBuilder, px, relative,
+    prelude::FluentBuilder, px,
 };
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    ActionMenu, Button, CodeView, Column, ConditionText, ConfirmDialog, DockState, EmptyState,
-    Entrance, ErrorState, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView, MenuItem,
-    PageHeader, Rule, SectionHeader, SectionLabel, Segmented, Skeleton, StatusText, Table,
-    TableEvent, Terminal, TextFieldState, Toast, Width, confirm, min_row_width, slide_in, toast,
+    ActionMenu, Button, CodeView, Column, ConfirmDialog, DockState, EmptyState, Entrance,
+    ErrorBlocks, ErrorState, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView,
+    MenuItem, PageHeader, PanelSection, Rule, SectionHeader, SectionLabel, Segmented,
+    SelectableWords, Skeleton, StatusText, Table, TableEvent, Terminal, TextFieldState, Toast,
+    Width, confirm, issue_stack, min_row_width, slide_in, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::related::{OnPick, Pick, page_sections};
 use crate::screens::{EDIT_YAML, FullView, edit_item, full_view_link};
 use crate::theme::{
-    ActiveTheme, FIELD_LABEL, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE, RULE, SPACE_1,
-    SPACE_2, SPACE_3, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_CONTROL, TEXT_GLYPH, TEXT_MONO,
-    TEXT_SMALL,
+    ActiveTheme, FIELD_LABEL, FONT_MONO, Palette, ROW_TABLE, RULE, SECTION_HEADER, SPACE_1,
+    SPACE_3, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_GLYPH, TEXT_MONO, TEXT_SMALL,
 };
 
 pub const KEY_CONTEXT: &str = "Workload";
@@ -42,7 +42,9 @@ const PODS_HINT: &str = "click to follow logs";
 const ROLLOUT_HISTORY: &str = "Rollout history";
 const NO_HISTORY: &str = "No rollouts recorded for this workload.";
 const CONTAINER: &str = "Container";
-const ENVIRONMENT: &str = "Environment · resolved";
+const ENVIRONMENT: &str = "Environment";
+const SPEC: &str = "Spec";
+const MISSING: &str = "missing";
 const CURRENT: &str = "current";
 const ACTIONS: &str = "Actions";
 const ACTIONS_KEYS: &str = "⌘.";
@@ -72,9 +74,6 @@ const NOTE_WIDTH: Pixels = px(90.);
 
 const INSPECTOR_WIDTH: Pixels = px(320.);
 const INSPECTOR_ID: &str = "workload-inspector";
-const INSPECTOR_HEADER: Pixels = px(30.);
-const ENV_PAD_X: Pixels = px(7.);
-const ENV_PAD_Y: Pixels = px(5.);
 const ENV_INDENT: Pixels = px(16.);
 
 const RESTART: &str = "Restart rollout";
@@ -239,7 +238,7 @@ impl WorkloadScreen {
             .mono()
             .status(workload.status(), workload.ready_label())
             .action(cluster)
-            .detail(compact_status_line(workload))
+            .detail(issue_stack(workload.issues()))
             .footer(full_view_link("workload-full-view", open));
         let fields: Vec<AnyElement> = workload
             .fields()
@@ -471,7 +470,6 @@ impl WorkloadScreen {
             .mono()
             .status(workload.status(), workload.ready_label())
             .action(self.menu.clone())
-            .detail(status_line(workload))
             .meta(meta)
     }
 
@@ -613,7 +611,7 @@ impl WorkloadScreen {
             .flex()
             .flex_none()
             .items_center()
-            .h(INSPECTOR_HEADER)
+            .h(SECTION_HEADER)
             .px(SPACE_6)
             .border_b(RULE)
             .border_color(palette.line)
@@ -660,7 +658,7 @@ impl WorkloadScreen {
             .flex()
             .flex_none()
             .items_center()
-            .h(INSPECTOR_HEADER)
+            .h(SECTION_HEADER)
             .px(SPACE_6)
             .border_b(RULE)
             .border_color(palette.line)
@@ -684,13 +682,14 @@ impl WorkloadScreen {
             .border_color(palette.line)
             .bg(palette.panel)
             .text_size(TEXT_BODY)
+            .child(ErrorBlocks::new(workload.issues()))
             .child(header)
             .children(spec)
             .children(env);
         InspectorPane::new(INSPECTOR_ID, content).width(INSPECTOR_WIDTH)
     }
 
-    fn spec(&self, spec: &ContainerSpec, palette: &Palette) -> impl IntoElement {
+    fn spec(&self, spec: &ContainerSpec, palette: &Palette) -> PanelSection {
         let ports: Vec<String> = spec
             .ports
             .iter()
@@ -721,12 +720,7 @@ impl WorkloadScreen {
                     .child(SelectableText::new(exit)),
             );
         }
-        div()
-            .px(SPACE_6)
-            .py(SPACE_5)
-            .border_b(RULE)
-            .border_color(palette.line)
-            .child(grid)
+        PanelSection::new(INSPECTOR_ID, SPEC).child(grid)
     }
 }
 
@@ -754,63 +748,46 @@ fn fixed(width: Pixels) -> gpui::Div {
         .whitespace_nowrap()
 }
 
-fn env_section(env: &[EnvVar], palette: &Palette) -> impl IntoElement {
-    let boxes = env.iter().map(|var| env_box(var, palette));
-    div()
-        .flex()
-        .flex_col()
-        .child(
-            div()
-                .px(SPACE_6)
-                .pt(SPACE_5)
-                .pb(SPACE_2)
-                .child(SectionLabel::new(ENVIRONMENT)),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(SPACE_3)
-                .px(SPACE_6)
-                .pb(SPACE_5)
-                .border_b(RULE)
-                .border_color(palette.line)
-                .children(boxes),
-        )
+fn env_section(env: &[EnvVar], palette: &Palette) -> PanelSection {
+    let missing = env
+        .iter()
+        .filter(|var| var.status() == Some(Status::Err))
+        .count();
+    let section = PanelSection::new(INSPECTOR_ID, ENVIRONMENT);
+    let section = if missing > 0 {
+        section
+            .count(format!("{}{META_SEPARATOR}{missing} {MISSING}", env.len()))
+            .count_color(palette.err)
+    } else {
+        section.count(env.len().to_string())
+    };
+    let rows = env.iter().map(|var| env_row(var, palette));
+    section.child(div().flex().flex_col().gap(SPACE_3).children(rows))
 }
 
-fn env_box(var: &EnvVar, palette: &Palette) -> impl IntoElement {
-    let status = var.status();
-    let (glyph, color) = match status {
+fn env_row(var: &EnvVar, palette: &Palette) -> impl IntoElement {
+    let (glyph, color) = match var.status() {
         Some(status) => (status.glyph(), palette.status(status)),
         None => (PLAIN_GLYPH, palette.mute),
     };
-    let failing = status == Some(Status::Err);
-    let note = var.note().map(|note| {
+    let line = |text: String, color| {
         div()
             .pl(ENV_INDENT)
-            .text_size(TEXT_CONTROL)
-            .line_height(relative(LINE_PROSE))
-            .text_color(palette.fg2)
-            .child(note)
-    });
+            .text_color(color)
+            .child(SelectableWords::new(text))
+    };
+    let note = var.note().map(|note| line(note, palette.err));
     div()
         .flex()
         .flex_col()
         .gap(SPACE_1)
-        .px(ENV_PAD_X)
-        .py(ENV_PAD_Y)
-        .rounded(RADIUS)
-        .when(failing, |row| {
-            row.bg(palette.errbg).border(RULE).border_color(palette.err)
-        })
+        .font_family(FONT_MONO)
+        .text_size(TEXT_SMALL)
         .child(
             div()
                 .flex()
                 .items_center()
                 .gap(SPACE_3)
-                .font_family(FONT_MONO)
-                .text_size(TEXT_SMALL)
                 .child(
                     div()
                         .text_size(TEXT_GLYPH)
@@ -819,14 +796,7 @@ fn env_box(var: &EnvVar, palette: &Palette) -> impl IntoElement {
                 )
                 .child(div().text_color(palette.fg).child(var.name.clone())),
         )
-        .child(
-            div()
-                .pl(ENV_INDENT)
-                .font_family(FONT_MONO)
-                .text_size(TEXT_SMALL)
-                .text_color(palette.fg2)
-                .child(var.source.label()),
-        )
+        .child(line(var.source.label(), palette.fg2))
         .children(note)
 }
 
@@ -1133,16 +1103,6 @@ fn unavailable_note(target: &ResourceRef) -> String {
         "{} {target} is not available on {}.",
         target.kind, target.cluster
     )
-}
-
-fn status_line(workload: &Workload) -> Option<ConditionText> {
-    workload.condition_line().map(ConditionText::new)
-}
-
-fn compact_status_line(workload: &Workload) -> Option<SelectableText> {
-    workload
-        .condition_line()
-        .map(|line| SelectableText::new(line.compact()))
 }
 
 #[cfg(test)]
