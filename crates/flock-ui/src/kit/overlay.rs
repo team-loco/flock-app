@@ -204,6 +204,15 @@ pub fn toast_titles(cx: &App) -> Vec<SharedString> {
         .collect()
 }
 
+pub fn toast_details(cx: &App) -> Vec<Option<SharedString>> {
+    let overlays = layer(cx);
+    let shown = &overlays.read(cx).toasts;
+    shown
+        .iter()
+        .map(|shown| shown.toast.detail.clone())
+        .collect()
+}
+
 pub fn toast_statuses(cx: &App) -> Vec<Status> {
     let overlays = layer(cx);
     let shown = &overlays.read(cx).toasts;

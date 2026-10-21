@@ -58,8 +58,8 @@ pub use menu::{ActionMenu, MenuItem};
 pub use modal::Modal;
 pub use navigation::{HeaderNavigation, HistoryJump};
 pub use overlay::{
-    ConfirmDialog, Overlays, Toast, confirm, layer as overlay_layer, toast, toast_statuses,
-    toast_titles,
+    ConfirmDialog, Overlays, Toast, confirm, layer as overlay_layer, toast, toast_details,
+    toast_statuses, toast_titles,
 };
 pub(crate) use popover::{Dismissal, Step, above_right, appear, shadow, step, surface};
 pub use presence::{Entrance, Motion, Presence, slide_in, slide_out, swap_in};

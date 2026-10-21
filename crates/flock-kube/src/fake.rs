@@ -161,6 +161,7 @@ pub fn supervised(
 pub const SEEN: &str = "seen-uid";
 pub const RECREATED: &str = "recreated-uid";
 const CONFLICT: &str = r#"{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Conflict","code":409,"message":"Precondition failed: UID mismatch"}"#;
+const ETCD_TIMEOUT: &str = r#"{"kind":"Status","apiVersion":"v1","status":"Failure","message":"etcdserver: request timed out","code":500}"#;
 const UID_POINTERS: [&str; 3] = ["/preconditions/uid", "/metadata/uid", "/0/value"];
 
 fn object(kind: &str, uid: &str) -> String {
@@ -202,7 +203,31 @@ pub fn recreated(
         *lock(&state) = true;
         Some((StatusCode::OK, current))
     });
-    let (manager, handle) = handle(&client);
+    let (manager, handle) = registered(&client);
+    (manager, handle, traffic, changed)
+}
+
+pub fn overloaded(
+    kind: &'static str,
+    timeouts: usize,
+) -> (ClusterManager, ClusterHandle, Arc<Traffic>) {
+    let writes = AtomicUsize::new(0);
+    let (client, traffic) = client(Duration::ZERO, move |method, _| {
+        let current = object(kind, SEEN);
+        if method != Method::PATCH {
+            return Some((StatusCode::OK, current));
+        }
+        if writes.fetch_add(1, Ordering::SeqCst) < timeouts {
+            return Some((StatusCode::INTERNAL_SERVER_ERROR, ETCD_TIMEOUT.to_owned()));
+        }
+        Some((StatusCode::OK, current))
+    });
+    let (manager, handle) = registered(&client);
+    (manager, handle, traffic)
+}
+
+fn registered(client: &Client) -> (ClusterManager, ClusterHandle) {
+    let (manager, handle) = handle(client);
     let mut resources = lock(&handle.shared.resources);
     for (api_version, name, resource) in [
         ("v1", "ConfigMap", ApiResource::erase::<ConfigMap>(&())),
@@ -216,5 +241,5 @@ pub fn recreated(
         resources.insert((api_version.to_owned(), name.to_owned()), resource);
     }
     drop(resources);
-    (manager, handle, traffic, changed)
+    (manager, handle)
 }

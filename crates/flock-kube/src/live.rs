@@ -116,6 +116,7 @@ struct Connected {
     id: ClusterId,
     handle: ClusterHandle,
     _background: Vec<Subscription>,
+    helm: Option<Subscription>,
     extras: Extras,
     usage_task: Option<TaskGuard>,
     pod_usage_task: Option<TaskGuard>,
@@ -134,6 +135,7 @@ impl Connected {
             id,
             handle,
             _background: background,
+            helm: None,
             extras: Extras::default(),
             usage_task: None,
             pod_usage_task: None,
@@ -171,7 +173,6 @@ struct Navigation {
     crd: Option<CrdKey>,
     custom: Option<CustomWatch>,
     helm: Option<HelmKey>,
-    helm_watch: Option<(ClusterId, Subscription)>,
     yaml: Option<(ResourceRef, String)>,
     inspecting: Option<Inspecting>,
     yaml_task: Option<TaskGuard>,
@@ -197,7 +198,6 @@ impl Navigation {
             crd: None,
             custom: None,
             helm: None,
-            helm_watch: None,
             yaml: None,
             inspecting: None,
             yaml_task: None,
@@ -454,52 +454,41 @@ impl Live {
         let shown = self
             .navigation
             .selected
-            .clone()
+            .as_ref()
             .filter(|_| self.navigation.page == Page::Releases);
-        let Some((cluster, handle)) =
-            shown.and_then(|cluster| Some((cluster.clone(), self.handle(&cluster)?.clone())))
+        let Some(cluster) =
+            shown.and_then(|shown| self.clusters.values_mut().find(|c| &c.id == shown))
         else {
-            self.navigation.helm_watch = None;
             return;
         };
-        let current = self
-            .navigation
-            .helm_watch
-            .as_ref()
-            .is_some_and(|(known, watch)| known == &cluster && watch.belongs_to(&handle));
-        if !current {
-            let watch = handle.subscribe(WatchKind::HelmStorage);
-            self.navigation.helm_watch = Some((cluster, watch));
+        if cluster.helm.is_none() {
+            cluster.helm = Some(cluster.handle.subscribe(WatchKind::HelmStorage));
         }
     }
 
     fn helm(&self, now: Timestamp) -> (Vec<HelmRelease>, Vec<HelmReleaseDetail>) {
         let mut releases = Vec::new();
         let mut details = Vec::new();
-        let mut shown: Vec<ClusterId> = Vec::new();
-        for navigation in self.navigations() {
-            let Some((cluster, _)) = &navigation.helm_watch else {
-                continue;
-            };
-            let Some(handle) = self.handle(cluster) else {
-                continue;
-            };
-            let secrets = handle.objects::<k8s_openapi::api::core::v1::Secret>();
-            let decoded = self.helm_cache.releases(cluster, &secrets);
-            if !shown.contains(cluster) {
-                let flux = handle.custom_objects(&crate::helm::flux_kind());
-                let owners = crate::helm::owners(cluster, &flux);
-                releases.extend(crate::helm::summaries(cluster, &decoded, &owners, now));
-                shown.push(cluster.clone());
-            }
-            let detail = navigation
-                .helm
-                .as_ref()
-                .filter(|key| &key.cluster == cluster)
-                .and_then(|key| crate::helm::detail(key, &decoded, now));
-            details.extend(detail);
+        let mut watched: Vec<ClusterId> = Vec::new();
+        for cluster in self.clusters.values().filter(|c| c.helm.is_some()) {
+            let id = &cluster.id;
+            let secrets = cluster
+                .handle
+                .objects::<k8s_openapi::api::core::v1::Secret>();
+            let decoded = self.helm_cache.releases(id, &secrets);
+            let flux = cluster.handle.custom_objects(&crate::helm::flux_kind());
+            let owners = crate::helm::owners(id, &flux);
+            releases.extend(crate::helm::summaries(id, &decoded, &owners, now));
+            let shown = self
+                .navigations()
+                .filter(|navigation| navigation.page == Page::Releases)
+                .filter_map(|navigation| navigation.helm.as_ref())
+                .filter(|key| &key.cluster == id)
+                .filter_map(|key| crate::helm::detail(key, &decoded, now));
+            details.extend(shown);
+            watched.push(id.clone());
         }
-        self.helm_cache.forget(&shown);
+        self.helm_cache.forget(&watched);
         (releases, details)
     }
 
@@ -1329,12 +1318,8 @@ impl Live {
                 continue;
             };
             let page = navigation.page;
-            if let Some((_, watch)) = navigation
-                .helm_watch
-                .as_ref()
-                .filter(|_| page == Page::Releases)
-            {
-                let state = cluster.handle.watch_state(watch.kind());
+            if page == Page::Releases {
+                let state = cluster.handle.watch_state(&WatchKind::HelmStorage);
                 pages
                     .entry(selected.clone())
                     .or_default()
@@ -2125,6 +2110,7 @@ mod tests {
                     handle,
                     extras,
                     _background: Vec::new(),
+                    helm: None,
                     usage_task: None,
                     pod_usage_task: None,
                     prometheus_task: None,
@@ -2246,6 +2232,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn returning_to_the_releases_page_keeps_its_loaded_watch() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let mut live = test_live(dir.path());
+        let (client, _) = crate::fake::client(LIST_POLL, |method, path| {
+            if method != http::Method::GET {
+                return None;
+            }
+            if path.contains("watch=true") {
+                return Some((http::StatusCode::OK, String::new()));
+            }
+            Some((http::StatusCode::OK, EMPTY_LIST.to_owned()))
+        });
+        let (_manager, handle, _events) = crate::fake::supervised(&client);
+        let id = ClusterId::new("a");
+        let key = handle.id().clone();
+        live.clusters
+            .insert(key, Connected::watching(id.clone(), handle));
+        live.navigation.selected = Some(id.clone());
+        live.select_page(Page::Releases);
+        let deadline = tokio::time::Instant::now() + LIST_PATIENCE;
+        loop {
+            let snapshot = live.snapshot();
+            let state = snapshot.page_state(&id, Page::Releases).cloned();
+            if state.as_ref().is_some_and(WatchState::is_loaded) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the releases never loaded: {state:?}"
+            );
+            tokio::time::sleep(LIST_POLL).await;
+        }
+        live.select_page(Page::Pods);
+        live.select_page(Page::Releases);
+        let snapshot = live.snapshot();
+        assert_eq!(
+            snapshot.page_state(&id, Page::Releases),
+            Some(&WatchState::Synced)
+        );
+    }
+
+    #[tokio::test]
     async fn a_cluster_nobody_opened_still_counts_and_flags_every_nav_kind() {
         let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
         let mut live = test_live(dir.path());
@@ -2327,6 +2355,7 @@ mod tests {
                 handle,
                 extras,
                 _background: Vec::new(),
+                helm: None,
                 usage_task: None,
                 pod_usage_task: None,
                 prometheus_task: None,
@@ -2379,6 +2408,7 @@ mod tests {
                     handle,
                     extras,
                     _background: Vec::new(),
+                    helm: None,
                     usage_task: None,
                     pod_usage_task: None,
                     prometheus_task: None,

@@ -7,7 +7,7 @@ use flock_flux::{GitOpsObject, ObjectKind, actions};
 use kube::api::PropagationPolicy;
 use serde_json::{Value, json};
 
-use super::failure::{ActionFailureKind, action_failure};
+use super::failure::{ActionFailureKind, action_failure, is_transient};
 use crate::error::{Error, Result};
 use crate::manager::ClusterHandle;
 use crate::ops::{ObjectRef, PatchBody, restart_patch};
@@ -20,6 +20,8 @@ const REPLICA_SET: &str = "ReplicaSet";
 const TEMPLATE_PATH: &str = "/spec/template";
 const DELETE_POLL: Duration = Duration::from_millis(500);
 const DELETE_WAIT: Duration = Duration::from_secs(60);
+const PATCH_ATTEMPTS: usize = 3;
+const PATCH_RETRY_DELAY: Duration = Duration::from_millis(500);
 const BUILTIN: [(&str, &str); 16] = [
     ("Pod", "v1"),
     ("Service", "v1"),
@@ -138,13 +140,30 @@ pub(crate) async fn explain(
     error
 }
 
+async fn guarded_patch(
+    handle: &ClusterHandle,
+    object: &ObjectRef,
+    uid: &Uid,
+    body: PatchBody,
+) -> Result<()> {
+    let body = body.guarded(uid);
+    let mut attempt = 1;
+    loop {
+        match handle.patch(object, body.clone()).await {
+            Ok(_) => return Ok(()),
+            Err(error) if attempt < PATCH_ATTEMPTS && is_transient(&error) => {
+                attempt += 1;
+                tokio::time::sleep(PATCH_RETRY_DELAY).await;
+            }
+            Err(error) => return Err(explain(handle, object, uid, error).await),
+        }
+    }
+}
+
 async fn patch(handle: &ClusterHandle, seen: &Seen, body: PatchBody) -> Result<()> {
     let uid = known(&seen.uid)?;
     let object = crate::crd::object_ref(handle, &seen.target)?;
-    match handle.patch(&object, body.guarded(uid)).await {
-        Ok(_) => Ok(()),
-        Err(error) => Err(explain(handle, &object, uid, error).await),
-    }
+    guarded_patch(handle, &object, uid, body).await
 }
 
 pub async fn cordon(handle: &ClusterHandle, seen: &Seen, cordoned: bool) -> Result<()> {
@@ -268,11 +287,8 @@ pub async fn flux(
                 .await?;
         }
     }
-    let body = PatchBody::Merge(flux_patch(action, at)).guarded(uid);
-    match handle.patch(&target, body).await {
-        Ok(_) => Ok(()),
-        Err(error) => Err(explain(handle, &target, uid, error).await),
-    }
+    let body = PatchBody::Merge(flux_patch(action, at));
+    guarded_patch(handle, &target, uid, body).await
 }
 
 #[cfg(test)]
@@ -280,7 +296,7 @@ mod tests {
     use flock_core::ClusterId;
 
     use super::*;
-    use crate::fake::{RECREATED, SEEN, recreated, sent_uid};
+    use crate::fake::{RECREATED, SEEN, overloaded, recreated, sent_uid};
     use crate::manager::lock;
 
     const CONFIGMAP_PATH: &str = "/api/v1/namespaces/apps/configmaps/podinfo";
@@ -424,6 +440,31 @@ mod tests {
             })
         ));
         assert!(require("Scale", &target("Deployment"), &[DEPLOYMENT]).is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_write_retries_when_the_server_times_out() {
+        let (_manager, handle, traffic) = overloaded("Deployment", PATCH_ATTEMPTS - 1);
+        let seen = Seen::new(target("Deployment"), Uid::new(SEEN));
+        let outcome = replace_template(&handle, &seen, &json!({"spec": {}})).await;
+        assert!(outcome.is_ok(), "{outcome:?}");
+        let sent = traffic.bodies(&http::Method::PATCH, DEPLOYMENT_PATH).len();
+        assert_eq!(sent, PATCH_ATTEMPTS);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_write_gives_up_after_repeated_server_timeouts() {
+        let (_manager, handle, traffic) = overloaded("Deployment", PATCH_ATTEMPTS);
+        let seen = Seen::new(target("Deployment"), Uid::new(SEEN));
+        let outcome = replace_template(&handle, &seen, &json!({"spec": {}})).await;
+        assert!(
+            outcome
+                .as_ref()
+                .is_err_and(|error| action_failure(error).reason == "etcdserver: request timed out"),
+            "{outcome:?}"
+        );
+        let sent = traffic.bodies(&http::Method::PATCH, DEPLOYMENT_PATH).len();
+        assert_eq!(sent, PATCH_ATTEMPTS);
     }
 
     #[test]
