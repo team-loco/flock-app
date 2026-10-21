@@ -77,12 +77,22 @@ pub fn short_kind(kind: &str) -> String {
     kind_info(kind).map_or_else(|| kind.to_lowercase(), |info| info.short.to_owned())
 }
 
+const PARENT_PAGES: &[(&str, Page)] = &[
+    ("HorizontalPodAutoscaler", Page::Deployments),
+    ("PersistentVolume", Page::Pvcs),
+];
+
 pub fn page_for_kind(kind: &str) -> Page {
     if crate::crd::CrdKey::parse(kind).is_some() {
         return Page::CustomResources;
     }
+    let parent = PARENT_PAGES
+        .iter()
+        .find(|(parent_kind, _)| *parent_kind == kind)
+        .map(|(_, page)| *page);
     kind_info(kind)
         .and_then(|info| info.page)
+        .or(parent)
         .unwrap_or(Page::ClusterOverview)
 }
 
@@ -107,10 +117,9 @@ mod tests {
     fn kinds_route_to_their_list_page() {
         assert_eq!(page_for_kind("Pod"), Page::Pods);
         assert_eq!(page_for_kind("OCIRepository"), Page::Sources);
-        assert_eq!(
-            page_for_kind("HorizontalPodAutoscaler"),
-            Page::ClusterOverview
-        );
+        assert_eq!(page_for_kind("HorizontalPodAutoscaler"), Page::Deployments);
+        assert_eq!(page_for_kind("PersistentVolume"), Page::Pvcs);
+        assert_eq!(page_for_kind("ReplicaSet"), Page::ClusterOverview);
         assert_eq!(page_for_kind("Widget"), Page::ClusterOverview);
         assert_eq!(
             page_for_kind("Certificate.cert-manager.io"),
