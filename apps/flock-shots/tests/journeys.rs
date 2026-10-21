@@ -402,9 +402,15 @@ fn missing_error_badges(state: &AppState) -> Vec<String> {
 }
 
 fn toasts(ui: &Ui) -> Vec<String> {
-    ui.read_app(flock_ui::kit::toast_titles)
+    let titles = ui.read_app(flock_ui::kit::toast_titles);
+    let details = ui.read_app(flock_ui::kit::toast_details);
+    titles
         .into_iter()
-        .map(|title| title.to_string())
+        .zip(details)
+        .map(|(title, detail)| match detail {
+            Some(detail) => format!("{title}: {detail}"),
+            None => title.to_string(),
+        })
         .collect()
 }
 

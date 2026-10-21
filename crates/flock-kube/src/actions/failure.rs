@@ -5,6 +5,7 @@ const HTTP_NOT_FOUND: u16 = 404;
 const HTTP_CONFLICT: u16 = 409;
 const HTTP_INVALID: u16 = 422;
 const HTTP_TOO_MANY_REQUESTS: u16 = 429;
+const HTTP_SERVER_ERRORS: std::ops::Range<u16> = 500..600;
 const MAX_REASON_CHARS: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +66,10 @@ fn first_line(text: &str) -> String {
     line.chars().take(MAX_REASON_CHARS).collect()
 }
 
+pub fn is_transient(error: &Error) -> bool {
+    matches!(error, Error::Kube(kube::Error::Api(status)) if HTTP_SERVER_ERRORS.contains(&status.code))
+}
+
 pub fn action_failure(error: &Error) -> ActionFailure {
     if let Error::Kube(kube::Error::Api(status)) = error {
         let message = if status.message.is_empty() {
@@ -92,6 +97,31 @@ mod tests {
     fn api(code: u16, message: &str, reason: &str) -> Error {
         let status = Status::failure(message, reason).with_code(code);
         Error::Kube(kube::Error::Api(status.boxed()))
+    }
+
+    #[test]
+    fn only_server_errors_are_transient() {
+        let timeout = api(500, "etcdserver: request timed out", "InternalError");
+        assert!(is_transient(&timeout));
+        let unavailable = api(
+            503,
+            "the server is currently unable to handle the request",
+            "",
+        );
+        assert!(is_transient(&unavailable));
+        let conflict = api(
+            HTTP_CONFLICT,
+            "Precondition failed: UID mismatch",
+            "Conflict",
+        );
+        assert!(!is_transient(&conflict));
+        let throttled = api(
+            HTTP_TOO_MANY_REQUESTS,
+            "disruption budget",
+            "TooManyRequests",
+        );
+        assert!(!is_transient(&throttled));
+        assert!(!is_transient(&Error::NotConnected));
     }
 
     #[test]
