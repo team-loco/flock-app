@@ -8,6 +8,7 @@ use flock_core::control_plane::{
     ApiService, Check, ControlPlane, ETCD_CHECK, FailedRequests, Health, Probe, Traffic, Webhook,
 };
 use flock_core::events::Event;
+use flock_core::expiry::{Expiring, SupportEnd};
 use flock_core::home::Problem;
 use flock_core::nodes::{CONDITION_TRUE, Node, READY_CONDITION, Usage};
 use flock_core::overview::{Commitment, NetworkFacts, Overview, PodPhases, TimeRange, Utilization};
@@ -106,6 +107,12 @@ fn overview() -> Overview {
             load_balancers_pending: 1,
             pvcs_pending: 0,
         },
+        expiring: expiring(),
+        support: Some(SupportEnd {
+            label: "EKS v1.31 extended support ends".into(),
+            date: jiff::civil::date(2026, 11, 26),
+            days: 37,
+        }),
         unready_services: unready_services(),
         changes: changes(),
         control_plane: control_plane(),
@@ -198,6 +205,41 @@ fn control_plane() -> ControlPlane {
             reason: "FailedDiscoveryCheck".into(),
         }],
     }
+}
+
+fn expiring() -> Vec<Expiring> {
+    [
+        (
+            "ingress",
+            "wildcard-onloco",
+            9,
+            "Ready=False Failed · ACME order failed: 429 rateLimited",
+        ),
+        (
+            "kyverno",
+            "webhook-tls",
+            12,
+            "Ready=False DoesNotExist · Issuer \"kyverno-ca\" not found",
+        ),
+        ("monitoring", "grafana-tls", 23, "Ready=True · Issuing=True"),
+        ("payments", "internal-api", 41, "Ready=True"),
+        ("platform", "registry-tls", 67, "Ready=True"),
+        ("observability", "otel-collector", 84, "Ready=True"),
+    ]
+    .into_iter()
+    .map(|(namespace, name, days, detail)| Expiring {
+        label: format!("Certificate {namespace}/{name}"),
+        detail: detail.into(),
+        days: Some(days),
+        ready: detail.starts_with("Ready=True"),
+        target: Some(ResourceRef {
+            cluster: ClusterId::new(DEMO_CLUSTER),
+            kind: "Certificate.cert-manager.io".into(),
+            namespace: Some(namespace.into()),
+            name: name.into(),
+        }),
+    })
+    .collect()
 }
 
 fn unready_services() -> Vec<Problem> {

@@ -118,6 +118,13 @@ pub fn cluster(
     for change in &mut overview.changes {
         change.target.cluster = summary.id.clone();
     }
+    for target in overview
+        .expiring
+        .iter_mut()
+        .filter_map(|item| item.target.as_mut())
+    {
+        target.cluster = summary.id.clone();
+    }
     Some(Derived {
         detail: ClusterDetail {
             events,

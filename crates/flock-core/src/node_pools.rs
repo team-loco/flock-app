@@ -146,14 +146,14 @@ fn instance_label(members: &[&Node]) -> String {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct Version {
-    major: u32,
-    minor: u32,
+pub(crate) struct Version {
+    pub(crate) major: u32,
+    pub(crate) minor: u32,
     patch: Option<u32>,
 }
 
 impl Version {
-    fn parse(text: &str) -> Option<Self> {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
         let text = text.trim().trim_start_matches(VERSION_PREFIX);
         let mut parts = text.split(VERSION_SEPARATOR);
         let major = parts.next()?.parse().ok()?;
@@ -166,7 +166,7 @@ impl Version {
         })
     }
 
-    fn minor_label(self) -> String {
+    pub(crate) fn minor_label(self) -> String {
         format!("{VERSION_PREFIX}{}.{}", self.major, self.minor)
     }
 

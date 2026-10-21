@@ -13,6 +13,7 @@ pub mod crd;
 pub mod detail;
 pub mod discovery;
 pub mod error;
+pub mod expiry;
 pub mod failure;
 #[cfg(test)]
 mod fake;

@@ -69,6 +69,7 @@ flate2 = "1.1.10"
 base64 = "0.23.1"
 similar = "3.2.0"
 vt100 = "0.16.2"
+x509-parser = { version = "0.18.1", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use crate::cluster_changes::ClusterChange;
 use crate::control_plane::ControlPlane;
+use crate::expiry::{Expiring, SupportEnd};
 use crate::home::Problem;
 use crate::pod_tops::PodTops;
 use crate::resources::{Resource, ResourceKind};
@@ -215,6 +216,8 @@ pub struct Overview {
     pub utilization: Vec<Utilization>,
     pub tops: PodTops,
     pub network: NetworkFacts,
+    pub expiring: Vec<Expiring>,
+    pub support: Option<SupportEnd>,
     pub unready_services: Vec<Problem>,
     pub changes: Vec<ClusterChange>,
     pub control_plane: ControlPlane,
