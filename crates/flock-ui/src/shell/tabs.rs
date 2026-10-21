@@ -226,12 +226,13 @@ impl Shell {
         let id = tab.id();
         let title = title(tab.location(), &self.state.snapshot);
         let hover = palette.hover;
-        let top = if active && focused {
+        let bottom = if active && focused {
             palette.acc
+        } else if active {
+            palette.editor
         } else {
-            gpui::transparent_black()
+            palette.line
         };
-        let bottom = if active { palette.editor } else { palette.line };
         let dragged = DraggedTab {
             id,
             title: title.clone(),
@@ -273,7 +274,7 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .h_full()
-                    .child(div().h(RULE).bg(top))
+                    .child(div().h(RULE))
                     .child(
                         div()
                             .flex()

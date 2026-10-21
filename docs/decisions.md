@@ -205,7 +205,7 @@ Settled; change only with a new entry that says why.
     it, ⌥⌘1 / ⌥⌘2 focus pane 1 or 2, and navigation from a pane's own screens focuses that pane
     first; background commands from a screen (watch and stream requests) reach its pane's scope
     without moving focus. The sidebar, status-bar switcher, palette and ⌘W follow the focused pane;
-    only the focused pane's active tab has the `acc` top line. Closing a pane's last tab closes the
+    only the focused pane's active tab has the `acc` bottom line. Closing a pane's last tab closes the
     pane; the window's last tab closes the window. A split keeps each pane's
     inspector as it was: the existing pane is not re-revealed, and the new pane opens the inspector
     only if the source pane had it open. Tabs move to the other pane from the
