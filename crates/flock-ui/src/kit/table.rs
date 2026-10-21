@@ -23,7 +23,6 @@ use super::selectable::{SelectableText, is_text_drag};
 use super::status::StatusGlyph;
 use super::text::Highlighted;
 use super::tooltip::Tooltip;
-use crate::actions::CloseInspector;
 use crate::prefs::{self, ColumnWidths, FLOCK_SCOPE};
 use crate::theme::{
     ActiveTheme, COLUMN_DIVIDER, COLUMN_HANDLE, COLUMN_MIN, FLASH, FONT_MONO, FONT_SANS,
@@ -1021,13 +1020,8 @@ impl<R: 'static> Table<R> {
         cx.notify();
     }
 
-    fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
-        if keystroke.key == "escape" && !keystroke.modifiers.modified() {
-            window.dispatch_action(Box::new(CloseInspector), cx);
-            cx.stop_propagation();
-            return;
-        }
         if keystroke.key == "enter" && !keystroke.modifiers.modified() {
             if let Some(row) = self.selected {
                 cx.emit(TableEvent::Opened(row));
@@ -1359,7 +1353,7 @@ impl<R: 'static> Render for Table<R> {
             .key_context(TABLE_CONTEXT)
             .relative()
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::key_down))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| this.key_down(event, cx)))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
                 this.drag_to(event, cx);
             }))

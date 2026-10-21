@@ -309,7 +309,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding::built_in(&["enter"], "Open the selected row", Group::Lists),
     Binding::built_in(
         &["escape"],
-        "Close the inspector (not on Pods, where a pod is always selected)",
+        "Close the open side panel from anywhere on the page (menus, dialogs, text fields and a running terminal take Esc first)",
         Group::Lists,
     ),
     Binding::built_in(

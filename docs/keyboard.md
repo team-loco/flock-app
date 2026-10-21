@@ -73,7 +73,7 @@ Generated from the binding table in `crates/flock-ui/src/keymap.rs`; run `mise r
 | PgUp / PgDn | Move a page |
 | letters | Jump to the row whose name starts with them |
 | ↵ | Open the selected row |
-| Esc | Close the inspector (not on Pods, where a pod is always selected) |
+| Esc | Close the open side panel from anywhere on the page (menus, dialogs, text fields and a running terminal take Esc first) |
 | ⌘. | Connect, disconnect or remove the highlighted cluster in the switcher |
 
 ## Selected resource
