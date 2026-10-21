@@ -1030,6 +1030,19 @@ fn the_terminal_tab_waits_for_an_open_shell_click() -> anyhow::Result<()> {
 }
 
 #[test]
+fn the_pod_shell_button_starts_a_shell_in_the_terminal_tab() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.click("pod-shell")?;
+    assert!(ui.bounds("pod-close-shell").is_some());
+    ui.click("pod-shell")?;
+    assert!(ui.bounds("pod-close-shell").is_some());
+    ui.type_text("exit")?;
+    ui.press("enter")?;
+    assert!(ui.bounds("pod-open-shell").is_some());
+    Ok(())
+}
+
+#[test]
 fn flux_pages_list_their_objects_and_open_one_on_double_click() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     for page in [Page::Kustomizations, Page::HelmReleases, Page::Sources] {
