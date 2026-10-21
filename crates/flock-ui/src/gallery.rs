@@ -8,9 +8,10 @@ use gpui::{
 use crate::kit::{
     ActionMenu, Button, Checkbox, CodeView, Column, ConfirmDialog, DiffFile, DiffLine, DiffView,
     Dock, DockState, DockTab, IconButton, InputEvent, Kbd, KeyValue, LOG_FILTER_PLACEHOLDER, Level,
-    LineChart, LineKind, Link, LogLine, LogView, MenuItem, Meter, MiniMeter, PageHeader, Rule,
-    SectionHeader, Segmented, Select, Series, Split, StackedBar, StatusGlyph, StatusText, Table,
-    TextField, TextFieldState, Toast, Toggle, confirm, overlay_layer, parse_unified, toast,
+    LineChart, LineKind, Link, LogLine, LogView, MenuItem, Meter, MiniMeter, PageHeader,
+    RawMessage, Rule, SectionHeader, Segmented, Select, Series, Split, StackedBar, StatusGlyph,
+    StatusText, Table, TextField, TextFieldState, Toast, Toggle, confirm, overlay_layer,
+    parse_unified, toast,
 };
 use crate::theme::{
     self, ActiveTheme, DOCK_HEIGHT, FONT_MONO, Palette, RULE, SPACE_4, SPACE_6, SPACE_8, TEXT_MONO,
@@ -721,7 +722,9 @@ fn event_columns() -> Vec<Column<Event>> {
         })
         .mono()
         .fixed(EVENT_REASON_WIDTH),
-        Column::colored_text("Message", |e: &Event| e.message.into(), |_, p| p.fg2).mono(),
+        Column::new("Message", |e: &Event, _| {
+            RawMessage::new(e.message).line().into_any_element()
+        }),
         Column::colored_text(
             "Count",
             |e: &Event| flock_core::units::times(e.count).into(),

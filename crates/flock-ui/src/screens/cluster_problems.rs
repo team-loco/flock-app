@@ -10,16 +10,16 @@ use gpui::{
 
 use super::ScreenEvent;
 use crate::kit::{
-    Column, EmptyState, FilterBar, FilterEvent, InspectorPane, SectionLabel, StatusGlyph, Table,
-    TableEvent,
+    Column, EmptyState, FilterBar, FilterEvent, InspectorPane, RawMessage, SectionLabel,
+    StatusGlyph, Table, TableEvent,
 };
 use crate::theme::{
     AFFECTED_NAMESPACE_WIDTH, AFFECTED_NODE_WIDTH, AFFECTED_OBJECT_MIN, AFFECTED_SINCE_WIDTH,
     AFFECTED_TAG_WIDTH, AFFECTED_WORKLOAD_WIDTH, ActiveTheme, FONT_MONO, PROBLEM_BAR_EMPTY,
     PROBLEM_BAR_GAP, PROBLEM_CAUSES_WIDTH, PROBLEM_HISTOGRAM, PROBLEM_TRAIT_BAR,
-    PROBLEM_TRAIT_BAR_HEIGHT, PROBLEM_TRAIT_NAME, PROBLEM_TRAIT_SHARE, Palette, RADIUS, RULE,
-    SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_AXIS, TEXT_BODY,
-    TEXT_CONTROL, TEXT_LABEL, TEXT_MONO, TEXT_SMALL, TEXT_SUBHEADING,
+    PROBLEM_TRAIT_BAR_HEIGHT, PROBLEM_TRAIT_NAME, PROBLEM_TRAIT_SHARE, Palette, RULE, SPACE_1,
+    SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_AXIS, TEXT_BODY,
+    TEXT_CONTROL, TEXT_LABEL, TEXT_SMALL, TEXT_SUBHEADING,
 };
 
 const NOTHING: &str = "Nothing needs attention in this cluster.";
@@ -376,15 +376,8 @@ fn cause_header(cause: &Cause, palette: &Palette) -> AnyElement {
         .child(
             div()
                 .debug_selector(|| "problem-template".to_owned())
-                .px(SPACE_5)
-                .py(SPACE_4)
-                .border(RULE)
-                .border_color(palette.line2)
-                .rounded(RADIUS)
-                .bg(palette.panel)
-                .font_family(FONT_MONO)
-                .text_size(TEXT_MONO)
-                .child(template),
+                .min_w_0()
+                .child(RawMessage::new(template)),
         )
         .into_any_element()
 }

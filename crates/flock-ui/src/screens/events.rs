@@ -18,8 +18,8 @@ use super::{
     ALL_NAMESPACES, ListShape, ScreenEvent, chosen_namespace, empty_list, set_namespace_options,
 };
 use crate::kit::{
-    Column, FilterBar, FilterEvent, Presence, Select, SelectEvent, ShowAll, StatusGlyph,
-    StatusText, Table, TableEvent, chip_label,
+    Column, FilterBar, FilterEvent, Presence, RawMessage, Select, SelectEvent, ShowAll,
+    StatusGlyph, StatusText, Table, TableEvent, chip_label,
 };
 use crate::theme::{
     EVENT_AGE_WIDTH, EVENT_COUNT_WIDTH, EVENT_MESSAGE_MIN, EVENT_MESSAGE_WEIGHT,
@@ -361,13 +361,11 @@ fn columns() -> Vec<Column<Event>> {
         )
         .fixed(EVENT_NAMESPACE_WIDTH)
         .sort_by_key(|e: &Event| e.namespace.clone()),
-        Column::colored_text(
-            "Message",
-            |event: &Event| event.message.clone().into(),
-            |_, palette| palette.fg2,
-        )
-        .highlight()
-        .selectable()
+        Column::new("Message", |event: &Event, _| {
+            RawMessage::new(event.message.clone())
+                .line()
+                .into_any_element()
+        })
         .tooltip(|event: &Event| event.message.clone().into())
         .flex(EVENT_MESSAGE_WEIGHT, EVENT_MESSAGE_MIN),
         Column::colored_text("Age", |e: &Event| age(e.age).into(), |_, p| p.mute)
