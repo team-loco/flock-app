@@ -57,6 +57,8 @@ const THREAD_NAME: &str = "flock-kube";
 pub const SNAPSHOT_INTERVAL: Duration = DEFAULT_SNAPSHOTS.duration();
 const EXTENSION_POLL_INTERVAL: Duration = SNAPSHOT_INTERVAL;
 const DEFAULT_WINDOW: u64 = 0;
+const POD_ROW_PAGES: [Page; 2] = [Page::Pods, Page::ClusterProblems];
+const POD_USAGE_PAGES: [Page; 3] = [Page::ClusterOverview, Page::Namespaces, Page::Pods];
 const MISSING_STATE: &str = "Not in kubeconfig";
 const CHANGED_STATE: &str = "Context changed";
 const DISCONNECTED_STATE: &str = "Disconnected";
@@ -513,15 +515,13 @@ impl Live {
     }
 
     fn poll_page(&mut self) {
-        match self.navigation.page {
-            Page::ClusterOverview => {
-                self.poll_prometheus();
-                self.poll_control_plane();
-                self.poll_expiry();
-            }
-            Page::Namespaces => self.poll_pod_usage(),
-            Page::Pods => self.poll_pod_usage(),
-            _ => {}
+        if self.navigation.page == Page::ClusterOverview {
+            self.poll_prometheus();
+            self.poll_control_plane();
+            self.poll_expiry();
+        }
+        if POD_USAGE_PAGES.contains(&self.navigation.page) {
+            self.poll_pod_usage();
         }
     }
 
@@ -541,7 +541,7 @@ impl Live {
             }));
         }
         self.for_each_window(|live| {
-            if matches!(live.navigation.page, Page::Namespaces | Page::Pods) {
+            if POD_USAGE_PAGES.contains(&live.navigation.page) {
                 live.poll_pod_usage();
             }
         });
@@ -1269,7 +1269,7 @@ impl Live {
             .filter(|navigation| navigation.selected.as_ref() == Some(id))
             .peekable();
         selecting.peek()?;
-        Some(selecting.any(|navigation| navigation.page == Page::Pods))
+        Some(selecting.any(|navigation| POD_ROW_PAGES.contains(&navigation.page)))
     }
 
     fn away(&self, saved: &SavedCluster) -> &'static str {
@@ -2036,7 +2036,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pod_rows_are_built_only_while_some_window_shows_the_pods_page() {
+    async fn pod_rows_are_built_only_while_some_window_shows_pods_or_problems() {
         let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
         let mut live = test_live(dir.path());
         let cluster = ClusterId::new("a");
@@ -2051,6 +2051,9 @@ mod tests {
         live.apply(&window_command(SECOND_WINDOW, pods));
         assert_eq!(live.viewing(&cluster), Some(true));
         assert_eq!(live.viewing(&ClusterId::new("b")), None);
+        let problems = Command::SelectPage(Page::ClusterProblems);
+        live.apply(&window_command(SECOND_WINDOW, problems));
+        assert_eq!(live.viewing(&cluster), Some(true));
     }
 
     #[tokio::test]

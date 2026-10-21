@@ -163,6 +163,7 @@ enum Step {
         to: Point<Pixels>,
     },
     Pause(Duration),
+    Restore(Box<SavedWindow>),
 }
 
 fn mouse_down(
@@ -256,6 +257,7 @@ fn apply(step: &Step, window: &mut Window, cx: &mut App) -> anyhow::Result<()> {
             window.dispatch_event(mouse_up(*to, MouseButton::Left, SINGLE, none), cx);
         }
         Step::Pause(_) => {}
+        Step::Restore(_) => {}
     }
     Ok(())
 }
@@ -313,6 +315,9 @@ impl Headless {
                 self.settle()?;
             }
             return Ok(());
+        }
+        if let Step::Restore(saved) = step {
+            return self.restore(saved);
         }
         self.cx
             .update_window(self.window, |_, window, cx| apply(step, window, cx))??;
@@ -553,6 +558,7 @@ impl Ui {
         self.cx.update(|window, cx| {
             shell.update(cx, |shell, cx| shell.restore_tabs(tabs, window, cx));
         });
+        self.steps.push(Step::Restore(Box::new(tabs.clone())));
         self.settle()
     }
 
