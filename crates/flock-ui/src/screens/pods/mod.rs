@@ -1222,7 +1222,11 @@ impl Render for ElsewhereLink {
                     let _ = screen.update(cx, PodsScreen::go_elsewhere);
                 })
         });
-        div().text_size(TEXT_SMALL).children(link)
+        div()
+            .min_w_0()
+            .truncate()
+            .text_size(TEXT_SMALL)
+            .children(link)
     }
 }
 
