@@ -137,13 +137,15 @@ fn restarts_color(restarts: u32, palette: &Palette) -> Hsla {
 fn failing_cell(
     ix: usize,
     namespace: &Namespace,
+    target: &ResourceRef,
     figure: Div,
     cx: &mut Context<OverviewScreen>,
 ) -> Div {
     if namespace.problems.err == 0 {
         return cell(Cell::Count, figure);
     }
-    let activate = OverviewScreen::attention(Page::Namespaces, None, cx);
+    let open = OverviewScreen::open(target.clone(), cx);
+    let activate: super::Activate = std::rc::Rc::new(open);
     let link = problem_link(format!("overview-ns-{ix}-failing"), figure, activate);
     cell(Cell::Count, div().child(link))
 }
@@ -173,7 +175,13 @@ fn row(
             mono(namespace.name.clone(), palette.fg).truncate(),
         ),
         cell(Cell::Count, mono(thousands(namespace.pods), palette.fg2)),
-        failing_cell(ix, namespace, mono(failing_label, failing_color), cx),
+        failing_cell(
+            ix,
+            namespace,
+            &target,
+            mono(failing_label, failing_color),
+            cx,
+        ),
         cell(
             Cell::Usage,
             usage(

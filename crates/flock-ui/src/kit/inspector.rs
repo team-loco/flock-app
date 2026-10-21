@@ -172,6 +172,8 @@ fn save_width(kind: &str, width: Pixels, persist: bool, cx: &mut App) {
     }
 }
 
+const HANDLE_GROUP: &str = "inspector-resize-handle";
+
 #[derive(Default)]
 struct ResizeState {
     drag: Option<(Pixels, Pixels)>,
@@ -190,6 +192,16 @@ impl Handle {
             Self::Trailing => initial + now - start,
         }
     }
+}
+
+fn divider(dragging: bool, cx: &App) -> gpui::Div {
+    let palette = cx.palette();
+    let accent = palette.acc;
+    div()
+        .w(RULE)
+        .h_full()
+        .bg(if dragging { accent } else { palette.sep })
+        .group_hover(HANDLE_GROUP, move |style| style.bg(accent))
 }
 
 #[derive(IntoElement)]
@@ -273,6 +285,7 @@ impl RenderOnce for InspectorPane {
         )
         .absolute()
         .size_full();
+        let divider = divider(state.read(cx).drag.is_some(), cx);
         let reset_kind = self.kind.clone();
         let fallback = self.width;
         let selector = format!("{}-resize", self.kind);
@@ -287,6 +300,13 @@ impl RenderOnce for InspectorPane {
             .top_0()
             .bottom_0()
             .w(SPLITTER)
+            .group(HANDLE_GROUP)
+            .flex()
+            .map(|edge| match handle {
+                Handle::Leading => edge.justify_start(),
+                Handle::Trailing => edge.justify_end(),
+            })
+            .child(divider)
             .cursor(CursorStyle::ResizeLeftRight)
             .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                 cx.stop_propagation();

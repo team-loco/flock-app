@@ -957,7 +957,11 @@ fn opened(ui: &Ui) -> Option<(String, String)> {
         .map(|target| (target.kind.clone(), target.name.clone()))
 }
 
-fn needs_attention_in(ui: &Ui, page: Page, list: Option<&str>) -> Option<Option<String>> {
+fn needs_attention_in(
+    ui: &Ui,
+    page: Page,
+    list: &str,
+) -> Option<flock_core::settings::NamespaceSelection> {
     use flock_core::resources::attention_chip;
     let location = ui.state().location().clone();
     assert_eq!(location.page, page);
@@ -966,29 +970,41 @@ fn needs_attention_in(ui: &Ui, page: Page, list: Option<&str>) -> Option<Option<
     let cluster = location.cluster?;
     let state = ui.state();
     let settings = state.snapshot.catalog.get(&cluster)?;
-    let selection = settings.preferences.namespace_selection(list?);
-    Some(selection.namespace().map(str::to_owned))
+    Some(settings.preferences.namespace_selection(list))
 }
+
+const ALL_NAMESPACES: flock_core::settings::NamespaceSelection =
+    flock_core::settings::NamespaceSelection::All;
 
 #[test]
 fn overview_problem_counts_open_their_list_on_the_rows_that_need_attention() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     ui.click("overview-pods-failing")?;
-    assert_eq!(needs_attention_in(&ui, Page::Pods, Some("Pod")), Some(None));
+    assert_eq!(
+        needs_attention_in(&ui, Page::Pods, "Pod"),
+        Some(ALL_NAMESPACES)
+    );
     assert!(ui.bounds("pods-row-0").is_some());
     let mut ui = Ui::open(Screen::Cluster)?;
     ui.click("overview-pending-meta")?;
-    assert_eq!(needs_attention_in(&ui, Page::Pods, Some("Pod")), Some(None));
+    assert_eq!(
+        needs_attention_in(&ui, Page::Pods, "Pod"),
+        Some(ALL_NAMESPACES)
+    );
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-ns-sort-2")?;
+    ui.click("overview-ns-0")?;
+    let namespace = opened(&ui);
     let mut ui = Ui::open(Screen::Cluster)?;
     ui.click("overview-ns-sort-2")?;
     ui.click("overview-ns-0-failing")?;
-    assert_eq!(needs_attention_in(&ui, Page::Namespaces, None), None);
-    assert!(ui.bounds("namespaces-row-0").is_some());
+    assert!(namespace.is_some());
+    assert_eq!(opened(&ui), namespace);
     let mut ui = Ui::open(Screen::Cluster)?;
     scroll_overview_to_the_end(&mut ui)?;
     ui.click("overview-deployments-bad")?;
-    let all = needs_attention_in(&ui, Page::Deployments, Some("Deployment"));
-    assert_eq!(all, Some(None));
+    let all = needs_attention_in(&ui, Page::Deployments, "Deployment");
+    assert_eq!(all, Some(ALL_NAMESPACES));
     assert!(ui.bounds("resources-Deployment-row-0").is_some());
     let mut ui = Ui::open(Screen::Cluster)?;
     scroll_overview_to_the_end(&mut ui)?;

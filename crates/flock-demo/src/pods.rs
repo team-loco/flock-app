@@ -797,7 +797,7 @@ mod tests {
             counts,
             [
                 (PodFilter::All, 412),
-                (PodFilter::Attention, 14),
+                (PodFilter::Attention, 15),
                 (PodFilter::Running, 403),
                 (PodFilter::Pending, 9),
                 (PodFilter::Failed, 0),

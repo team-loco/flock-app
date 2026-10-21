@@ -750,6 +750,7 @@ mod tests {
             counts,
             [
                 ("All", 6),
+                ("Needs attention", 2),
                 ("Running", 2),
                 ("Pending", 1),
                 ("Failed", 1),
