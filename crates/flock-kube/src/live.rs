@@ -146,6 +146,7 @@ impl Connected {
 
 fn has_rows(target: &ResourceRef) -> bool {
     CrdKey::parse(&target.kind).is_some()
+        || crate::objects::KINDS.contains(&target.kind.as_str())
         || flock_core::ResourceKind::ALL
             .into_iter()
             .any(|kind| kind.name() == target.kind)
@@ -161,6 +162,7 @@ struct Inspecting {
     target: ResourceRef,
     shown: Option<String>,
     _watches: Vec<Subscription>,
+    routes: Option<Subscription>,
 }
 
 struct Navigation {
@@ -685,6 +687,7 @@ impl Live {
             self.for_each_window(|live| {
                 live.sync_custom();
                 live.sync_helm();
+                live.sync_routes();
                 live.refresh_yaml(id);
             });
         }
@@ -866,14 +869,47 @@ impl Live {
     fn inspect(&mut self, target: &ResourceRef) {
         self.navigation.yaml = None;
         self.navigation.yaml_task = None;
-        let watches = self.namespace_watches(target);
+        let mut watches = self.namespace_watches(target);
+        watches.extend(self.related_watches(target));
         self.navigation.inspecting = Some(Inspecting {
             target: target.clone(),
             shown: None,
             _watches: watches,
+            routes: None,
         });
+        self.sync_routes();
         if has_rows(target) {
             self.fetch_yaml();
+        }
+    }
+
+    fn related_watches(&self, target: &ResourceRef) -> Vec<Subscription> {
+        self.handle(&target.cluster)
+            .map_or_else(Vec::new, |handle| {
+                crate::objects::WATCHES
+                    .iter()
+                    .map(|kind| handle.subscribe(kind.clone()))
+                    .collect()
+            })
+    }
+
+    fn sync_routes(&mut self) {
+        let Some(inspecting) = self.navigation.inspecting.as_ref() else {
+            return;
+        };
+        let Some(handle) = self.handle(&inspecting.target.cluster) else {
+            return;
+        };
+        let current = inspecting
+            .routes
+            .as_ref()
+            .is_some_and(|routes| routes.belongs_to(handle));
+        if current {
+            return;
+        }
+        let routes = crate::objects::watch_routes(handle);
+        if let Some(inspecting) = self.navigation.inspecting.as_mut() {
+            inspecting.routes = routes;
         }
     }
 

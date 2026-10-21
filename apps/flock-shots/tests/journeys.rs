@@ -2015,3 +2015,211 @@ fn live_keyboard_reaches_yaml_and_an_edit_draft_survives_a_tab_switch() -> anyho
     ui.click("edit-back")?;
     check_invariants(&mut ui, &before, "editing a ConfigMap with a dry run")
 }
+
+const RELATED_SCROLL: f32 = 400.;
+const WORKLOAD_BODY: &str = "workload-main";
+const DETAIL_BODY: &str = "detail-body";
+const AUTOSCALED: (&str, &str) = ("web", "podinfo");
+const QA_VOLUME: &str = "flock-qa-volume";
+const QA_CLAIM: &str = "flock-qa-claim";
+const QA_NAMESPACE: &str = "default";
+const QA_VOLUMES: &str = r"
+apiVersion: v1
+kind: PersistentVolume
+metadata: { name: flock-qa-volume }
+spec:
+  capacity: { storage: 1Mi }
+  accessModes: [ReadWriteOnce]
+  storageClassName: flock-qa
+  hostPath: { path: /tmp/flock-qa-volume }
+  claimRef: { namespace: default, name: flock-qa-claim }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: flock-qa-claim, namespace: default }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: flock-qa
+  volumeName: flock-qa-volume
+  resources: { requests: { storage: 1Mi } }
+";
+const ROUTE_BACKEND: &str = "jsonpath={.items[0].metadata.namespace} {.items[0].metadata.name} {.items[0].spec.rules[0].backendRefs[0].name}";
+
+struct BoundVolume {
+    context: &'static str,
+    _dir: tempfile::TempDir,
+}
+
+impl BoundVolume {
+    fn create(context: &'static str) -> anyhow::Result<Self> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("volumes.yaml");
+        std::fs::write(&path, QA_VOLUMES)?;
+        let path = path.to_string_lossy().into_owned();
+        kubectl(context, &["apply", "-f", path.as_str()])?;
+        Ok(Self { context, _dir: dir })
+    }
+}
+
+impl Drop for BoundVolume {
+    fn drop(&mut self) {
+        let claim = [
+            "-n",
+            QA_NAMESPACE,
+            "delete",
+            "pvc",
+            QA_CLAIM,
+            "--ignore-not-found",
+            "--wait=false",
+        ];
+        let volume = [
+            "delete",
+            "pv",
+            QA_VOLUME,
+            "--ignore-not-found",
+            "--wait=false",
+        ];
+        for args in [&claim[..], &volume[..]] {
+            if let Err(error) = kubectl(self.context, args) {
+                eprintln!("could not clean up the QA volume: {error}");
+            }
+        }
+    }
+}
+
+fn kubectl_output(context: &str, args: &[&str]) -> anyhow::Result<String> {
+    let output = std::process::Command::new("kubectl")
+        .args(["--context", context])
+        .args(args)
+        .output()
+        .context("running kubectl")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "kubectl {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn row_index(state: &AppState, page: Page, namespace: &str, name: &str) -> Option<usize> {
+    let kind = flock_core::ResourceKind::for_page(page)?;
+    let cluster = state.location().cluster.as_ref()?;
+    state
+        .snapshot
+        .details
+        .get(cluster)?
+        .resources(kind)
+        .iter()
+        .filter(|row| row.name.contains(name))
+        .position(|row| row.namespace == namespace)
+}
+
+fn open_row(ui: &mut Ui, page: Page, namespace: &str, name: &str) -> anyhow::Result<()> {
+    visit(ui, page)?;
+    all_namespaces(ui, "resource-namespace")?;
+    filter(ui, name)?;
+    let kind = flock_core::ResourceKind::for_page(page).context("not a resource page")?;
+    let index = row_index(&ui.state(), page, namespace, name)
+        .with_context(|| format!("no {namespace}/{name} row on {page:?}"))?;
+    ui.double_click(selector(format!("resources-{}-row-{index}", kind.name())))
+}
+
+fn related_titles(state: &AppState) -> Vec<String> {
+    let Some(target) = state.location().resource.as_ref() else {
+        return Vec::new();
+    };
+    state
+        .snapshot
+        .details
+        .get(&target.cluster)
+        .and_then(|detail| detail.related(target))
+        .map(|related| related.groups.iter().map(|g| g.title.clone()).collect())
+        .unwrap_or_default()
+}
+
+fn follow(ui: &mut Ui, page: &'static str, group: &str, name: &str) -> anyhow::Result<ResourceRef> {
+    let link = selector(format!("related-{group}-{name}"));
+    let start = std::time::Instant::now();
+    while ui.bounds(link).is_none() {
+        anyhow::ensure!(
+            start.elapsed() < PAGE_TIMEOUT,
+            "Related never linked {group} {name}; it shows {:?}",
+            related_titles(&ui.state())
+        );
+        if ui.bounds(page).is_some() {
+            ui.scroll(page, gpui::point(gpui::px(0.), gpui::px(-RELATED_SCROLL)))?;
+        }
+        ui.pause(Duration::from_millis(500))?;
+    }
+    let from = ui.state().location().resource.clone();
+    ui.click(link)?;
+    ui.wait_until(PAGE_TIMEOUT, |state| {
+        let to = state.location().resource.as_ref();
+        to != from.as_ref() && to.is_some_and(|to| to.name == name)
+    })
+    .with_context(|| format!("{link} opened nothing"))?;
+    ui.state()
+        .location()
+        .resource
+        .clone()
+        .with_context(|| format!("{link} opened nothing"))
+}
+
+fn detail_loaded(state: &AppState, target: &ResourceRef) -> bool {
+    state
+        .snapshot
+        .details
+        .get(&target.cluster)
+        .and_then(|detail| detail.object(target))
+        .is_some_and(|row| !row.yaml.is_empty())
+}
+
+#[test]
+fn live_related_sections_link_autoscalers_volumes_and_routes() -> anyhow::Result<()> {
+    let Some(make) = kind()? else {
+        return Ok(());
+    };
+    let (cluster, context) = CLUSTERS[0];
+    let _volume = BoundVolume::create(context)?;
+    let (mut ui, before) = opened(&make, Screen::Flock)?;
+    switch_to(&mut ui, cluster)?;
+    open_row(&mut ui, Page::Deployments, AUTOSCALED.0, AUTOSCALED.1)?;
+    let autoscaler = follow(&mut ui, WORKLOAD_BODY, "Autoscalers", AUTOSCALED.1)?;
+    anyhow::ensure!(
+        ui.state().location().detail() == Some(&autoscaler),
+        "the autoscaler link did not open its detail page"
+    );
+    ui.wait_until(PAGE_TIMEOUT, |state| detail_loaded(state, &autoscaler))
+        .context("the autoscaler detail page never loaded")?;
+    open_row(&mut ui, Page::Pvcs, QA_NAMESPACE, QA_CLAIM)?;
+    let volume = follow(&mut ui, DETAIL_BODY, "PersistentVolumes", QA_VOLUME)?;
+    anyhow::ensure!(
+        ui.state().location().detail() == Some(&volume),
+        "the volume link did not open its detail page"
+    );
+    ui.wait_until(PAGE_TIMEOUT, |state| detail_loaded(state, &volume))
+        .context("the volume detail page never loaded")?;
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(SHOTS_DIR);
+    ui.save_png(&dir.join("fleet-a-volume-detail-dark.png"))?;
+    follow(&mut ui, DETAIL_BODY, "PVCs", QA_CLAIM)?;
+    let (loco, loco_context) = CLUSTERS[2];
+    let backend = kubectl_output(
+        loco_context,
+        &["get", "httproute", "-A", "-o", ROUTE_BACKEND],
+    )?;
+    let mut parts = backend.split_whitespace();
+    let found = (parts.next(), parts.next(), parts.next());
+    let (Some(namespace), Some(route), Some(service)) = found else {
+        anyhow::bail!("flock-loco has no HTTPRoute with a backend: {backend}");
+    };
+    switch_to(&mut ui, loco)?;
+    open_row(&mut ui, Page::Services, namespace, service)?;
+    let opened = follow(&mut ui, DETAIL_BODY, "HTTPRoutes", route)?;
+    anyhow::ensure!(
+        ui.state().location().page == Page::CustomResources && opened.name == route,
+        "the HTTPRoute link went to {:?}",
+        ui.state().location()
+    );
+    ui.save_png(&dir.join("flock-loco-http-route-dark.png"))?;
+    check_invariants(&mut ui, &before, "following Related links")
+}

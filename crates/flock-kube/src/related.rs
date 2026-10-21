@@ -11,9 +11,11 @@ use flock_core::resources::{Resource, ResourceKind};
 use flock_core::{ClusterId, ResourceRef};
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
+use k8s_openapi::api::autoscaling::v2::HorizontalPodAutoscaler;
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, PersistentVolumeClaim, Pod, PodSpec, PodTemplateSpec, Secret, Service,
+    ConfigMap, PersistentVolume, PersistentVolumeClaim, Pod, PodSpec, PodTemplateSpec, Secret,
+    Service,
 };
 use k8s_openapi::api::networking::v1::{Ingress, IngressBackend};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
@@ -23,6 +25,7 @@ use crate::clock::age;
 use crate::detail::PodIndex;
 use crate::lists;
 use crate::manager::ClusterHandle;
+use crate::objects;
 use crate::pods::health_status;
 use crate::snapshot::{PodHealth, pod_health};
 
@@ -367,6 +370,24 @@ fn other_facts(handle: &ClusterHandle, scope: &Scope<'_>, namespace: Option<&str
                 ..row_fact(ResourceKind::PersistentVolumeClaim, &row, &i.metadata)
             }
         },
+    ));
+    facts.extend(collect(
+        &handle.objects::<HorizontalPodAutoscaler>(),
+        namespace,
+        |i| &i.metadata,
+        |i| objects::autoscaler(i, now),
+    ));
+    facts.extend(collect(
+        &objects::routes(handle),
+        namespace,
+        |i| &i.metadata,
+        |i| objects::route(i, now),
+    ));
+    facts.extend(collect(
+        &handle.objects::<PersistentVolume>(),
+        None,
+        |i| &i.metadata,
+        |i| objects::volume(i, now),
     ));
     facts
 }

@@ -316,6 +316,7 @@ fn cluster_detail(
         resources,
         related,
         namespace_details: crate::namespace::details(handle, selection.inspected, now),
+        objects: crate::objects::objects(handle, selection.inspected, selection.yaml, now),
     }
 }
 

@@ -82,6 +82,11 @@ impl DetailScreen {
                             && Some(row.namespace.as_str()) == self.target.namespace.as_deref()
                     })
                     .cloned()
+            })
+            .or_else(|| {
+                detail
+                    .and_then(|detail| detail.object(&self.target))
+                    .cloned()
             });
         let related = detail
             .and_then(|detail| detail.related(&self.target).cloned())
@@ -120,9 +125,10 @@ impl DetailScreen {
 
     fn status(&self) -> Option<(Status, String)> {
         let row = self.row.as_ref()?;
-        let label = kind_of(&self.target)
-            .and_then(|kind| kind.status_cell(row))
-            .unwrap_or_default();
+        let label = kind_of(&self.target).map_or_else(
+            || row.cells.first().cloned().unwrap_or_default(),
+            |kind| kind.status_cell(row).unwrap_or_default(),
+        );
         Some((row.status, label))
     }
 

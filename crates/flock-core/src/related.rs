@@ -2,6 +2,7 @@ use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
+use crate::crd::{CrdKey, display_kind};
 use crate::events::Event;
 use crate::resource::kind_info;
 use crate::{ClusterId, Counts, Page, ResourceKind, ResourceRef, Status};
@@ -17,6 +18,7 @@ pub const JOB: &str = "Job";
 pub const PERSISTENT_VOLUME: &str = "PersistentVolume";
 pub const AUTOSCALER: &str = "HorizontalPodAutoscaler";
 pub const HTTP_ROUTE: &str = "HTTPRoute";
+pub const GATEWAY_API: &str = "gateway.networking.k8s.io";
 pub const CONFIG_MAP: &str = "ConfigMap";
 pub const SECRET: &str = "Secret";
 pub const CLAIM: &str = "PersistentVolumeClaim";
@@ -53,8 +55,17 @@ const PLURALS: [(&str, &str); 4] = [
     (PERSISTENT_VOLUME, "PersistentVolumes"),
     (HTTP_ROUTE, "HTTPRoutes"),
 ];
-pub const DETAIL_KINDS: [&str; 8] = [
-    JOB, "CronJob", SERVICE, "Ingress", CONFIG_MAP, SECRET, CLAIM, NAMESPACE,
+pub const DETAIL_KINDS: [&str; 10] = [
+    JOB,
+    "CronJob",
+    SERVICE,
+    "Ingress",
+    CONFIG_MAP,
+    SECRET,
+    CLAIM,
+    PERSISTENT_VOLUME,
+    AUTOSCALER,
+    NAMESPACE,
 ];
 pub const NAMESPACE_PAGES: [Page; 11] = [
     Page::Deployments,
@@ -145,7 +156,7 @@ impl Fact {
             status: Some(self.status),
             note: self.note.clone(),
             age: Some(self.age),
-            linked: has_page(&self.kind),
+            linked: opens(&self.kind),
         }
     }
 }
@@ -204,7 +215,12 @@ pub fn has_page(kind: &str) -> bool {
     kind_info(kind).is_some_and(|info| info.page.is_some())
 }
 
+fn opens(kind: &str) -> bool {
+    has_page(kind) || DETAIL_KINDS.contains(&kind) || CrdKey::parse(kind).is_some()
+}
+
 pub fn plural(kind: &str) -> String {
+    let kind = display_kind(kind);
     let fixed = PLURALS
         .iter()
         .find(|(singular, _)| *singular == kind)
@@ -476,6 +492,7 @@ impl Kinds {
 }
 
 fn rank(kind: &str) -> usize {
+    let kind = display_kind(kind);
     ORDER
         .iter()
         .position(|known| *known == kind)
@@ -816,6 +833,37 @@ mod tests {
         let pod = related(&cluster(), &facts, &target(POD, Some(NS), "db-0"));
         assert_eq!(names(&pod, CONTROLLED_BY), ["db"]);
         assert_eq!(names(&pod, "PVCs"), ["data"]);
+    }
+
+    #[test]
+    fn a_bound_volume_links_both_ways_and_routes_and_autoscalers_open() {
+        let claim = Fact {
+            uses: vec![Key::new(PERSISTENT_VOLUME, "pv-1")],
+            ..fact(CLAIM, "data")
+        };
+        let route_kind = CrdKey::new(GATEWAY_API, HTTP_ROUTE).qualified();
+        let route = Fact {
+            uses: vec![Key::new(SERVICE, "cart")],
+            ..fact(&route_kind, "web")
+        };
+        let mut facts = shop();
+        facts.extend([claim, route, Fact::new(PERSISTENT_VOLUME, None, "pv-1")]);
+        let claim = related(&cluster(), &facts, &target(CLAIM, Some(NS), "data"));
+        let volume = item(&claim, "PersistentVolumes", "pv-1");
+        assert_eq!(
+            volume.map(|i| (i.linked, i.target.namespace.clone())),
+            Some((true, None))
+        );
+        let volume = related(&cluster(), &facts, &target(PERSISTENT_VOLUME, None, "pv-1"));
+        assert_eq!(titles(&volume), ["PVCs"]);
+        assert!(item(&volume, "PVCs", "data").is_some_and(|i| i.linked));
+        let service = related(&cluster(), &facts, &target(SERVICE, Some(NS), "cart"));
+        assert_eq!(titles(&service), ["Pods", "Ingresses", "HTTPRoutes"]);
+        let deployment = related(&cluster(), &facts, &target(DEPLOYMENT, Some(NS), "cart"));
+        assert!(item(&deployment, "HTTPRoutes", "web").is_some_and(|i| i.linked));
+        assert!(item(&deployment, "Autoscalers", "cart").is_some_and(|i| i.linked));
+        let route = related(&cluster(), &facts, &target(&route_kind, Some(NS), "web"));
+        assert_eq!(names(&route, "Services"), ["cart"]);
     }
 
     #[test]

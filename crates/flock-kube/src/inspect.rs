@@ -1,10 +1,12 @@
 use flock_core::ResourceRef;
+use flock_core::related::{AUTOSCALER, PERSISTENT_VOLUME};
 use flock_core::resources::ResourceKind;
 use flock_flux::{ObjectKind, redact};
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
+use k8s_openapi::api::autoscaling::v2::HorizontalPodAutoscaler;
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Namespace, Node, PersistentVolumeClaim, Pod, Secret, Service,
+    ConfigMap, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, Secret, Service,
 };
 use k8s_openapi::api::networking::v1::Ingress;
 use kube::Resource;
@@ -20,7 +22,13 @@ use crate::resources::Watched;
 const POD_KIND: &str = "Pod";
 const NODE_KIND: &str = "Node";
 const NAMESPACE_KIND: &str = "Namespace";
-const CORE_KINDS: [(&str, &str); 3] = [(POD_KIND, "v1"), (NODE_KIND, "v1"), (NAMESPACE_KIND, "v1")];
+const CORE_KINDS: [(&str, &str); 5] = [
+    (POD_KIND, "v1"),
+    (NODE_KIND, "v1"),
+    (NAMESPACE_KIND, "v1"),
+    (PERSISTENT_VOLUME, "v1"),
+    (AUTOSCALER, "autoscaling/v2"),
+];
 
 fn resource_api_version(kind: ResourceKind) -> &'static str {
     match kind {
@@ -149,6 +157,8 @@ pub fn cached_version(handle: &ClusterHandle, target: &ResourceRef) -> Option<St
             POD_KIND => version_of::<Pod>(handle, target),
             NODE_KIND => version_of::<Node>(handle, target),
             NAMESPACE_KIND => version_of::<Namespace>(handle, target),
+            PERSISTENT_VOLUME => version_of::<PersistentVolume>(handle, target),
+            AUTOSCALER => version_of::<HorizontalPodAutoscaler>(handle, target),
             _ => None,
         },
     }

@@ -6,10 +6,11 @@ use std::sync::{Arc, Mutex};
 use futures::{StreamExt, TryStreamExt};
 use jiff::Timestamp;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet};
+use k8s_openapi::api::autoscaling::v2::HorizontalPodAutoscaler;
 use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
-    ConfigMap, Event, Namespace, Node, PersistentVolumeClaim, Pod, ResourceQuota, Secret, Service,
-    ServiceAccount,
+    ConfigMap, Event, Namespace, Node, PersistentVolume, PersistentVolumeClaim, Pod, ResourceQuota,
+    Secret, Service, ServiceAccount,
 };
 use k8s_openapi::api::discovery::v1::EndpointSlice;
 use k8s_openapi::api::networking::v1::{Ingress, NetworkPolicy};
@@ -77,6 +78,8 @@ pub enum WatchKind {
     ResourceQuotas,
     Events,
     PersistentVolumeClaims,
+    PersistentVolumes,
+    HorizontalPodAutoscalers,
     CustomResourceDefinitions,
     HelmStorage,
     Custom(CustomKind),
@@ -104,6 +107,8 @@ impl WatchKind {
             Self::ResourceQuotas => "ResourceQuota",
             Self::Events => "Event",
             Self::PersistentVolumeClaims => "PersistentVolumeClaim",
+            Self::PersistentVolumes => "PersistentVolume",
+            Self::HorizontalPodAutoscalers => "HorizontalPodAutoscaler",
             Self::CustomResourceDefinitions => "CustomResourceDefinition",
             Self::HelmStorage => "Helm release",
             Self::Custom(kind) => &kind.kind,
@@ -143,6 +148,8 @@ watched! {
     ResourceQuota => ResourceQuotas,
     Event => Events,
     PersistentVolumeClaim => PersistentVolumeClaims,
+    PersistentVolume => PersistentVolumes,
+    HorizontalPodAutoscaler => HorizontalPodAutoscalers,
     CustomResourceDefinition => CustomResourceDefinitions,
     Secret => HelmStorage,
 }
@@ -301,6 +308,10 @@ pub fn spawn_builtin(
         WatchKind::Events => spawn_events(runtime, client, event_window, signals),
         WatchKind::PersistentVolumeClaims => {
             spawn_full::<PersistentVolumeClaim>(runtime, client, signals)
+        }
+        WatchKind::PersistentVolumes => spawn_full::<PersistentVolume>(runtime, client, signals),
+        WatchKind::HorizontalPodAutoscalers => {
+            spawn_full::<HorizontalPodAutoscaler>(runtime, client, signals)
         }
         WatchKind::CustomResourceDefinitions => {
             spawn_trimmed(runtime, Api::all(client), signals, trim_definition)
