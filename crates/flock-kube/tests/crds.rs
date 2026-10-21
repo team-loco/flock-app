@@ -356,8 +356,8 @@ fn live_helm_releases_come_from_storage_with_history_values_and_flux_owners() {
             .is_some_and(flock_core::WatchState::is_loaded)
     );
     running.send(Command::SelectPage(Page::Pods));
-    running.until("the Helm storage watch to stop", |snapshot| {
-        snapshot.helm.is_empty() && snapshot.helm_details.is_empty()
+    running.until("the releases kept after leaving the page", |snapshot| {
+        snapshot.helm_details.is_empty() && !snapshot.helm_releases(&cluster).is_empty()
     });
 }
 
