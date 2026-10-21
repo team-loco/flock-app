@@ -6,7 +6,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTERS=(fleet-a fleet-b flock-loco)
 WAIT_TIMEOUT=300s
 BUILD_TIMEOUT=600s
-LOCO_COMPONENTS=(loco-controller loco-build-controller envoy-gateway)
+LOCO_COMPONENTS=(loco-controller loco-build-controller envoy-gateway loco-core-agent)
+CONTROL_PLANE_COMPONENTS=(postgres loco-api)
+AGENT_CONNECTED="sync stream connected"
 APPLICATION_PHASES=(Ready Failed Deploying)
 BUILD_PHASES=(Succeeded Failed Running)
 GATEWAY_LABELS=gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=loco-system
@@ -15,7 +17,11 @@ verify_loco() {
   for deployment in "${LOCO_COMPONENTS[@]}"; do
     "${kubectl[@]}" -n loco-system rollout status "deployment/${deployment}" --timeout="${WAIT_TIMEOUT}"
   done
-  "${kubectl[@]}" -n loco-system get deployment/loco-core-agent
+  for deployment in "${CONTROL_PLANE_COMPONENTS[@]}"; do
+    "${kubectl[@]}" -n loco-control-plane rollout status "deployment/${deployment}" --timeout="${WAIT_TIMEOUT}"
+  done
+  agent_logs="$("${kubectl[@]}" -n loco-system logs deployment/loco-core-agent)"
+  [[ "${agent_logs}" == *"${AGENT_CONNECTED}"* ]]
   "${kubectl[@]}" -n reports wait job/nightly-report-backfill --for=condition=Complete --timeout="${WAIT_TIMEOUT}"
   "${kubectl[@]}" -n loco-system wait deployment -l "${GATEWAY_LABELS}" --for=condition=Available --timeout="${WAIT_TIMEOUT}"
   "${kubectl[@]}" -n loco-system wait gateway/eg --for=condition=Accepted --timeout="${WAIT_TIMEOUT}"

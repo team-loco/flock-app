@@ -1,0 +1,17 @@
+ui:
+  enabled: false
+api:
+  imagePullPolicy: IfNotPresent
+  existingSecret: loco-api-env
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 512Mi
+obsProxy:
+  clickhouse:
+    existingSecret:
+      name: loco-clickhouse
+    migratorExistingSecret:
+      name: loco-clickhouse
