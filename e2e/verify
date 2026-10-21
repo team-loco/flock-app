@@ -5,13 +5,69 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 CLUSTERS=(fleet-a fleet-b flock-loco)
 WAIT_TIMEOUT=300s
-BUILD_TIMEOUT=600s
+BUILD_NAMESPACE=loco-builds
+BUILD_STALL_SECONDS=300
+BUILD_POLL_SECONDS=5
+BUILD_LOG_TAIL=30
+BUILD_TERMINAL_PHASES=(Succeeded Failed Canceled)
 LOCO_COMPONENTS=(loco-controller loco-build-controller envoy-gateway loco-core-agent)
 CONTROL_PLANE_COMPONENTS=(postgres loco-api)
 AGENT_CONNECTED="sync stream connected"
 APPLICATION_PHASES=(Ready Failed Deploying)
-BUILD_PHASES=(Succeeded Failed Running)
 GATEWAY_LABELS=gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=loco-system
+
+build_states() {
+  "${kubectl[@]}" -n "${BUILD_NAMESPACE}" get builds \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.labels.flock\.dev/expect}{"|"}{.status.phase}{"|"}{.status.message}{"\n"}{end}'
+}
+
+build_progress() {
+  "${kubectl[@]}" -n "${BUILD_NAMESPACE}" get builds,jobs,pods \
+    -o jsonpath='{range .items[*]}{.kind}/{.metadata.name}={.metadata.resourceVersion}{"\n"}{end}'
+}
+
+dump_build_diagnostics() {
+  "${kubectl[@]}" -n "${BUILD_NAMESPACE}" get builds,jobs,pods -o wide >&2 || true
+  "${kubectl[@]}" -n "${BUILD_NAMESPACE}" get events --sort-by=.lastTimestamp >&2 || true
+  if [[ -n "${1:-}" ]]; then
+    "${kubectl[@]}" -n "${BUILD_NAMESPACE}" logs -l "job-name=${1}" --all-containers --prefix \
+      --tail="${BUILD_LOG_TAIL}" >&2 || true
+  fi
+}
+
+wait_for_builds() {
+  local states progress name expected phase message pending
+  local last_progress="" changed="${SECONDS}"
+  while true; do
+    states="$(build_states)"
+    pending=0
+    while IFS='|' read -r name expected phase message; do
+      if [[ -z "${name}" || "${phase}" == "${expected}" ]]; then
+        continue
+      fi
+      if [[ " ${BUILD_TERMINAL_PHASES[*]} " == *" ${phase} "* ]]; then
+        printf 'build %s is %s, expected %s: %s\n' "${name}" "${phase}" "${expected}" "${message}" >&2
+        dump_build_diagnostics "${name}"
+        return 1
+      fi
+      pending=$((pending + 1))
+    done <<<"${states}"
+    if ((pending == 0)); then
+      return 0
+    fi
+    progress="$(build_progress)"
+    if [[ "${progress}" != "${last_progress}" ]]; then
+      last_progress="${progress}"
+      changed="${SECONDS}"
+    fi
+    if ((SECONDS - changed > BUILD_STALL_SECONDS)); then
+      printf '%s builds made no progress for %ss\n' "${pending}" "${BUILD_STALL_SECONDS}" >&2
+      dump_build_diagnostics
+      return 1
+    fi
+    sleep "${BUILD_POLL_SECONDS}"
+  done
+}
 
 verify_loco() {
   for deployment in "${LOCO_COMPONENTS[@]}"; do
@@ -29,10 +85,7 @@ verify_loco() {
     "${kubectl[@]}" -n loco-system wait applications -l "flock.dev/expect=${phase}" \
       --for=jsonpath='{.status.phase}'="${phase}" --timeout="${WAIT_TIMEOUT}"
   done
-  for phase in "${BUILD_PHASES[@]}"; do
-    "${kubectl[@]}" -n loco-builds wait builds -l "flock.dev/expect=${phase}" \
-      --for=jsonpath='{.status.phase}'="${phase}" --timeout="${BUILD_TIMEOUT}"
-  done
+  wait_for_builds
   "${kubectl[@]}" wait httproutes --all --all-namespaces \
     --for=jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'=True --timeout="${WAIT_TIMEOUT}"
   "${kubectl[@]}" -n ledger wait helmrelease/ledger-api --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=False --timeout="${WAIT_TIMEOUT}"
