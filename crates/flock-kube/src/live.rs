@@ -1531,15 +1531,16 @@ fn custom_state(navigation: &Navigation, handle: &ClusterHandle) -> WatchState {
         return handle.watch_state(watch.subscription.kind());
     }
     let definitions = handle.watch_state(&WatchKind::CustomResourceDefinitions);
+    let Some(crd) = navigation.crd.as_ref() else {
+        return definitions;
+    };
     if !definitions.is_loaded() {
         return definitions;
     }
-    let name = navigation
-        .crd
-        .as_ref()
-        .map(CrdKey::qualified)
-        .unwrap_or_default();
-    WatchState::Failed(format!("{name} is not installed on this cluster"))
+    WatchState::Failed(format!(
+        "{} is not installed on this cluster",
+        crd.qualified()
+    ))
 }
 
 pub fn cluster_settings(
@@ -2162,6 +2163,50 @@ mod tests {
             Some((http::StatusCode::OK, body))
         });
         crate::fake::supervised(&client)
+    }
+
+    #[tokio::test]
+    async fn the_custom_resources_page_without_a_chosen_kind_follows_the_definitions_watch() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let mut live = test_live(dir.path());
+        let (client, _) = crate::fake::client(LIST_POLL, |method, path| {
+            if method != http::Method::GET {
+                return None;
+            }
+            if path.contains("watch=true") {
+                return Some((http::StatusCode::OK, String::new()));
+            }
+            Some((http::StatusCode::OK, EMPTY_LIST.to_owned()))
+        });
+        let (_manager, handle, _events) = crate::fake::supervised(&client);
+        let id = ClusterId::new("a");
+        let key = handle.id().clone();
+        live.clusters
+            .insert(key, Connected::watching(id.clone(), handle));
+        live.navigation.selected = Some(id.clone());
+        live.navigation.page = Page::CustomResources;
+        let deadline = tokio::time::Instant::now() + LIST_PATIENCE;
+        let state = loop {
+            let snapshot = live.snapshot();
+            let state = snapshot.page_state(&id, Page::CustomResources).cloned();
+            if state.as_ref().is_some_and(WatchState::is_loaded) {
+                break state;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the definitions never loaded: {state:?}"
+            );
+            tokio::time::sleep(LIST_POLL).await;
+        };
+        assert_eq!(state, Some(WatchState::Synced));
+        live.navigation.crd = Some(CrdKey::new("cert-manager.io", "Certificate"));
+        let snapshot = live.snapshot();
+        assert_eq!(
+            snapshot.page_state(&id, Page::CustomResources),
+            Some(&WatchState::Failed(
+                "Certificate.cert-manager.io is not installed on this cluster".into()
+            ))
+        );
     }
 
     #[tokio::test]
