@@ -6,8 +6,7 @@ agent:
   buildRetention: 8760h
 env:
   LOG_LEVEL: info
-  CONTROL_PLANE_URL: http://loco-api.loco-system.svc.cluster.local:8000
+  CONTROL_PLANE_URL: http://loco-api.loco-control-plane.svc.cluster.local
   AGENT_TOKEN: flock-e2e-agent-token-not-a-secret
 certManager:
-  issuer:
-    email: e2e@flock.test
+  existingTLSSecret: flock-loco-gateway-tls

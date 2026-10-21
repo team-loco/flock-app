@@ -29,6 +29,8 @@ MISSING_DOCKERFILE = "deploy/Dockerfile"
 MISSING_SOURCE = "flock-missing-source.tar.gz"
 OK_SOURCE = "ok.tar.gz"
 SLOW_SOURCE = "slow.tar.gz"
+BUILD_PREFIX = "flock-build-"
+AGENT_BUILD_PREFIX = "build-"
 
 WORKSPACES = (
     "acme", "northwind", "globex", "initech", "umbrella", "hooli", "stark", "wayne",
@@ -221,7 +223,7 @@ def build(index, workspace, service, phase, registry, sources):
     return dict(
         apiVersion=API_VERSION,
         kind="Build",
-        metadata=dict(name=f"build-{identifier}", namespace=BUILD_NAMESPACE, labels={EXPECT_LABEL: phase}),
+        metadata=dict(name=f"{BUILD_PREFIX}{identifier}", namespace=BUILD_NAMESPACE, labels={EXPECT_LABEL: phase}),
         spec=dict(
             buildId=identifier,
             organizationId=ORGANIZATION_ID,

@@ -12,12 +12,16 @@ LOCO_DIR="${ROOT}/target/loco/${LOCO_REF:?LOCO_REF comes from mise.toml}"
 LOCO_NAMESPACE=loco-system
 BUILD_NAMESPACE=loco-builds
 REGISTRY_NAMESPACE=loco-registry
-GATEWAY_RELEASE=eg
 REGISTRY_HOST="zot.${REGISTRY_NAMESPACE}.svc.cluster.local:5000"
 SOURCES_URL="http://sources.${REGISTRY_NAMESPACE}.svc.cluster.local:8080"
 BUILDER_USER=builder:loco-dev-builder
 PUSH_SECRET=loco-registry-push
 RUNNING_BUILD_SECONDS=86400
+TLS_DAYS=3650
+CONTROL_PLANE_RELEASE=loco
+API_SECRET=loco-api-env
+POSTGRES_PASSWORD=flock-e2e-postgres-not-a-secret
+CONTROL_PLANE_NAMESPACE=loco-control-plane
 
 kubectl=(mise exec -- kubectl --context "${CONTEXT}")
 helm=(mise exec -- helm --kube-context "${CONTEXT}")
@@ -43,17 +47,24 @@ gateway_version="$(mise exec -- yq '.dependencies[] | select(.name == "gateway-h
 if [[ ! -f "${core_chart}/charts/gateway-helm-${gateway_version}.tgz" ]]; then
   mise exec -- helm dependency build "${core_chart}"
 fi
-mise exec -- yq '.["gateway-helm"]' "${core_chart}/values.yaml" >"${work_dir}/gateway-values.yaml"
-"${helm[@]}" upgrade --install "${GATEWAY_RELEASE}" "${core_chart}/charts/gateway-helm-${gateway_version}.tgz" \
-  --namespace "${LOCO_NAMESPACE}" --values "${work_dir}/gateway-values.yaml" --wait --timeout "${HELM_TIMEOUT}"
 
-mise exec -- helm template loco-core "${core_chart}" --namespace "${LOCO_NAMESPACE}" \
-  --values "${HERE}/core-values.yaml" --set agent.image.tag="${image_tag}" \
-  --show-only templates/gateway.yaml \
-  --show-only templates/agent-rbac.yaml \
-  --show-only templates/env-config-secret.yml \
-  --show-only templates/agent-deployment.yaml >"${work_dir}/core.yaml"
-"${kubectl[@]}" apply -f "${work_dir}/core.yaml"
+postgres_image="$(mise exec -- yq '.services.postgres.image' "${LOCO_DIR}/compose.yaml")"
+sed -e "s|POSTGRES_IMAGE|${postgres_image}|" "${HERE}/control-plane.yaml" | "${kubectl[@]}" apply -f -
+"${kubectl[@]}" -n "${CONTROL_PLANE_NAMESPACE}" create secret generic loco-postgres \
+  --from-literal=password="${POSTGRES_PASSWORD}" --dry-run=client -o yaml | "${kubectl[@]}" apply -f -
+agent_token="$(mise exec -- yq '.env.AGENT_TOKEN' "${HERE}/core-values.yaml")"
+"${kubectl[@]}" -n "${CONTROL_PLANE_NAMESPACE}" create secret generic "${API_SECRET}" \
+  --from-literal=DATABASE_URL="postgresql://loco:${POSTGRES_PASSWORD}@postgres:5432/loco?sslmode=disable" \
+  --from-literal=LOCO_AGENT_CONNECTION_SECRETS="${agent_token}" \
+  --from-literal=LOCO_IMAGE_RETENTION=0 \
+  --dry-run=client -o yaml | "${kubectl[@]}" apply -f -
+"${kubectl[@]}" -n "${CONTROL_PLANE_NAMESPACE}" rollout status deployment/postgres --timeout="${WAIT_TIMEOUT}"
+mise exec -- helm template "${CONTROL_PLANE_RELEASE}" "${LOCO_DIR}/charts/loco-control-plane" --namespace "${CONTROL_PLANE_NAMESPACE}" \
+  --values "${HERE}/control-plane-values.yaml" --set api.image.tag="${image_tag}" --set obsProxy.image.tag="${image_tag}" \
+  --show-only templates/api-deployment.yaml \
+  --show-only templates/api-service.yaml >"${work_dir}/api.yaml"
+"${kubectl[@]}" apply -f "${work_dir}/api.yaml"
+"${kubectl[@]}" -n "${CONTROL_PLANE_NAMESPACE}" rollout status "deployment/${CONTROL_PLANE_RELEASE}-api" --timeout="${WAIT_TIMEOUT}"
 
 app_image="$(fixture_image public-image)"
 root_image="$(fixture_image build-probe)"
@@ -80,6 +91,17 @@ printf '{"auths":{"%s":{"auth":"%s"}}}' "${REGISTRY_HOST}" "${auth}" >"${work_di
 "${helm[@]}" upgrade --install loco-operator "${LOCO_DIR}/charts/loco-operator" \
   --namespace "${LOCO_NAMESPACE}" --values "${HERE}/operator-values.yaml" \
   --set controller.image.tag="${image_tag}" --set builds.builderImage.tag="${image_tag}" \
+  --wait --timeout "${HELM_TIMEOUT}"
+
+tls_secret="$(mise exec -- yq '.certManager.existingTLSSecret' "${HERE}/core-values.yaml")"
+if ! "${kubectl[@]}" -n "${LOCO_NAMESPACE}" get secret "${tls_secret}" >/dev/null 2>&1; then
+  openssl req -x509 -newkey rsa:2048 -nodes -days "${TLS_DAYS}" -subj "/CN=${CLUSTER}" \
+    -keyout "${work_dir}/tls.key" -out "${work_dir}/tls.crt" 2>/dev/null
+  "${kubectl[@]}" -n "${LOCO_NAMESPACE}" create secret tls "${tls_secret}" \
+    --cert="${work_dir}/tls.crt" --key="${work_dir}/tls.key"
+fi
+"${helm[@]}" upgrade --install loco-core "${core_chart}" --namespace "${LOCO_NAMESPACE}" \
+  --values "${HERE}/core-values.yaml" --set agent.image.tag="${image_tag}" \
   --wait --timeout "${HELM_TIMEOUT}"
 
 for deployment in zot sources; do

@@ -34,6 +34,10 @@ class LocoScenario(unittest.TestCase):
         builds = {item["metadata"]["labels"][loco.EXPECT_LABEL] for item in of_kind("Build")}
         self.assertEqual(builds, {"Succeeded", "Failed", "Running"})
 
+    def test_builds_are_not_named_like_agent_dispatched_builds(self):
+        for item in of_kind("Build"):
+            self.assertNotEqual(item["metadata"]["name"], loco.AGENT_BUILD_PREFIX + item["spec"]["buildId"])
+
     def test_ids_and_names_are_stable_unique_and_valid(self):
         self.assertEqual(generated(), generated())
         names = [(item["kind"], item["metadata"]["name"]) for item in generated()]
