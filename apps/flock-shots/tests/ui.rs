@@ -694,7 +694,7 @@ fn escape_closes_the_pods_panel_and_enter_or_a_click_reopens_it() -> anyhow::Res
     assert_eq!(ui.state().location().page, Page::Pods);
     ui.press("enter")?;
     assert!(ui.bounds("pod-inspector-pane").is_some());
-    ui.click("pod-header")?;
+    ui.click("pod-container-head")?;
     ui.press("escape")?;
     assert!(ui.bounds("pod-inspector-pane").is_none());
     ui.click("pods-row-2")?;
