@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::app_settings::Refresh;
@@ -114,6 +115,7 @@ pub struct AppState {
     pub snapshot: Snapshot,
     pub sidebar_open: bool,
     panes: Panes,
+    unconfirmed: BTreeMap<ClusterId, Preferences>,
 }
 
 impl Default for AppState {
@@ -122,6 +124,7 @@ impl Default for AppState {
             snapshot: Snapshot::default(),
             sidebar_open: true,
             panes: Panes::default(),
+            unconfirmed: BTreeMap::new(),
         }
     }
 }
@@ -272,10 +275,33 @@ impl AppState {
         }
     }
 
+    pub fn set_preferences(&mut self, cluster: &ClusterId, preferences: &Preferences) {
+        if let Some(settings) = self.snapshot.catalog.get_mut(cluster) {
+            settings.preferences.clone_from(preferences);
+            self.unconfirmed
+                .insert(cluster.clone(), preferences.clone());
+        }
+    }
+
+    fn keep_unconfirmed_preferences(&mut self) {
+        let catalog = &mut self.snapshot.catalog;
+        self.unconfirmed.retain(|cluster, preferences| {
+            let Some(settings) = catalog.get_mut(cluster) else {
+                return false;
+            };
+            if &settings.preferences == preferences {
+                return false;
+            }
+            settings.preferences.clone_from(preferences);
+            true
+        });
+    }
+
     pub fn update(&mut self, update: Update) {
         match update {
             Update::Snapshot(snapshot) => {
                 let previous = std::mem::replace(&mut self.snapshot, *snapshot);
+                self.keep_unconfirmed_preferences();
                 for tab in self.panes.tabs_mut() {
                     let location = tab.location_mut();
                     let gone = location.flux_object.as_ref().is_some_and(|key| {
@@ -1075,7 +1101,7 @@ mod tests {
             resource,
             status: None,
             detail: String::new(),
-            labels: std::collections::BTreeMap::new(),
+            labels: BTreeMap::new(),
             ports: Vec::new(),
             owner: None,
         }
@@ -1228,5 +1254,56 @@ mod tests {
         state.update(Update::Snapshot(Box::new(sample())));
         assert_eq!(state.location(), &flux);
         assert_eq!(state.panes().saved(), saved);
+    }
+
+    fn with_preferences(preferences: Preferences) -> Snapshot {
+        use crate::settings::{Auth, ClusterSettings, Connection};
+        let settings = ClusterSettings {
+            cluster: ClusterId::new("a"),
+            connection: Connection {
+                context: "a".into(),
+                server: String::new(),
+                auth: Auth::Other(String::new()),
+                kubeconfig: String::new(),
+            },
+            auth_expired: false,
+            context_change: None,
+            prometheus: None,
+            preferences,
+        };
+        let mut snapshot = sample();
+        snapshot.catalog.clusters = vec![settings];
+        snapshot
+    }
+
+    fn preferences_of(state: &AppState) -> Option<Preferences> {
+        let settings = state.snapshot.catalog.get(&ClusterId::new("a"));
+        settings.map(|settings| settings.preferences.clone())
+    }
+
+    fn scoped(list: &str, namespace: &str) -> Preferences {
+        let mut preferences = Preferences::default();
+        let selection = crate::settings::NamespaceSelection::Named(namespace.into());
+        preferences.select_namespace(list, selection);
+        preferences
+    }
+
+    #[test]
+    fn local_preferences_outlive_snapshots_until_the_backend_confirms_them() {
+        let mut state = AppState::default();
+        let old = Preferences::default();
+        state.update(Update::Snapshot(Box::new(with_preferences(old.clone()))));
+        let first = scoped("Pod", "payments");
+        let newest = scoped("Pod", "billing");
+        state.set_preferences(&ClusterId::new("a"), &first);
+        state.set_preferences(&ClusterId::new("a"), &newest);
+        assert_eq!(preferences_of(&state), Some(newest.clone()));
+        state.update(Update::Snapshot(Box::new(with_preferences(old.clone()))));
+        assert_eq!(preferences_of(&state), Some(newest.clone()));
+        state.update(Update::Snapshot(Box::new(with_preferences(first))));
+        assert_eq!(preferences_of(&state), Some(newest.clone()));
+        state.update(Update::Snapshot(Box::new(with_preferences(newest))));
+        state.update(Update::Snapshot(Box::new(with_preferences(old.clone()))));
+        assert_eq!(preferences_of(&state), Some(old));
     }
 }

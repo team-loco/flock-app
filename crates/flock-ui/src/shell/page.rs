@@ -222,7 +222,6 @@ impl Shell {
         let screen = cx.new(|cx| NamespaceScreen::new(target, window, cx));
         let navigation = self.screens(ix).navigation.clone();
         let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
-            shell.apply_preferences_now(command);
             shell.pane_command(pane, command.clone(), cx);
         });
         let events = cx.subscribe(&screen, move |shell, _, event: &ScreenEvent, cx| {

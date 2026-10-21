@@ -363,15 +363,6 @@ impl Shell {
         }
     }
 
-    pub(super) fn apply_preferences_now(&mut self, command: &Command) {
-        let Command::SetPreferences(cluster, preferences) = command else {
-            return;
-        };
-        if let Some(settings) = self.state.snapshot.catalog.get_mut(cluster) {
-            settings.preferences.clone_from(preferences);
-        }
-    }
-
     fn send(&self, command: Command) {
         self.focused_screens().scope.send(command);
     }
@@ -540,7 +531,9 @@ impl Shell {
                     .settings
                     .update(cx, |settings, cx| settings.open(cluster, cx));
             }
-            Command::SetPreferences(..) => {}
+            Command::SetPreferences(cluster, preferences) => {
+                self.state.set_preferences(cluster, preferences);
+            }
             Command::SetRefresh(_) => {}
             Command::Connect(_) => {}
             Command::Reauthenticate(_) => {}

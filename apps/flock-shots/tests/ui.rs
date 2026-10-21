@@ -3210,6 +3210,69 @@ fn a_namespace_page_scopes_the_list_it_opens_before_the_backend_answers() -> any
 }
 
 #[test]
+fn a_detail_page_scopes_the_list_it_opens_before_the_backend_answers() -> anyhow::Result<()> {
+    let (mut ui, updates) = Ui::scripted(Screen::Job)?;
+    let target = ui
+        .state()
+        .location()
+        .detail()
+        .cloned()
+        .context("the job page has a target")?;
+    let namespace = target.namespace.clone().context("the job is namespaced")?;
+    let mut snapshot = flock_demo::snapshot();
+    let detail = snapshot
+        .details
+        .get_mut(&target.cluster)
+        .context("the demo cluster has a detail")?;
+    let pods = flock_core::related::Group {
+        title: "Pods".into(),
+        items: Vec::new(),
+        total: 0,
+        counts: flock_core::Counts::default(),
+        list: Some(flock_core::related::ListLink {
+            page: Page::Pods,
+            namespace: namespace.clone(),
+        }),
+    };
+    detail.related.insert(
+        0,
+        flock_core::related::Related {
+            target,
+            groups: vec![pods],
+        },
+    );
+    updates.try_send(flock_core::Update::Snapshot(Box::new(snapshot)))?;
+    ui.settle()?;
+    ui.click("related-list-Pods")?;
+    assert_eq!(ui.state().location().page, Page::Pods);
+    assert_eq!(
+        picked(&ui, SAMPLE, POD_LIST),
+        Some(flock_core::settings::NamespaceSelection::Named(namespace))
+    );
+    Ok(())
+}
+
+#[test]
+fn a_namespace_pick_survives_stale_snapshots_and_navigation_before_the_backend_answers()
+-> anyhow::Result<()> {
+    const BEYOND_ONE_NAMESPACE: &str = "resources-Deployment-row-8";
+    let everywhere = Some(flock_core::settings::NamespaceSelection::All);
+    let (mut ui, updates) = Ui::scripted(Screen::Resources)?;
+    ui.click("resource-namespace")?;
+    ui.click("resource-namespace-option-0")?;
+    assert_eq!(picked(&ui, SAMPLE, "Deployment"), everywhere);
+    let stale = flock_core::Update::Snapshot(Box::new(flock_demo::snapshot()));
+    updates.try_send(stale)?;
+    ui.settle()?;
+    assert_eq!(picked(&ui, SAMPLE, "Deployment"), everywhere);
+    assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_some());
+    open_deployments(&mut ui, "staging")?;
+    open_deployments(&mut ui, SAMPLE)?;
+    assert!(ui.bounds(BEYOND_ONE_NAMESPACE).is_some());
+    Ok(())
+}
+
+#[test]
 fn healthy_objects_have_no_reason_or_whats_wrong() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::ResourceInspector)?;
     assert!(ui.bounds("resource-inspector-pane").is_some());
