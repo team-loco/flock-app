@@ -9,13 +9,15 @@ use crate::overview::{WorkloadHealth, plural};
 use crate::related::{Group, Related};
 use crate::resources::ResourceKind;
 use crate::time::age;
-use crate::units::{self, Metric};
+use crate::units::{self, CPU_UNIT, MEMORY_UNIT};
 use crate::watch::WatchState;
 use crate::{Counts, Page, ResourceRef, Status};
 
 pub const RECENT_EVENTS: usize = 4;
 const SEPARATOR: &str = " · ";
 const RATIO: &str = "/";
+const QUOTA_SCOPE: char = '.';
+const CPU_RESOURCE: &str = "cpu";
 const FAILING: &str = "failing";
 const DEGRADED: &str = "degraded";
 const SUSPENDED: &str = "suspended";
@@ -83,19 +85,18 @@ impl Requested {
     }
 
     pub fn cpu_label(&self) -> String {
-        self.label(Metric::Cpu)
+        self.label(CPU_UNIT)
     }
 
     pub fn memory_label(&self) -> String {
-        self.label(Metric::Memory)
+        self.label(MEMORY_UNIT)
     }
 
-    fn label(&self, metric: Metric) -> String {
-        let values: Vec<Option<f32>> = std::iter::once(Some(self.requested))
-            .chain(self.quota.map(Some))
-            .collect();
-        let amounts = units::amounts(metric, &values).labelled();
-        format!("{amounts} {REQUESTED}")
+    fn label(&self, unit: &str) -> String {
+        match self.quota {
+            Some(quota) => format!("{} {REQUESTED}", units::amount(self.requested, quota, unit)),
+            None => format!("{} {unit} {REQUESTED}", units::figure(self.requested)),
+        }
     }
 }
 
@@ -108,7 +109,21 @@ pub struct QuotaItem {
 
 impl QuotaItem {
     pub fn label(&self) -> String {
-        format!("{} {}{RATIO}{}", self.resource, self.used, self.hard)
+        let read: fn(&str) -> String = if self.is_cpu() {
+            units::written_cpu
+        } else {
+            str::to_owned
+        };
+        format!(
+            "{} {}{RATIO}{}",
+            self.resource,
+            read(&self.used),
+            read(&self.hard)
+        )
+    }
+
+    fn is_cpu(&self) -> bool {
+        self.resource.rsplit(QUOTA_SCOPE).next() == Some(CPU_RESOURCE)
     }
 }
 
@@ -869,8 +884,8 @@ mod tests {
     #[test]
     fn usage_pairs_the_namespace_requests_with_its_quota() {
         let page = page();
-        assert_eq!(page.cpu().cpu_label(), "1.2 / 4.0 cores requested");
-        assert_eq!(page.memory().memory_label(), "2.5 GiB requested");
+        assert_eq!(page.cpu().cpu_label(), "1.20 / 4.00 cores requested");
+        assert_eq!(page.memory().memory_label(), "2.50 GiB requested");
     }
 
     #[test]
@@ -879,24 +894,24 @@ mod tests {
             requested: 1.2,
             quota: Some(4.),
         };
-        assert_eq!(cpu.cpu_label(), "1.2 / 4.0 cores requested");
+        assert_eq!(cpu.cpu_label(), "1.20 / 4.00 cores requested");
         assert_eq!(cpu.share(), Some(0.3));
         let memory = Requested {
             requested: 2.6,
             quota: None,
         };
-        assert_eq!(memory.memory_label(), "2.6 GiB requested");
+        assert_eq!(memory.memory_label(), "2.60 GiB requested");
         assert_eq!(memory.share(), None);
         let small = Requested {
             requested: 0.12,
             quota: Some(0.5),
         };
-        assert_eq!(small.cpu_label(), "120m / 500m requested");
+        assert_eq!(small.cpu_label(), "0.12 / 0.50 cores requested");
         let little = Requested {
             requested: 0.0625,
             quota: None,
         };
-        assert_eq!(little.memory_label(), "64Mi requested");
+        assert_eq!(little.memory_label(), "0.06 GiB requested");
         let over = Requested {
             requested: 5.,
             quota: Some(4.),
@@ -915,6 +930,14 @@ mod tests {
             }],
         };
         assert_eq!(quota.line(), "payments-quota · pods 9/30");
+        let cpu = |resource: &str| QuotaItem {
+            resource: resource.into(),
+            used: "1200m".into(),
+            hard: "4".into(),
+        };
+        assert_eq!(cpu("requests.cpu").label(), "requests.cpu 1.20/4.00");
+        assert_eq!(cpu("cpu").label(), "cpu 1.20/4.00");
+        assert_eq!(cpu("requests.memory").label(), "requests.memory 1200m/4");
         let denied: Listing<Quota> = Listing {
             items: Vec::new(),
             state: WatchState::Failed("forbidden".into()),

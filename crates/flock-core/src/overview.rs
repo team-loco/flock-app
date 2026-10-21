@@ -381,7 +381,7 @@ mod tests {
             requests: 0.74,
             limits: 1.31,
         };
-        assert_eq!(cpu.amount(), "68.4 / 112.0 cores");
+        assert_eq!(cpu.amount(), "68.40 / 112.00 cores");
         assert_eq!(percent(cpu.fraction()), "61%");
         assert_eq!(percent(cpu.limits), "131%");
         assert!(Capacity::default().fraction().abs() < f32::EPSILON);

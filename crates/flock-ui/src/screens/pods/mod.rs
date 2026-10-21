@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::kit::SelectableText;
+use crate::kit::{SelectableText, Tooltip};
 use flock_core::diagnosis::true_label;
 use flock_core::emptiness::Noun;
 use flock_core::filter::label_values;
@@ -13,6 +13,7 @@ use flock_core::pods::{
 use flock_core::related::Related;
 use flock_core::resources::{NamespaceCount, POD_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
+use flock_core::units::{CPU_UNIT, POD_MEMORY_UNIT};
 use flock_core::{
     ClusterId, Command, Condition, LogInstance, LogTarget, Page, Preferences, ResourceRef, Seen,
     Snapshot, Status,
@@ -44,6 +45,8 @@ use crate::theme::{
 };
 
 const INSPECTOR_ID: &str = "pod-inspector";
+const REQUESTS: &str = "requests";
+const LIMITS: &str = "limits";
 const FAILING_ELSEWHERE: &str = "pod-failing-elsewhere";
 const OWNER_LINK: &str = "pod-owner";
 const NAME_MIN: Pixels = px(180.);
@@ -877,10 +880,18 @@ impl PodsScreen {
 }
 
 fn container_fields(container: &Container, ports: Vec<AnyElement>, palette: &Palette) -> KeyValue {
-    let resources = |resources: &Resources| match resources.label() {
-        Some(label) => value(label, palette.fg),
-        None => value(NO_RESOURCES, palette.mute),
-    };
+    let resources =
+        |side: &str, resources: &Resources| match (resources.label(), resources.written()) {
+            (Some(label), Some(written)) => div()
+                .id(SharedString::from(format!(
+                    "container-{side}-{}",
+                    container.name
+                )))
+                .tooltip(Tooltip::text(written))
+                .child(value(label, palette.fg))
+                .into_any_element(),
+            _ => value(NO_RESOURCES, palette.mute),
+        };
     let restarts_color = if container.restarts > 0 {
         palette.warn
     } else {
@@ -906,8 +917,8 @@ fn container_fields(container: &Container, ports: Vec<AnyElement>, palette: &Pal
     }
     let fields = fields
         .row("image", value(container.image.clone(), palette.fg))
-        .row("requests", resources(&container.requests))
-        .row("limits", resources(&container.limits));
+        .row(REQUESTS, resources(REQUESTS, &container.requests))
+        .row(LIMITS, resources(LIMITS, &container.limits));
     let fields = match probes {
         Some(probes) => fields.row("probes", probes),
         None => fields,
@@ -1135,7 +1146,7 @@ fn columns() -> Vec<Column<Pod>> {
         .flex(NODE_WEIGHT, NODE_MIN)
         .sort_by_key(|p: &Pod| p.node.clone()),
         Column::colored_text(
-            "CPU",
+            format!("CPU {CPU_UNIT}"),
             |p: &Pod| usage_text(p, Usage::cpu_label),
             |_, palette| palette.fg2,
         )
@@ -1144,7 +1155,7 @@ fn columns() -> Vec<Column<Pod>> {
         .fixed(CPU)
         .sort_by_key(|p: &Pod| std::cmp::Reverse(p.usage.map(|u| u.cpu_millis))),
         Column::colored_text(
-            "Memory",
+            format!("Mem {POD_MEMORY_UNIT}"),
             |p: &Pod| usage_text(p, Usage::memory_label),
             |_, palette| palette.fg2,
         )

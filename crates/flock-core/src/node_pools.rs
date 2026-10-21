@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use crate::Status;
 use crate::nodes::Node;
 use crate::overview::plural;
+use crate::units::{self, CPU_UNIT};
 
 const PRESSURE_WARN: f32 = 0.9;
 const PRESSURE_ERR: f32 = 0.95;
@@ -33,7 +34,8 @@ impl Fit {
     }
 
     pub fn label(&self) -> String {
-        format!("{} cpu · {} Gi", compact(self.cpu), compact(self.memory))
+        let cpu = units::figure(self.cpu);
+        format!("{cpu} {CPU_UNIT} · {} Gi", compact(self.memory))
     }
 }
 
@@ -302,7 +304,7 @@ mod tests {
         let fit = general.fit.unwrap_or_default();
         assert!(close(fit.cpu, 6.));
         assert!(close(fit.memory, 16.));
-        assert_eq!(fit.label(), "6.0 cpu · 16 Gi");
+        assert_eq!(fit.label(), "6.00 cores · 16 Gi");
         let gpu = &pools[1];
         assert_eq!(gpu.instance_type, "g5.2xlarge");
         assert_eq!(gpu.cpu_status(), Some(Status::Err));

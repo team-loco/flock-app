@@ -3,6 +3,7 @@ use flock_core::emptiness::Noun;
 use flock_core::filter::{StatusFilter, label_values};
 use flock_core::related::NAMESPACE;
 use flock_core::time::age;
+use flock_core::units::{CPU_UNIT, MEMORY_UNIT};
 use flock_core::{
     ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Page, ResourceRef, Status,
 };
@@ -241,18 +242,22 @@ fn columns() -> Vec<Column<Namespace>> {
             .end()
             .fixed(PODS_WIDTH)
             .sort_by_key(|n: &Namespace| n.pods),
-        Column::colored_text("CPU", |n: &Namespace| n.cpu_label().into(), |_, p| p.fg2)
-            .mono()
-            .end()
-            .fixed(CPU_WIDTH)
-            .tooltip(|n: &Namespace| n.cpu_note().into())
-            .sortable(|a: &Namespace, b: &Namespace| {
-                a.cpu
-                    .unwrap_or_default()
-                    .total_cmp(&b.cpu.unwrap_or_default())
-            }),
         Column::colored_text(
-            "Memory",
+            format!("CPU {CPU_UNIT}"),
+            |n: &Namespace| n.cpu_label().into(),
+            |_, p| p.fg2,
+        )
+        .mono()
+        .end()
+        .fixed(CPU_WIDTH)
+        .tooltip(|n: &Namespace| n.cpu_note().into())
+        .sortable(|a: &Namespace, b: &Namespace| {
+            a.cpu
+                .unwrap_or_default()
+                .total_cmp(&b.cpu.unwrap_or_default())
+        }),
+        Column::colored_text(
+            format!("Memory {MEMORY_UNIT}"),
             |n: &Namespace| n.memory_label().into(),
             |_, p| p.fg2,
         )

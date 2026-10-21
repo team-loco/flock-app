@@ -586,8 +586,8 @@ mod tests {
         let row = pod(&cluster(), &raw, None, Vec::new(), &clock());
         let web = &row.containers[0];
         assert_eq!(web.state_label(), "Running · 15h");
-        assert_eq!(web.requests.label().as_deref(), Some("cpu 1m · mem 16Mi"));
-        assert_eq!(web.limits.label().as_deref(), Some("cpu 2"));
+        assert_eq!(web.requests.written().as_deref(), Some("cpu 1m · mem 16Mi"));
+        assert_eq!(web.limits.written().as_deref(), Some("cpu 2"));
         assert_eq!(
             web.probes_label().as_deref(),
             Some("live :9898/healthz · ready tcp :http · start exec")

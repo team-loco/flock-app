@@ -1,6 +1,6 @@
 use flock_core::Status;
 use flock_core::overview::{Capacity, percent};
-use flock_core::units::fixed;
+use flock_core::units::figure;
 use gpui::{
     AnyElement, App, Bounds, Div, Hsla, InteractiveElement, IntoElement, ParentElement,
     PathBuilder, Pixels, Point, RenderOnce, SharedString, StatefulInteractiveElement, Styled,
@@ -152,15 +152,15 @@ impl RenderOnce for CapacityMeter {
         let scale = capacity_scale(&[usage, capacity.requests, capacity.limits]);
         let tooltip = format!(
             "Usage: {} {}\nRequests: {} {} ({})\nLimits: {} {} ({})\nCapacity: {} {}",
-            fixed(capacity.used),
+            figure(capacity.used),
             capacity.unit,
-            fixed(capacity.requests * capacity.total),
+            figure(capacity.requests * capacity.total),
             capacity.unit,
             percent(capacity.requests),
-            fixed(capacity.limits * capacity.total),
+            figure(capacity.limits * capacity.total),
             capacity.unit,
             percent(capacity.limits),
-            fixed(capacity.total),
+            figure(capacity.total),
             capacity.unit,
         );
         let legend = [

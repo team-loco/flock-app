@@ -84,7 +84,15 @@ pub struct Resources {
 
 impl Resources {
     pub fn label(&self) -> Option<String> {
-        let cpu = self.cpu.as_ref().map(|cpu| format!("cpu {cpu}"));
+        self.describe(units::written_cpu)
+    }
+
+    pub fn written(&self) -> Option<String> {
+        self.describe(str::to_owned)
+    }
+
+    fn describe(&self, read: fn(&str) -> String) -> Option<String> {
+        let cpu = self.cpu.as_deref().map(|cpu| format!("cpu {}", read(cpu)));
         let memory = self.memory.as_ref().map(|memory| format!("mem {memory}"));
         let parts: Vec<String> = cpu.into_iter().chain(memory).collect();
         (!parts.is_empty()).then(|| parts.join(SEPARATOR))
@@ -209,11 +217,11 @@ pub struct Usage {
 
 impl Usage {
     pub fn cpu_label(self) -> String {
-        units::cpu_millis(self.cpu_millis)
+        units::millicores(self.cpu_millis)
     }
 
     pub fn memory_label(self) -> String {
-        units::memory_mib(self.memory_mib)
+        self.memory_mib.to_string()
     }
 }
 
@@ -834,8 +842,12 @@ mod tests {
         ];
         assert_eq!(web.state_label(), "Running · 15h");
         assert_eq!(web.restarts_label(), "1 restart");
-        assert_eq!(web.requests.label().as_deref(), Some("cpu 1m · mem 16Mi"));
-        assert_eq!(web.limits.label().as_deref(), Some("cpu 2"));
+        assert_eq!(
+            web.requests.label().as_deref(),
+            Some("cpu <0.01 · mem 16Mi")
+        );
+        assert_eq!(web.requests.written().as_deref(), Some("cpu 1m · mem 16Mi"));
+        assert_eq!(web.limits.label().as_deref(), Some("cpu 2.00"));
         assert_eq!(Resources::default().label(), None);
         assert_eq!(
             web.probes_label().as_deref(),
@@ -938,14 +950,14 @@ mod tests {
     }
 
     #[test]
-    fn usage_labels_switch_units() {
+    fn usage_labels_keep_one_unit() {
         let small = Usage {
             cpu_millis: 212,
             memory_mib: 301,
         };
         assert_eq!(
             (small.cpu_label(), small.memory_label()),
-            ("212m".into(), "301 MiB".into())
+            ("0.21".into(), "301".into())
         );
         let large = Usage {
             cpu_millis: 1500,
@@ -953,7 +965,7 @@ mod tests {
         };
         assert_eq!(
             (large.cpu_label(), large.memory_label()),
-            ("1.5 cores".into(), "2.0 GiB".into())
+            ("1.50".into(), "2048".into())
         );
     }
 

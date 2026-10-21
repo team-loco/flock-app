@@ -1,7 +1,7 @@
 use crate::changes::{LineChange, PatchLine};
 use crate::tabs::short_name;
 use crate::workload::{ContainerSpec, EnvResolution, EnvSource, EnvVar, Resources, short_image};
-use crate::{ClusterId, ResourceRef, Seen, Status, Uid, Workload};
+use crate::{ClusterId, ResourceRef, Seen, Status, Uid, Workload, units};
 
 const MISSING: &str = "—";
 const READY: &str = "Ready";
@@ -197,12 +197,14 @@ fn container_text(
         .unwrap_or_else(|| MISSING.to_owned())
 }
 
-fn pair(request: &Resources, limit: &Resources, pick: fn(&Resources) -> Option<&String>) -> String {
-    let side = |resources: &Resources| {
-        pick(resources)
-            .cloned()
-            .unwrap_or_else(|| MISSING.to_owned())
-    };
+fn pair(
+    request: &Resources,
+    limit: &Resources,
+    pick: fn(&Resources) -> Option<&String>,
+    read: fn(&str) -> String,
+) -> String {
+    let side =
+        |resources: &Resources| pick(resources).map_or_else(|| MISSING.to_owned(), |v| read(v));
     format!("{} / {}", side(request), side(limit))
 }
 
@@ -335,7 +337,14 @@ fn fields(observed: &[&Observed]) -> Vec<Field> {
         CPU,
         each(&|o| {
             container_text(
-                |c| Some(pair(&c.requests, &c.limits, |r| r.cpu.as_ref())),
+                |c| {
+                    Some(pair(
+                        &c.requests,
+                        &c.limits,
+                        |r| r.cpu.as_ref(),
+                        units::written_cpu,
+                    ))
+                },
                 &o.workload,
             )
         }),
@@ -344,7 +353,14 @@ fn fields(observed: &[&Observed]) -> Vec<Field> {
         MEMORY,
         each(&|o| {
             container_text(
-                |c| Some(pair(&c.requests, &c.limits, |r| r.memory.as_ref())),
+                |c| {
+                    Some(pair(
+                        &c.requests,
+                        &c.limits,
+                        |r| r.memory.as_ref(),
+                        str::to_owned,
+                    ))
+                },
                 &o.workload,
             )
         }),
@@ -581,7 +597,7 @@ mod tests {
         );
         assert_eq!(
             texts(&comparison.fields[4]),
-            [("500m / 1", None), ("500m / 1", None)]
+            [("0.50 / 1.00", None), ("0.50 / 1.00", None)]
         );
         assert_eq!(
             texts(&comparison.fields[5]),

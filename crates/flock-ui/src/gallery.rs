@@ -165,8 +165,8 @@ const PODS: [Pod; 4] = [
         phase: "CrashLoopBackOff",
         restarts: 14,
         node: "ip-10-4-12-87",
-        cpu: "4m",
-        mem: "38Mi",
+        cpu: "<0.01",
+        mem: "38",
         age: "3h",
     },
     Pod {
@@ -176,8 +176,8 @@ const PODS: [Pod; 4] = [
         phase: "Running",
         restarts: 0,
         node: "ip-10-4-14-201",
-        cpu: "212m",
-        mem: "301Mi",
+        cpu: "0.21",
+        mem: "301",
         age: "3h",
     },
     Pod {
@@ -187,8 +187,8 @@ const PODS: [Pod; 4] = [
         phase: "Running",
         restarts: 0,
         node: "ip-10-4-22-63",
-        cpu: "187m",
-        mem: "288Mi",
+        cpu: "0.19",
+        mem: "288",
         age: "3h",
     },
     Pod {
@@ -198,8 +198,8 @@ const PODS: [Pod; 4] = [
         phase: "Readiness failing",
         restarts: 2,
         node: "ip-10-4-22-63",
-        cpu: "96m",
-        mem: "120Mi",
+        cpu: "0.10",
+        mem: "120",
         age: "12m",
     },
 ];
@@ -461,8 +461,8 @@ impl Gallery {
             KeyValue::new()
                 .text("image", "ghcr.io/acme/checkout-api:2.14.0")
                 .text("ports", "8080/TCP http")
-                .text("requests", "CPU 500m · memory 512Mi")
-                .text("limits", "CPU 1 · memory 1Gi")
+                .text("requests", "CPU 0.50 · memory 512Mi")
+                .text("limits", "CPU 1.00 · memory 1Gi")
                 .row(
                     "last exit",
                     div().text_color(palette.err).child("1 (Error) · 2m ago"),
@@ -773,11 +773,11 @@ fn pod_columns() -> Vec<Column<Pod>> {
         Column::colored_text("Node", |pod: &Pod| pod.node.into(), |_, p| p.fg2)
             .mono()
             .fixed(NODE_WIDTH),
-        Column::colored_text("CPU", |pod: &Pod| pod.cpu.into(), |_, p| p.fg2)
+        Column::colored_text("CPU cores", |pod: &Pod| pod.cpu.into(), |_, p| p.fg2)
             .mono()
             .end()
             .fixed(CPU_WIDTH),
-        Column::colored_text("Mem", |pod: &Pod| pod.mem.into(), |_, p| p.fg2)
+        Column::colored_text("Mem MiB", |pod: &Pod| pod.mem.into(), |_, p| p.fg2)
             .mono()
             .end()
             .fixed(MEM_WIDTH),
