@@ -153,6 +153,12 @@ impl NamespaceSort {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DetailObject {
+    pub target: ResourceRef,
+    pub row: Resource,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClusterDetail {
     pub overview: Overview,
@@ -162,6 +168,7 @@ pub struct ClusterDetail {
     pub resources: BTreeMap<ResourceKind, Vec<Resource>>,
     pub related: Vec<Related>,
     pub namespace_details: Vec<NamespaceDetail>,
+    pub objects: Vec<DetailObject>,
 }
 
 impl ClusterDetail {
@@ -199,6 +206,13 @@ impl ClusterDetail {
         self.namespace_details
             .iter()
             .find(|detail| detail.name == name)
+    }
+
+    pub fn object(&self, target: &ResourceRef) -> Option<&Resource> {
+        self.objects
+            .iter()
+            .find(|object| &object.target == target)
+            .map(|object| &object.row)
     }
 
     pub fn resources(&self, kind: ResourceKind) -> &[Resource] {

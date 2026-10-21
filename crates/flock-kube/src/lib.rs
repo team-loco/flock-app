@@ -32,6 +32,7 @@ pub mod metrics_history;
 pub mod migrate;
 pub mod namespace;
 pub mod network;
+pub mod objects;
 pub mod ops;
 pub mod paste;
 pub mod pod_tops;

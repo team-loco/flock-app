@@ -372,7 +372,13 @@ struct Health {
 
 impl Health {
     fn record(&mut self, kind: WatchKind, failure: Failure) {
-        let optional = matches!(kind, WatchKind::Custom(_) | WatchKind::EndpointSlices);
+        let optional = matches!(
+            kind,
+            WatchKind::Custom(_)
+                | WatchKind::EndpointSlices
+                | WatchKind::PersistentVolumes
+                | WatchKind::HorizontalPodAutoscalers
+        );
         let page_scoped = optional && failure.kind == FailureKind::Forbidden;
         if !page_scoped {
             self.kinds.insert(kind, failure);
@@ -720,15 +726,25 @@ mod tests {
     }
 
     #[test]
-    fn forbidden_endpoint_slices_do_not_degrade() {
-        let mut health = Health {
-            connected_once: true,
-            ..Health::default()
-        };
-        health.record(WatchKind::EndpointSlices, failure(FailureKind::Forbidden));
-        assert_eq!(health.status(), ConnectionStatus::Connected);
-        health.record(WatchKind::EndpointSlices, failure(FailureKind::Other));
-        assert!(matches!(health.status(), ConnectionStatus::Degraded(_)));
+    fn forbidden_optional_kinds_do_not_degrade() {
+        let optional = [
+            WatchKind::EndpointSlices,
+            WatchKind::PersistentVolumes,
+            WatchKind::HorizontalPodAutoscalers,
+        ];
+        for kind in optional {
+            let mut health = Health {
+                connected_once: true,
+                ..Health::default()
+            };
+            health.record(kind.clone(), failure(FailureKind::Forbidden));
+            assert_eq!(health.status(), ConnectionStatus::Connected, "{kind:?}");
+            health.record(kind.clone(), failure(FailureKind::Other));
+            assert!(
+                matches!(health.status(), ConnectionStatus::Degraded(_)),
+                "{kind:?}"
+            );
+        }
     }
 
     const ROUND_TRIP: Duration = Duration::from_secs(1);

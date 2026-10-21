@@ -241,6 +241,12 @@ pub fn related(
     let columns = Columns::of(&crd);
     let row = row(&crd, &columns, &found, scope.now);
     let mut facts = crate::related::facts(handle, scope, target.namespace.as_deref());
+    let known = facts.iter().any(|fact| {
+        fact.kind == target.kind && fact.name == target.name && fact.namespace == target.namespace
+    });
+    if known {
+        return Some(flock_core::related::related(scope.cluster, &facts, target));
+    }
     facts.push(Fact {
         status: row.status,
         age: row.age,

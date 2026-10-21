@@ -36,7 +36,12 @@ const STORAGE: &str = "storage";
 const DEFAULT_REPLICAS: i32 = 1;
 const DEFAULT_COMPLETIONS: i32 = 1;
 
-fn row(meta: &ObjectMeta, status: Status, cells: Vec<String>, now: Timestamp) -> Resource {
+pub(crate) fn row(
+    meta: &ObjectMeta,
+    status: Status,
+    cells: Vec<String>,
+    now: Timestamp,
+) -> Resource {
     let labels = meta.labels.clone().unwrap_or_default();
     Resource {
         namespace: meta.namespace.clone().unwrap_or_default(),

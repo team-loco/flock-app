@@ -93,6 +93,7 @@ pub fn cluster(
         nodes,
         related: Vec::new(),
         namespace_details: Vec::new(),
+        objects: Vec::new(),
     };
     let pods = pods(
         summary,
