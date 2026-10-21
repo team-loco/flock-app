@@ -148,6 +148,10 @@ pub enum ScreenEvent {
     Navigate(Page),
     ShowEvents(flock_core::events::EventFilter),
     ShowEvent(String),
+    NeedsAttention {
+        page: Page,
+        namespace: Option<String>,
+    },
 }
 
 pub struct ClusterPages {

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::diagnosis::{self, Condition, Diagnosis};
-use crate::filter::{FilterSpec, TextFilter};
+use crate::filter::{FilterSpec, StatusFilter, TextFilter};
 use crate::related::{DEPLOYMENT, REPLICA_SET, deployment_name};
 use crate::resource::short_kind;
 use crate::{ClusterId, Counts, ResourceRef, Status, Uid, time, units};
@@ -431,6 +431,7 @@ fn container_sentence(container: &Container) -> String {
 pub enum PodFilter {
     #[default]
     All,
+    Attention,
     Running,
     Pending,
     Failed,
@@ -438,8 +439,9 @@ pub enum PodFilter {
 }
 
 impl PodFilter {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::All,
+        Self::Attention,
         Self::Running,
         Self::Pending,
         Self::Failed,
@@ -449,6 +451,7 @@ impl PodFilter {
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
+            Self::Attention => StatusFilter::Attention.label(),
             Self::Running => "Running",
             Self::Pending => "Pending",
             Self::Failed => "Failed",
@@ -459,6 +462,7 @@ impl PodFilter {
     pub fn keeps(self, pod: &Pod) -> bool {
         match self {
             Self::All => true,
+            Self::Attention => StatusFilter::Attention.keeps(pod.status),
             Self::Running => pod.phase == PodPhase::Running,
             Self::Pending => pod.phase == PodPhase::Pending,
             Self::Failed => pod.phase == PodPhase::Failed,
@@ -746,6 +750,7 @@ mod tests {
             counts,
             [
                 ("All", 6),
+                ("Needs attention", 2),
                 ("Running", 2),
                 ("Pending", 1),
                 ("Failed", 1),

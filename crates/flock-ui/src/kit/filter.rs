@@ -16,8 +16,8 @@ use super::input::{
 };
 use super::{Kbd, popover};
 use crate::theme::{
-    ActiveTheme, CONTROL, FILTER_WIDTH, FONT_MONO, MENU_MAX_HEIGHT, Palette, RADIUS, ROW_TABLE,
-    RULE, SPACE_4, SPACE_8, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, CONTROL, FILTER_MIN, FILTER_WIDTH, FONT_MONO, MENU_MAX_HEIGHT, Palette, RADIUS,
+    ROW_TABLE, RULE, SPACE_4, SPACE_8, TEXT_MONO, TEXT_SMALL,
 };
 
 const CLEAR: &str = "Clear";
@@ -382,7 +382,7 @@ impl FilterBar {
             .gap(SPACE_4)
             .max_w(FILTER_WIDTH)
             .flex_1()
-            .min_w_0()
+            .min_w(FILTER_MIN)
             .h(CONTROL)
             .px(SPACE_4)
             .rounded(RADIUS)

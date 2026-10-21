@@ -392,7 +392,7 @@ mod tests {
             .iter()
             .filter(|pod| PodFilter::Running.keeps(pod) && !failing(pod))
             .count();
-        assert_eq!(counts[2], (PodFilter::Pending, 9));
+        assert_eq!(counts[3], (PodFilter::Pending, 9));
         assert_eq!((healthy_running, crashing), (398, 5));
         assert_eq!(phases, Some((398, 9, 5)));
     }

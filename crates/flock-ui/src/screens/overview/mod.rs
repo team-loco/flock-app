@@ -10,6 +10,8 @@ mod pools;
 mod summary;
 mod workloads;
 
+use std::rc::Rc;
+
 use flock_core::cluster::{Namespace, NamespaceSort};
 use flock_core::cluster_changes::{ClusterChange, newest_first};
 use flock_core::control_plane::ControlPlane;
@@ -36,6 +38,8 @@ use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, RULE, SPACE_3, SPACE_4, SPACE_5, SPACE_7, SPACE_8,
     TEXT_CONTROL, TEXT_SMALL,
 };
+
+type Activate = Rc<dyn Fn(&mut Window, &mut App)>;
 
 const CHANGES_BAND_WEIGHTS: [f32; 2] = [3., 2.];
 const LIVE: &str = "Live";
@@ -283,6 +287,15 @@ impl OverviewScreen {
         }
     }
 
+    fn attention(page: Page, namespace: Option<String>, cx: &mut Context<Self>) -> Activate {
+        let this = cx.entity().downgrade();
+        Rc::new(move |_, cx| {
+            let namespace = namespace.clone();
+            let event = ScreenEvent::NeedsAttention { page, namespace };
+            this.update(cx, |_, cx| cx.emit(event)).ok();
+        })
+    }
+
     fn open(
         target: ResourceRef,
         cx: &mut Context<Self>,
@@ -409,15 +422,21 @@ fn section(palette: &Palette) -> Div {
         .text_color(palette.fg)
 }
 
+fn meta_text(meta: String, palette: &Palette) -> Div {
+    div()
+        .font_family(FONT_MONO)
+        .text_size(TEXT_SMALL)
+        .text_color(palette.mute)
+        .truncate()
+        .child(meta)
+}
+
 fn section_head(label: &str, meta: Option<String>, link: Option<Link>, palette: &Palette) -> Div {
-    let meta = meta.map(|meta| {
-        div()
-            .font_family(FONT_MONO)
-            .text_size(TEXT_SMALL)
-            .text_color(palette.mute)
-            .truncate()
-            .child(meta)
-    });
+    let meta = meta.map(|meta| meta_text(meta, palette).into_any_element());
+    head_row(label, meta, link)
+}
+
+fn head_row(label: &str, meta: Option<AnyElement>, link: Option<Link>) -> Div {
     let link = link.map(|link| div().text_size(TEXT_CONTROL).child(link));
     div()
         .flex()
@@ -428,6 +447,20 @@ fn section_head(label: &str, meta: Option<String>, link: Option<Link>, palette: 
         .children(meta)
         .child(div().flex_1())
         .children(link)
+}
+
+fn problem_link(id: impl Into<SharedString>, content: Div, activate: Activate) -> Stateful<Div> {
+    let id: SharedString = id.into();
+    let selector = id.to_string();
+    content
+        .debug_selector(move || selector)
+        .id(ElementId::Name(id))
+        .cursor_pointer()
+        .hover(Styled::underline)
+        .on_click(move |_, window, cx| {
+            cx.stop_propagation();
+            activate(window, cx);
+        })
 }
 
 fn row_link(

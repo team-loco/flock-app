@@ -15,7 +15,6 @@ pub enum Motion {
     #[default]
     Still,
     Enter(u64),
-    Swap(u64),
 }
 
 #[derive(Default)]
@@ -34,30 +33,24 @@ impl Entrance {
         cx: &mut Context<V>,
     ) -> Motion {
         let previous = std::mem::replace(&mut self.key, key.map(str::to_owned));
-        let Some(key) = key else {
+        if key.is_none() {
             self.motion = Motion::Still;
             self.settle = None;
             return self.motion;
-        };
-        let entering = match previous.as_deref() {
-            None => true,
-            Some(previous) if previous != key => false,
-            Some(_) => return self.motion,
-        };
+        }
+        if previous.is_some() {
+            return self.motion;
+        }
         if cx.reduce_motion() {
             self.motion = Motion::Still;
             self.settle = None;
             return self.motion;
         }
         self.generation += 1;
-        let (motion, duration) = if entering {
-            (Motion::Enter(self.generation), INSPECTOR_IN)
-        } else {
-            (Motion::Swap(self.generation), INSPECTOR_SWAP)
-        };
+        let motion = Motion::Enter(self.generation);
         self.motion = motion;
         self.settle = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(duration).await;
+            cx.background_executor().timer(INSPECTOR_IN).await;
             this.update(cx, |view, cx| {
                 field(view).motion = Motion::Still;
                 cx.notify();
@@ -136,7 +129,6 @@ pub fn swap_in(element: impl IntoElement, id: &str, motion: Motion) -> AnyElemen
     let generation = match motion {
         Motion::Still => return content.into_any_element(),
         Motion::Enter(generation) => generation,
-        Motion::Swap(generation) => generation,
     };
     let animation = Animation::new(INSPECTOR_SWAP).with_easing(ease_out_quint());
     content
@@ -169,7 +161,6 @@ impl gpui::RenderOnce for Slide {
             .child(div().flex_none().w(width).h_full().child(content));
         let (phase, generation, duration, entering) = match self.motion {
             Some(Motion::Enter(generation)) => (ENTER, generation, INSPECTOR_IN, true),
-            Some(Motion::Swap(_)) => return panel.into_any_element(),
             Some(Motion::Still) => return panel.into_any_element(),
             None => (LEAVE, LEAVING, INSPECTOR_OUT, false),
         };
@@ -266,19 +257,26 @@ mod tests {
     }
 
     #[gpui::test]
-    fn only_a_new_inspector_or_selection_moves_and_then_comes_to_rest(cx: &mut TestAppContext) {
+    fn only_opening_the_inspector_moves_and_then_comes_to_rest(cx: &mut TestAppContext) {
         let view = cx.new(|_| View::default());
         assert_eq!(track(&view, Some("a"), cx), Motion::Enter(1));
         assert_eq!(track(&view, Some("a"), cx), Motion::Enter(1));
         cx.executor().advance_clock(INSPECTOR_IN);
         cx.run_until_parked();
         assert_eq!(track(&view, Some("a"), cx), Motion::Still);
-        assert_eq!(track(&view, Some("b"), cx), Motion::Swap(2));
-        cx.executor().advance_clock(INSPECTOR_SWAP);
-        cx.run_until_parked();
         assert_eq!(track(&view, Some("b"), cx), Motion::Still);
         assert_eq!(track(&view, None, cx), Motion::Still);
-        assert_eq!(track(&view, Some("b"), cx), Motion::Enter(3));
+        assert_eq!(track(&view, Some("b"), cx), Motion::Enter(2));
+    }
+
+    #[gpui::test]
+    fn switching_rows_while_opening_keeps_the_running_entrance(cx: &mut TestAppContext) {
+        let view = cx.new(|_| View::default());
+        assert_eq!(track(&view, Some("a"), cx), Motion::Enter(1));
+        assert_eq!(track(&view, Some("b"), cx), Motion::Enter(1));
+        cx.executor().advance_clock(INSPECTOR_IN);
+        cx.run_until_parked();
+        assert_eq!(track(&view, Some("c"), cx), Motion::Still);
     }
 
     #[gpui::test]

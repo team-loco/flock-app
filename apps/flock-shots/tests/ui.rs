@@ -695,6 +695,48 @@ fn inspector_edge_resizes_clamps_and_double_click_resets() -> anyhow::Result<()>
     Ok(())
 }
 
+fn drag_widens_and_persists(
+    ui: &mut Ui,
+    pane: &'static str,
+    handle: &'static str,
+    by: f32,
+) -> anyhow::Result<()> {
+    use gpui::{point, px};
+    let original = bounds_of(ui, pane)?.size.width;
+    ui.drag(handle, point(px(by), px(0.)))?;
+    let widened = original + px(by.abs());
+    assert_eq!(bounds_of(ui, pane)?.size.width, widened);
+    let kind = pane.trim_end_matches("-pane");
+    let saved = ui.read(|_, cx| {
+        flock_ui::settings::current(cx)
+            .inspector_widths
+            .get(kind)
+            .copied()
+    });
+    assert_eq!(saved.map(|width| px(f32::from(width))), Some(widened));
+    Ok(())
+}
+
+#[test]
+fn two_pane_splits_resize_from_their_divider_and_remember_the_width() -> anyhow::Result<()> {
+    const WIDER: f32 = 120.;
+    let mut problems = Ui::open(Screen::Problems)?;
+    drag_widens_and_persists(
+        &mut problems,
+        "problem-causes-pane",
+        "problem-causes-resize",
+        WIDER,
+    )?;
+    let mut settings = Ui::open(Screen::ClusterSettings)?;
+    drag_widens_and_persists(
+        &mut settings,
+        "cluster-inspector-pane",
+        "cluster-inspector-resize",
+        -WIDER,
+    )?;
+    Ok(())
+}
+
 #[test]
 fn events_namespace_choice_is_kept_per_cluster_in_preferences() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Events)?;
@@ -915,6 +957,64 @@ fn opened(ui: &Ui) -> Option<(String, String)> {
         .map(|target| (target.kind.clone(), target.name.clone()))
 }
 
+fn needs_attention_in(
+    ui: &Ui,
+    page: Page,
+    list: &str,
+) -> Option<flock_core::settings::NamespaceSelection> {
+    use flock_core::resources::attention_chip;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, page);
+    let chip = ui.read(|shell, cx| shell.filter_bar(cx).map(|bar| bar.read(cx).chip()));
+    assert_eq!(chip, Some(attention_chip(page)));
+    let cluster = location.cluster?;
+    let state = ui.state();
+    let settings = state.snapshot.catalog.get(&cluster)?;
+    Some(settings.preferences.namespace_selection(list))
+}
+
+const ALL_NAMESPACES: flock_core::settings::NamespaceSelection =
+    flock_core::settings::NamespaceSelection::All;
+
+#[test]
+fn overview_problem_counts_open_their_list_on_the_rows_that_need_attention() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-pods-failing")?;
+    assert_eq!(
+        needs_attention_in(&ui, Page::Pods, "Pod"),
+        Some(ALL_NAMESPACES)
+    );
+    assert!(ui.bounds("pods-row-0").is_some());
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-pending-meta")?;
+    assert_eq!(
+        needs_attention_in(&ui, Page::Pods, "Pod"),
+        Some(ALL_NAMESPACES)
+    );
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-ns-sort-2")?;
+    ui.click("overview-ns-0")?;
+    let namespace = opened(&ui);
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("overview-ns-sort-2")?;
+    ui.click("overview-ns-0-failing")?;
+    assert!(namespace.is_some());
+    assert_eq!(opened(&ui), namespace);
+    let mut ui = Ui::open(Screen::Cluster)?;
+    scroll_overview_to_the_end(&mut ui)?;
+    ui.click("overview-deployments-bad")?;
+    let all = needs_attention_in(&ui, Page::Deployments, "Deployment");
+    assert_eq!(all, Some(ALL_NAMESPACES));
+    assert!(ui.bounds("resources-Deployment-row-0").is_some());
+    let mut ui = Ui::open(Screen::Cluster)?;
+    scroll_overview_to_the_end(&mut ui)?;
+    ui.click("overview-deployments")?;
+    assert_eq!(ui.state().location().page, Page::Deployments);
+    let chip = ui.read(|shell, cx| shell.filter_bar(cx).map(|bar| bar.read(cx).chip()));
+    assert_eq!(chip, Some(0));
+    Ok(())
+}
+
 #[test]
 fn overview_namespace_headers_resort_the_top_namespaces() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
@@ -1005,6 +1105,28 @@ fn selected_nav_rows_fill_the_panel_between_the_design_insets() -> anyhow::Resul
     assert_eq!(nodes.size.width, SIDEBAR - SPACE_4 - SPACE_4);
     assert_eq!(nodes.size.width, overview.size.width);
     assert_eq!(nodes.size.height, ROW_NAV);
+    Ok(())
+}
+
+fn sidebar_highlight(ui: &mut Ui) -> Page {
+    ui.read_in_window(|shell, window, _| shell.sidebar_highlight(window))
+}
+
+#[test]
+fn the_sidebar_highlight_follows_the_shown_page_after_keyboard_navigation() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("nav-nodes")?;
+    ui.press("cmd-shift-e down enter")?;
+    let first = ui.state().location().page;
+    assert_ne!(first, Page::Nodes);
+    assert_eq!(sidebar_highlight(&mut ui), first);
+    ui.click("nav-nodes")?;
+    assert_eq!(ui.state().location().page, Page::Nodes);
+    assert_eq!(sidebar_highlight(&mut ui), Page::Nodes);
+    ui.press("cmd-shift-e down")?;
+    ui.press("cmd-[")?;
+    assert_eq!(ui.state().location().page, first);
+    assert_eq!(sidebar_highlight(&mut ui), first);
     Ok(())
 }
 
@@ -2236,6 +2358,33 @@ fn nodes_with_an_inspector_and_a_second_tab() -> anyhow::Result<Ui> {
     Ok(ui)
 }
 
+fn at_rest_while_switching_rows(
+    ui: &mut Ui,
+    pane: &'static str,
+    content: &'static str,
+) -> anyhow::Result<()> {
+    ui.advance_clock(INSPECTOR_IN)?;
+    ui.press_unsettled("down")?;
+    let switching = (bounds_of(ui, pane)?, bounds_of(ui, content)?);
+    ui.advance_clock(INSPECTOR_IN)?;
+    let rest = (bounds_of(ui, pane)?, bounds_of(ui, content)?);
+    assert_eq!(switching, rest);
+    Ok(())
+}
+
+#[test]
+fn an_open_inspector_swaps_rows_without_replaying_its_entrance() -> anyhow::Result<()> {
+    let mut nodes = Ui::open(Screen::Nodes)?;
+    motion_on(&mut nodes);
+    nodes.click("nodes-row-0")?;
+    at_rest_while_switching_rows(&mut nodes, "node-inspector-pane", "node-capacity-CPU")?;
+    let mut pods = Ui::open(Screen::Pods)?;
+    motion_on(&mut pods);
+    pods.click("pods-row-0")?;
+    at_rest_while_switching_rows(&mut pods, "pod-inspector-pane", "pod-shell")?;
+    Ok(())
+}
+
 #[test]
 fn splitting_keeps_the_existing_tabs_at_rest() -> anyhow::Result<()> {
     let mut ui = nodes_with_an_inspector_and_a_second_tab()?;
@@ -2472,9 +2621,9 @@ fn filter_namespace_completion_chips_and_backspace_work_in_both_appearances() ->
 fn the_pod_phase_filter_keeps_one_phase() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
     assert!(ui.bounds("pods-row-9").is_some());
-    ui.click("pod-filter-chips-1")?;
+    ui.click("pod-filter-chips-2")?;
     assert!(ui.bounds("pods-row-9").is_some());
-    ui.click("pod-filter-chips-4")?;
+    ui.click("pod-filter-chips-5")?;
     assert!(ui.bounds("pods-row-0").is_none());
     ui.click("pod-filter-chips-0")?;
     assert!(ui.bounds("pods-row-9").is_some());

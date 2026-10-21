@@ -172,15 +172,43 @@ fn save_width(kind: &str, width: Pixels, persist: bool, cx: &mut App) {
     }
 }
 
+const HANDLE_GROUP: &str = "inspector-resize-handle";
+
 #[derive(Default)]
 struct ResizeState {
     drag: Option<(Pixels, Pixels)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Handle {
+    Leading,
+    Trailing,
+}
+
+impl Handle {
+    fn dragged(self, initial: Pixels, start: Pixels, now: Pixels) -> Pixels {
+        match self {
+            Self::Leading => initial + start - now,
+            Self::Trailing => initial + now - start,
+        }
+    }
+}
+
+fn divider(dragging: bool, cx: &App) -> gpui::Div {
+    let palette = cx.palette();
+    let accent = palette.acc;
+    div()
+        .w(RULE)
+        .h_full()
+        .bg(if dragging { accent } else { palette.sep })
+        .group_hover(HANDLE_GROUP, move |style| style.bg(accent))
 }
 
 #[derive(IntoElement)]
 pub struct InspectorPane {
     kind: SharedString,
     width: Pixels,
+    handle: Handle,
     content: AnyElement,
 }
 
@@ -189,6 +217,7 @@ impl InspectorPane {
         Self {
             kind: kind.into(),
             width: INSPECTOR,
+            handle: Handle::Leading,
             content: content.into_any_element(),
         }
     }
@@ -197,11 +226,17 @@ impl InspectorPane {
         self.width = clamp_inspector_width(width);
         self
     }
+
+    pub fn trailing_handle(mut self) -> Self {
+        self.handle = Handle::Trailing;
+        self
+    }
 }
 
 impl RenderOnce for InspectorPane {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let width = stored_width(&self.kind, self.width, cx);
+        let handle = self.handle;
         let state = window.use_keyed_state(
             (ElementId::Name(self.kind.clone()), "resize"),
             cx,
@@ -224,7 +259,8 @@ impl RenderOnce for InspectorPane {
                         return;
                     };
                     if event.dragging() {
-                        save_width(&kind, initial + start - event.position.x, false, cx);
+                        let dragged = handle.dragged(initial, start, event.position.x);
+                        save_width(&kind, dragged, false, cx);
                         window.refresh();
                     } else {
                         moving.update(cx, |state, _| state.drag = None);
@@ -240,7 +276,8 @@ impl RenderOnce for InspectorPane {
                     }
                     let drag = releasing.update(cx, |state, _| state.drag.take());
                     if let Some((start, initial)) = drag {
-                        save_width(&kind, initial + start - event.position.x, true, cx);
+                        let dragged = handle.dragged(initial, start, event.position.x);
+                        save_width(&kind, dragged, true, cx);
                         window.refresh();
                     }
                 });
@@ -248,6 +285,7 @@ impl RenderOnce for InspectorPane {
         )
         .absolute()
         .size_full();
+        let divider = divider(state.read(cx).drag.is_some(), cx);
         let reset_kind = self.kind.clone();
         let fallback = self.width;
         let selector = format!("{}-resize", self.kind);
@@ -255,10 +293,20 @@ impl RenderOnce for InspectorPane {
             .id("inspector-resize")
             .debug_selector(move || selector.clone())
             .absolute()
-            .left_0()
+            .map(|edge| match handle {
+                Handle::Leading => edge.left_0(),
+                Handle::Trailing => edge.right_0(),
+            })
             .top_0()
             .bottom_0()
             .w(SPLITTER)
+            .group(HANDLE_GROUP)
+            .flex()
+            .map(|edge| match handle {
+                Handle::Leading => edge.justify_start(),
+                Handle::Trailing => edge.justify_end(),
+            })
+            .child(divider)
             .cursor(CursorStyle::ResizeLeftRight)
             .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                 cx.stop_propagation();
@@ -295,6 +343,19 @@ mod tests {
         assert_eq!(clamp_inspector_width(px(10000.)), INSPECTOR_MAX);
         assert_eq!(clamp_inspector_width(px(f32::NAN)), INSPECTOR);
         assert_eq!(clamp_inspector_width(px(480.)), px(480.));
+    }
+
+    #[test]
+    fn dragging_widens_the_pane_away_from_its_handle() {
+        let initial = px(360.);
+        assert_eq!(
+            Handle::Leading.dragged(initial, px(500.), px(450.)),
+            px(410.)
+        );
+        assert_eq!(
+            Handle::Trailing.dragged(initial, px(500.), px(550.)),
+            px(410.)
+        );
     }
 
     #[gpui::test]

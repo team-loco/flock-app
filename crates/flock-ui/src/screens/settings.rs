@@ -13,8 +13,8 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Button, Column, InputEvent, KeyValue, MenuItem, SectionLabel, Select, SelectEvent,
-    StatusText, Table, TableEvent, TextField, TextFieldState, Toggle,
+    ActionMenu, Button, Column, InputEvent, InspectorPane, KeyValue, MenuItem, SectionLabel,
+    Select, SelectEvent, StatusText, Table, TableEvent, TextField, TextFieldState, Toggle,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, Palette, ROW_CATALOG, RULE, SETTINGS_FIELD,
@@ -29,6 +29,7 @@ const VERSION: Pixels = px(150.);
 const NODES: Pixels = px(56.);
 const STATUS: Pixels = px(170.);
 const INSPECTOR: Pixels = px(340.);
+const INSPECTOR_ID: &str = "cluster-inspector";
 const CONNECTION_LABEL: Pixels = px(96.);
 
 const MISSING: &str = "—";
@@ -438,12 +439,10 @@ impl SettingsScreen {
                     .child(LABELS_HINT),
             );
         let inspector = div()
-            .id("cluster-inspector")
+            .id(INSPECTOR_ID)
             .flex()
             .flex_col()
-            .flex_none()
-            .w(INSPECTOR)
-            .h_full()
+            .size_full()
             .overflow_y_scroll()
             .bg(palette.panel)
             .border_l(RULE)
@@ -454,7 +453,8 @@ impl SettingsScreen {
             .child(section(CONNECTION, palette).child(details))
             .child(preferences)
             .child(labels);
-        Some(inspector.into_any_element())
+        let pane = InspectorPane::new(INSPECTOR_ID, inspector).width(INSPECTOR);
+        Some(pane.into_any_element())
     }
 }
 
