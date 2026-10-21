@@ -151,7 +151,7 @@ impl CustomResourcesScreen {
         Some(gpui::Focusable::focus_handle(&table, cx))
     }
 
-    pub fn header_note(&self, cx: &App) -> (Counts, String) {
+    pub fn header_note(&self, cx: &App) -> String {
         if self.crd.is_none() {
             return self.definitions.read(cx).header_note();
         }
@@ -162,12 +162,11 @@ impl CustomResourcesScreen {
             .collect();
         let counts = Counts::of(shown.iter().map(|row| row.status));
         let flagged = counts.flagged();
-        let text = if flagged > 0 {
+        if flagged > 0 {
             format!("{flagged} of {} need attention", shown.len())
         } else {
             shown.len().to_string()
-        };
-        (counts, text)
+        }
     }
 
     fn in_namespace(&self, row: &Resource) -> bool {

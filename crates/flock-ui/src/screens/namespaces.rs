@@ -145,10 +145,9 @@ impl NamespacesScreen {
         self.refresh(cx);
     }
 
-    pub fn header_note(&self) -> (Counts, String) {
+    pub fn header_note(&self) -> String {
         let counts = Counts::of(self.namespaces.iter().map(|n| n.status));
-        let text = format!("{} with problems", counts.flagged());
-        (counts, text)
+        format!("{} with problems", counts.flagged())
     }
 }
 

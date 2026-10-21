@@ -14,8 +14,8 @@ use flock_core::related::Related;
 use flock_core::resources::{NamespaceCount, POD_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
 use flock_core::{
-    ClusterId, Command, Condition, Counts, LogInstance, LogTarget, Page, Preferences, ResourceRef,
-    Seen, Snapshot, Status,
+    ClusterId, Command, Condition, LogInstance, LogTarget, Page, Preferences, ResourceRef, Seen,
+    Snapshot, Status,
 };
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
@@ -302,13 +302,13 @@ impl PodsScreen {
         &self.filter
     }
 
-    pub fn header_note(&self) -> (Counts, String) {
+    pub fn header_note(&self) -> String {
         let total = self
             .cluster
             .as_ref()
             .and_then(|cluster| nav_counts(&self.pods, cluster).total)
             .unwrap_or_default();
-        (Counts::default(), total.to_string())
+        total.to_string()
     }
 
     fn logs_target(&self, cx: &gpui::App) -> Option<(LogTarget, String)> {

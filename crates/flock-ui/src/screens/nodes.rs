@@ -10,7 +10,7 @@ use flock_core::related::Related;
 use flock_core::time::age;
 use flock_core::units::{CPU_UNIT, MEMORY_UNIT};
 use flock_core::{
-    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Page, ResourceRef, Seen, Status,
+    ClusterDetail, ClusterId, ClusterSummary, Command, Page, ResourceRef, Seen, Status,
 };
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, Hsla, IntoElement, ParentElement,
@@ -238,10 +238,8 @@ impl NodesScreen {
         });
     }
 
-    pub fn header_note(&self) -> (Counts, String) {
-        let counts = Counts::of(self.nodes.iter().map(|n| n.status));
-        let ready = format!("{} / {} ready", self.summary.ready, self.summary.total);
-        (counts, ready)
+    pub fn header_note(&self) -> String {
+        format!("{} / {} ready", self.summary.ready, self.summary.total)
     }
 
     fn select(&mut self, name: Option<String>, cx: &mut Context<Self>) {

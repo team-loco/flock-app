@@ -7,9 +7,7 @@ use flock_core::overview::plural;
 use flock_core::resources::{EVENT_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
 use flock_core::time::age;
-use flock_core::{
-    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Page, Preferences, Status,
-};
+use flock_core::{ClusterDetail, ClusterId, ClusterSummary, Command, Page, Preferences, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
     ParentElement, Render, Styled, Window, div,
@@ -190,11 +188,10 @@ impl EventsScreen {
         self.refresh(cx);
     }
 
-    pub fn header_note(&self) -> (Counts, String) {
+    pub fn header_note(&self) -> String {
         let scope = self.preferences.namespace_selection(EVENT_LIST);
         let events = events::in_namespace(&self.events, scope.namespace());
-        let counts = events::counts(&events);
-        (counts, plural(events.len(), "event", "events"))
+        plural(events.len(), "event", "events")
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {

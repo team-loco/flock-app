@@ -1,7 +1,7 @@
 use flock_core::emptiness::Noun;
 use flock_core::filter::{StatusFilter, label_values};
 use flock_core::overview::plural;
-use flock_core::{ClusterSummary, Command, Counts, FluxAction, FluxObject, Page};
+use flock_core::{ClusterSummary, Command, FluxAction, FluxObject, Page};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
     Render, Styled, WeakEntity, Window, div, px,
@@ -102,9 +102,8 @@ impl FluxListScreen {
         self.refresh(cx);
     }
 
-    pub fn header_note(&self) -> (Counts, String) {
-        let counts = Counts::of(self.objects.iter().map(FluxObject::status));
-        (counts, plural(self.objects.len(), "object", "objects"))
+    pub fn header_note(&self) -> String {
+        plural(self.objects.len(), "object", "objects")
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {

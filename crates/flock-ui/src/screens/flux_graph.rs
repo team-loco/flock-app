@@ -1,6 +1,6 @@
 use flock_core::flux_graph::{CrossCluster, EdgeKind, FluxGraph, GraphEdge, GraphNode, Step};
 use flock_core::overview::plural;
-use flock_core::{ClusterId, ClusterSummary, Command, Counts, FluxKey, Snapshot};
+use flock_core::{ClusterId, ClusterSummary, Command, FluxKey, Snapshot};
 use gpui::{
     AnyElement, App, Bounds, Context, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla,
     InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, PathBuilder, Pixels,
@@ -78,10 +78,9 @@ impl FluxGraphScreen {
         cx.notify();
     }
 
-    pub fn header_note(&self) -> (Counts, String) {
+    pub fn header_note(&self) -> String {
         let present: Vec<&GraphNode> = self.graph.nodes.iter().filter(|n| n.present).collect();
-        let counts = Counts::of(present.iter().map(|node| node.status));
-        (counts, plural(present.len(), "object", "objects"))
+        plural(present.len(), "object", "objects")
     }
 
     fn selected_ix(&self) -> Option<usize> {

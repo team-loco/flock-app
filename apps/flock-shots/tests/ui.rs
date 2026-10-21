@@ -2803,6 +2803,16 @@ fn a_list_header_has_no_count_while_its_rows_are_loading() -> anyhow::Result<()>
 }
 
 #[test]
+fn the_cluster_overview_title_carries_no_status_badge() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    assert!(ui.bounds("overview-settings").is_some());
+    assert!(ui.bounds("page-cluster-state").is_none());
+    assert!(ui.bounds("page-note").is_none());
+    Ok(())
+}
+
+#[test]
 fn every_utilization_window_keeps_the_chart_and_local_collection_note() -> anyhow::Result<()> {
     let mut ui = Ui::with_state(Screen::Cluster, flock_shots::StateFixture::MetricsLocal)?;
     for selector in ["range-0", "range-1", "range-2", "range-3"] {

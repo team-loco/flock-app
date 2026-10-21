@@ -103,15 +103,14 @@ impl HelmReleasesScreen {
         gpui::Focusable::focus_handle(&self.table, cx)
     }
 
-    pub fn header_note(&self) -> (Counts, String) {
+    pub fn header_note(&self) -> String {
         let counts = Counts::of(self.rows.iter().map(|row| row.status));
         let flagged = counts.flagged();
-        let text = if flagged > 0 {
+        if flagged > 0 {
             format!("{flagged} of {} need attention", self.rows.len())
         } else {
             self.rows.len().to_string()
-        };
-        (counts, text)
+        }
     }
 
     pub fn set(&mut self, cluster: &ClusterSummary, snapshot: &Snapshot, cx: &mut Context<Self>) {
