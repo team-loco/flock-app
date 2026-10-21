@@ -1301,38 +1301,32 @@ fn live_flux_pages_reconcile_and_resume_then_suspend_the_suspended_release() -> 
 }
 
 #[test]
-fn live_pod_terminal_opens_a_shell_only_on_request_and_exits() -> anyhow::Result<()> {
+fn live_pod_shell_button_starts_a_working_shell_and_exit_ends_it() -> anyhow::Result<()> {
     let Some(make) = kind()? else {
         return Ok(());
     };
     let (mut ui, before) = opened(&make, Screen::Flock)?;
-    switch_to(&mut ui, CLUSTERS[0].0)?;
+    switch_to(&mut ui, CLUSTERS[1].0)?;
     visit(&mut ui, Page::Pods)?;
     all_namespaces(&mut ui, "pod-namespace")?;
     filter(&mut ui, "podinfo")?;
     ui.click("pods-row-0")?;
     ui.click("pod-shell")?;
-    anyhow::ensure!(
-        ui.bounds("pod-open-shell").is_some(),
-        "the terminal tab shows no Open shell"
-    );
-    anyhow::ensure!(
-        ui.bounds("pod-close-shell").is_none(),
-        "the terminal started a shell by itself"
-    );
-    ui.click("pod-open-shell")?;
-    ui.wait_until(PAGE_TIMEOUT, |_| true)?;
-    anyhow::ensure!(
-        ui.bounds("pod-close-shell").is_some(),
-        "Open shell did not start a session"
-    );
-    ui.type_text("exit")?;
+    until_shown(&mut ui, "pod-close-shell")?;
+    ui.type_text(&format!("echo {SHELL_ECHO}-$((1+1))"))?;
     ui.press("enter")?;
     let start = std::time::Instant::now();
-    while ui.bounds("pod-open-shell").is_none() {
-        anyhow::ensure!(start.elapsed() < PAGE_TIMEOUT, "exit did not end the shell");
+    while !terminal_text(&mut ui)?.contains(&format!("{SHELL_ECHO}-2")) {
+        anyhow::ensure!(
+            start.elapsed() < PAGE_TIMEOUT,
+            "the shell did not answer: {:?}",
+            terminal_text(&mut ui)?
+        );
         ui.pause(Duration::from_millis(500))?;
     }
+    ui.type_text("exit")?;
+    ui.press("enter")?;
+    until_shown(&mut ui, "pod-open-shell")?;
     check_invariants(&mut ui, &before, "using the terminal")
 }
 
@@ -1695,6 +1689,7 @@ fn live_flux_graph_draws_sources_and_dependencies_and_opens_nodes() -> anyhow::R
 
 const NO_SHELL_POD: &str = "no-shell";
 const DEBUG_ECHO: &str = "flock-debug-shell";
+const SHELL_ECHO: &str = "flock-pod-shell";
 
 fn until_shown(ui: &mut Ui, selector: &'static str) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
@@ -1725,7 +1720,6 @@ fn live_a_container_without_a_shell_offers_a_debug_container() -> anyhow::Result
         filter(&mut ui, NO_SHELL_POD)?;
         ui.click("pods-row-0")?;
         ui.click("pod-shell")?;
-        ui.click("pod-open-shell")?;
         until_shown(&mut ui, "pod-no-shell")?;
         ui.save_png(&dir.join(format!("fleet-a-pod-no-shell-{label}.png")))?;
         if appearance == Appearance::Light {

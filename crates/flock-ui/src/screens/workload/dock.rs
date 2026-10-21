@@ -159,10 +159,9 @@ impl WorkloadScreen {
         self.dock.update(cx, |dock, cx| dock.select(LOGS, cx));
     }
 
-    pub(super) fn show_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dock.update(cx, |dock, cx| dock.select(TERMINAL, cx));
-        let focus = self.terminal.read(cx).focus_handle(cx);
-        window.focus(&focus, cx);
+        self.start_shell(window, cx);
     }
 
     pub(super) fn close_shell(&mut self, cx: &mut Context<Self>) {

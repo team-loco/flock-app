@@ -417,7 +417,7 @@ impl WorkloadScreen {
             MenuItem::new(SHELL_ITEM, {
                 let this = this.clone();
                 move |window, cx| {
-                    this.update(cx, |screen, cx| screen.show_terminal(window, cx))
+                    this.update(cx, |screen, cx| screen.open_terminal(window, cx))
                         .ok();
                 }
             })
@@ -1076,7 +1076,7 @@ impl Render for WorkloadScreen {
             .on_action(cx.listener(|this, _: &ShowLogs, _, cx| this.show_logs(cx)))
             .on_action(cx.listener(|this, _: &ViewYaml, _, cx| this.toggle_yaml(cx)))
             .on_action(cx.listener(|this, _: &ShowTerminal, window, cx| {
-                this.show_terminal(window, cx);
+                this.open_terminal(window, cx);
             }))
             .size_full()
             .flex()

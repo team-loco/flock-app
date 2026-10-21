@@ -611,7 +611,7 @@ impl PodsScreen {
     fn pod_header(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let shell = Button::new("pod-shell", "Shell")
             .primary()
-            .on_click(cx.listener(|this, _, window, cx| this.show_terminal(window, cx)));
+            .on_click(cx.listener(|this, _, window, cx| this.open_terminal(window, cx)));
         let header = section(palette)
             .gap(SPACE_3)
             .child(

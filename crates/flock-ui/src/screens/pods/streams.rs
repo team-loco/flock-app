@@ -368,6 +368,13 @@ impl PodsScreen {
         window.focus(&focus, cx);
     }
 
+    pub(super) fn open_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_terminal(window, cx);
+        if !self.shell.as_ref().is_some_and(|session| session.open) {
+            self.start_shell(window, cx);
+        }
+    }
+
     pub(super) fn show_logs(&mut self, cx: &mut Context<Self>) {
         self.dock.update(cx, |dock, cx| dock.select(LOGS_TAB, cx));
         self.sync_streams(cx);
