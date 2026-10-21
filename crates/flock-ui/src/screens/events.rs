@@ -74,6 +74,20 @@ impl EventsScreen {
         self.refresh(cx);
     }
 
+    pub fn show_event(&mut self, key: String, cx: &mut Context<Self>) {
+        self.requested = Some(EventFilter::All);
+        self.selected = Some(key);
+        self.refresh(cx);
+        let selected = self.selected.as_ref().and_then(|key| {
+            let table = self.table.read(cx);
+            (0..)
+                .map_while(|ix| table.row(ix))
+                .position(|event| &event.key() == key)
+        });
+        self.table
+            .update(cx, |table, cx| table.select(selected, cx));
+    }
+
     pub fn filter_bar(&self) -> &Entity<FilterBar> {
         &self.filter
     }

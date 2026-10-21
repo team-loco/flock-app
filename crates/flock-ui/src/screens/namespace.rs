@@ -20,8 +20,8 @@ use crate::kit::{
     Button, EmptyState, InputEvent, InspectorPane, Link, PageHeader, SectionLabel, Skeleton,
     StatusGlyph, TextField, TextFieldState, Tooltip,
 };
-use crate::screens::EDIT_YAML;
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
+use crate::screens::{EDIT_YAML, ScreenEvent};
 use crate::theme::{
     ASIDE_WIDTH, ActiveTheme, FONT_MONO, ICON, NAMESPACE_AGE_WIDTH, NAMESPACE_CONTENT_AGE,
     NAMESPACE_CONTENT_NAME, NAMESPACE_EVENT_AGE, NAMESPACE_EVENT_LINES, NAMESPACE_FACT_GAP,
@@ -68,6 +68,7 @@ pub struct NamespaceScreen {
 }
 
 impl EventEmitter<Command> for NamespaceScreen {}
+impl EventEmitter<ScreenEvent> for NamespaceScreen {}
 
 impl Focusable for NamespaceScreen {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -136,6 +137,18 @@ impl NamespaceScreen {
         let cluster = self.target.cluster.clone();
         cx.emit(Command::SetPreferences(cluster, self.preferences.clone()));
         cx.emit(Command::SelectPage(page));
+    }
+
+    fn open_event(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let Some(event) = self.page.recent_events().get(ix) else {
+            return;
+        };
+        let key = event.key();
+        let selection = NamespaceSelection::Named(self.target.name.clone());
+        self.preferences.select_namespace(EVENT_LIST, selection);
+        let cluster = self.target.cluster.clone();
+        cx.emit(Command::SetPreferences(cluster, self.preferences.clone()));
+        cx.emit(ScreenEvent::ShowEvent(key));
     }
 
     fn edit(&mut self, cx: &mut Context<Self>) {
@@ -457,7 +470,7 @@ impl NamespaceScreen {
             .recent_events()
             .iter()
             .enumerate()
-            .map(|(ix, event)| event_row(ix, event, palette))
+            .map(|(ix, event)| event_row(ix, event, palette, cx))
             .collect();
         let title = div()
             .flex()
@@ -770,7 +783,12 @@ fn chip(text: &str, palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
-fn event_row(ix: usize, event: &Event, palette: &Palette) -> AnyElement {
+fn event_row(
+    ix: usize,
+    event: &Event,
+    palette: &Palette,
+    cx: &mut Context<NamespaceScreen>,
+) -> AnyElement {
     let message = div()
         .id(("namespace-event-message", ix))
         .debug_selector(move || format!("namespace-event-message-{ix}"))
@@ -780,6 +798,10 @@ fn event_row(ix: usize, event: &Event, palette: &Palette) -> AnyElement {
         .tooltip(Tooltip::text(event.message.clone()))
         .child(event.message.clone());
     div()
+        .id(("namespace-event", ix))
+        .debug_selector(move || format!("namespace-event-{ix}"))
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _, _, cx| this.open_event(ix, cx)))
         .flex()
         .gap(SPACE_4)
         .text_size(TEXT_MONO)
