@@ -125,6 +125,7 @@ pub const SEARCH_WIDTH: Pixels = px(180.);
 pub const FILTER_WIDTH: Pixels = px(390.);
 pub const COLUMN_MIN: Pixels = px(32.);
 pub const COLUMN_HANDLE: Pixels = px(8.);
+pub const COLUMN_DIVIDER: Pixels = px(12.);
 pub const MENU_WIDTH: Pixels = px(300.);
 pub const MENU_MAX_HEIGHT: Pixels = px(360.);
 pub const DIALOG_WIDTH: Pixels = px(440.);
@@ -566,6 +567,7 @@ pub const NAMESPACE_FILTER_WIDTH: Pixels = px(200.);
 pub const NAMESPACE_USAGE_LABEL: Pixels = px(70.);
 pub const NAMESPACE_USAGE_BAR: Pixels = px(4.);
 pub const NAMESPACE_EVENT_AGE: Pixels = px(30.);
+pub const NAMESPACE_EVENT_LINES: usize = 2;
 pub const NAMESPACE_FACT_GAP: Pixels = px(20.);
 
 pub const PROBLEM_CAUSES_WIDTH: Pixels = px(360.);

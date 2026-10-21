@@ -78,7 +78,7 @@ pub use table::{
 };
 pub use terminal::{SendBackTab, SendTab, TERMINAL_CONTEXT, Terminal, TerminalEvent};
 pub use text::{Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel};
-pub use tooltip::Tooltip;
+pub use tooltip::{TOOLTIP_SELECTOR, Tooltip};
 
 pub(crate) fn init(cx: &mut gpui::App) {
     overlay::init(cx);

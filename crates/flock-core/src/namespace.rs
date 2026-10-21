@@ -7,7 +7,7 @@ use crate::home::Problem;
 use crate::overview::plural;
 use crate::related::{Group, Related};
 use crate::time::age;
-use crate::units::{CPU_UNIT, MEMORY_UNIT, fixed};
+use crate::units::{self, Metric};
 use crate::watch::WatchState;
 use crate::{Counts, Page, ResourceRef, Status};
 
@@ -89,19 +89,19 @@ impl Requested {
     }
 
     pub fn cpu_label(&self) -> String {
-        self.label(CPU_UNIT)
+        self.label(Metric::Cpu)
     }
 
     pub fn memory_label(&self) -> String {
-        self.label(MEMORY_UNIT)
+        self.label(Metric::Memory)
     }
 
-    fn label(&self, unit: &str) -> String {
-        let requested = fixed(self.requested);
-        match self.quota {
-            Some(quota) => format!("{requested} / {} {unit} {REQUESTED}", fixed(quota)),
-            None => format!("{requested} {unit} {REQUESTED}"),
-        }
+    fn label(&self, metric: Metric) -> String {
+        let values: Vec<Option<f32>> = std::iter::once(Some(self.requested))
+            .chain(self.quota.map(Some))
+            .collect();
+        let amounts = units::amounts(metric, &values).labelled();
+        format!("{amounts} {REQUESTED}")
     }
 }
 
@@ -683,6 +683,16 @@ mod tests {
         };
         assert_eq!(memory.memory_label(), "2.6 GiB requested");
         assert_eq!(memory.share(), None);
+        let small = Requested {
+            requested: 0.12,
+            quota: Some(0.5),
+        };
+        assert_eq!(small.cpu_label(), "120m / 500m requested");
+        let little = Requested {
+            requested: 0.0625,
+            quota: None,
+        };
+        assert_eq!(little.memory_label(), "64Mi requested");
         let over = Requested {
             requested: 5.,
             quota: Some(4.),

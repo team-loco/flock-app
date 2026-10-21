@@ -26,9 +26,9 @@ use super::tooltip::Tooltip;
 use crate::actions::CloseInspector;
 use crate::prefs::{self, ColumnWidths, FLOCK_SCOPE};
 use crate::theme::{
-    ActiveTheme, COLUMN_HANDLE, COLUMN_MIN, FLASH, FONT_MONO, FONT_SANS, GLYPH_SLOT, Palette,
-    ROW_TABLE, ROW_TABLE_MIN, RULE, SPACE_4, SPACE_6, SPACE_8, TEXT_AXIS, TEXT_BODY, TEXT_MONO,
-    TEXT_SMALL,
+    ActiveTheme, COLUMN_DIVIDER, COLUMN_HANDLE, COLUMN_MIN, FLASH, FONT_MONO, FONT_SANS,
+    GLYPH_SLOT, Palette, ROW_TABLE, ROW_TABLE_MIN, RULE, SPACE_4, SPACE_6, SPACE_8, TEXT_AXIS,
+    TEXT_BODY, TEXT_MONO, TEXT_SMALL,
 };
 
 const SORT_ASCENDING: &str = "↑";
@@ -38,6 +38,7 @@ const MORE_TOOLTIP: &str = "Actions";
 const FLASH_STRENGTH: f32 = 0.35;
 const TRAILING: Pixels = SPACE_8;
 const DOUBLE_CLICK: usize = 2;
+const COLUMN_HANDLE_GROUP: &str = "table-column-handle";
 pub const TABLE_CONTEXT: &str = "FlockTable";
 
 pub type CellRenderer<R> = Rc<dyn Fn(&R, &Palette) -> AnyElement>;
@@ -314,17 +315,23 @@ impl<R: 'static> Column<R> {
 }
 
 fn cell_frame(width: Width, align: Align) -> Div {
-    let cell = div()
+    justify(sized(cell_body(), width), align)
+}
+
+fn cell_body() -> Div {
+    div()
         .flex()
         .items_center()
         .overflow_hidden()
-        .whitespace_nowrap();
-    let cell = match width {
+        .whitespace_nowrap()
+}
+
+fn sized(cell: Div, width: Width) -> Div {
+    match width {
         Width::Fixed(width) => cell.w(width).flex_none(),
         Width::Flex { weight, min } => cell.flex_grow(weight).flex_basis(Pixels::ZERO).min_w(min),
         Width::Auto { min, .. } => cell.w(min).flex_none(),
-    };
-    justify(cell, align)
+    }
 }
 
 fn justify(cell: Div, align: Align) -> Div {
@@ -1060,6 +1067,7 @@ impl<R: 'static> Table<R> {
     }
 
     fn render_header(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let acc = palette.acc;
         let cells: Vec<AnyElement> = self
             .columns
             .iter()
@@ -1071,36 +1079,48 @@ impl<R: 'static> Table<R> {
                     Some(_) => None,
                     None => None,
                 };
+                let dragging = self.drag.is_some_and(|drag| drag.column == ix);
+                let divider = div()
+                    .w(RULE)
+                    .h(COLUMN_DIVIDER)
+                    .bg(if dragging { palette.acc } else { palette.sep })
+                    .group_hover(COLUMN_HANDLE_GROUP, |style| style.bg(acc));
                 let handle = div()
                     .debug_selector(|| format!("{}-resize-{ix}", self.id))
+                    .group(COLUMN_HANDLE_GROUP)
                     .absolute()
                     .top_0()
-                    .right_0()
+                    .right(-(self.column_gap + COLUMN_HANDLE) / 2.)
                     .h_full()
                     .w(COLUMN_HANDLE)
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .cursor(CursorStyle::ResizeLeftRight)
+                    .child(divider)
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                             this.start_resize(ix, event, window, cx);
                         }),
                     );
-                let frame = cell_frame(self.width_of(column), column.align)
+                let frame = justify(cell_body().size_full(), column.align)
                     .id(ix)
-                    .relative()
                     .child(column.title.clone())
-                    .children(arrow)
-                    .child(handle);
-                if column.sort.is_some() {
+                    .children(arrow);
+                let frame = if column.sort.is_some() {
                     let fg = palette.fg;
                     frame
                         .cursor_pointer()
                         .hover(move |style| style.text_color(fg))
                         .on_click(cx.listener(move |this, _, _, cx| this.toggle_sort(ix, cx)))
-                        .into_any_element()
                 } else {
-                    frame.into_any_element()
-                }
+                    frame
+                };
+                sized(div().relative().flex().h_full(), self.width_of(column))
+                    .child(frame)
+                    .child(handle)
+                    .into_any_element()
             })
             .collect();
         let measured = self.measured.clone();
