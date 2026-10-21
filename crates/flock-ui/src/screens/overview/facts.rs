@@ -338,6 +338,7 @@ pub(super) fn render(
     cx: &mut Context<OverviewScreen>,
 ) -> Vec<AnyElement> {
     let expiring_head = section_head(EXPIRING_TITLE, None, None, palette)
+        .flex_wrap()
         .child(horizon_control(horizon, palette, cx));
     let network_head = section_head("Network & storage", None, None, palette);
     vec![

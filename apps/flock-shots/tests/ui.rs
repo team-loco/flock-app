@@ -3668,3 +3668,35 @@ fn the_api_server_row_opens_the_5xx_drill_in() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn a_saved_png_shows_the_tabs_restored_into_the_ui() -> anyhow::Result<()> {
+    use flock_core::history::Location;
+    let dir = tempfile::tempdir()?;
+    let restored_path = dir.path().join("restored.png");
+    let home_path = dir.path().join("home.png");
+    let mut restored = Ui::open(Screen::Flock)?;
+    let nodes = Location::page_on(ClusterId::new("prod-us-east"), Page::Nodes);
+    restored.restore(&flock_shots::one_tab(nodes))?;
+    restored.save_png(&restored_path)?;
+    Ui::open(Screen::Flock)?.save_png(&home_path)?;
+    let restored_image = image::open(&restored_path)?.to_rgba8();
+    let home_image = image::open(&home_path)?.to_rgba8();
+    assert_ne!(restored_image, home_image);
+    Ok(())
+}
+
+#[test]
+fn the_expiring_horizon_stays_inside_its_column_with_the_drill_in_open() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    scroll_overview_to_the_end(&mut ui)?;
+    ui.click("overview-control-api-server")?;
+    let last = ui
+        .bounds("overview-expiring-horizon-3")
+        .ok_or_else(|| anyhow::anyhow!("missing the last horizon"))?;
+    let network = ui
+        .bounds("overview-fact-services-without-endpoints")
+        .ok_or_else(|| anyhow::anyhow!("missing the network column"))?;
+    assert!(last.origin.x + last.size.width <= network.origin.x);
+    Ok(())
+}
