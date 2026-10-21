@@ -1,5 +1,5 @@
 use flock_core::events::{ClusterEvent, EventFilter, cluster_filter_counts, filter_cluster_events};
-use flock_core::filter::label_values;
+use flock_core::filter::{highlights, label_values};
 use flock_core::time::age;
 use flock_core::{Command, Snapshot, Status};
 use gpui::{
@@ -162,8 +162,11 @@ fn columns() -> Vec<Column<ClusterEvent>> {
         )
         .fixed(EVENT_NAMESPACE_WIDTH)
         .sort_by_key(|e: &ClusterEvent| e.event.namespace.clone()),
-        Column::new("Message", |e: &ClusterEvent, _| {
-            RawMessage::new(e.event.message.clone())
+        Column::highlighted("Message", |e: &ClusterEvent, _, words| {
+            let text = e.event.message.clone();
+            let ranges = highlights(words, &text);
+            RawMessage::new(text)
+                .highlights(ranges)
                 .line()
                 .into_any_element()
         })

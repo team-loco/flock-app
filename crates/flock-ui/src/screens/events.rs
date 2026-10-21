@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use flock_core::emptiness::Noun;
 use flock_core::events::{self, Event, EventFilter, filter_counts, filter_events};
-use flock_core::filter::label_values;
+use flock_core::filter::{highlights, label_values};
 use flock_core::overview::plural;
 use flock_core::resources::{EVENT_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
@@ -361,8 +361,11 @@ fn columns() -> Vec<Column<Event>> {
         )
         .fixed(EVENT_NAMESPACE_WIDTH)
         .sort_by_key(|e: &Event| e.namespace.clone()),
-        Column::new("Message", |event: &Event, _| {
-            RawMessage::new(event.message.clone())
+        Column::highlighted("Message", |event: &Event, _, words| {
+            let text = event.message.clone();
+            let ranges = highlights(words, &text);
+            RawMessage::new(text)
+                .highlights(ranges)
                 .line()
                 .into_any_element()
         })
