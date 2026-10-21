@@ -277,7 +277,7 @@ toast(Toast::new(Status::Ok, "Scaled checkout-api to 3").detail("prod-us-east ·
 
 The dialog is 440px, 4px radius, over a scrim; Esc or Cancel dismisses, ⌘↵ confirms. Toasts stack
 bottom-right above the status bar. Each has a leading status glyph in the severity colour, a
-severity-tinted ground and border (`okbg` / `warnbg` / `errbg`, `accbg` for progress), and a ×; a click
+severity-tinted ground (`okbg` / `warnbg` / `errbg`, `accbg` for progress) with a flat 1px `line2` border and no shadow, and a ×; a click
 dismisses it. Errors persist until dismissed. Success auto-dismisses after `theme::TOAST_SUCCESS_TIMEOUT`,
 warnings after `TOAST_WARNING_TIMEOUT`, progress after `TOAST_PROGRESS_TIMEOUT`.
 
