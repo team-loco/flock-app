@@ -97,6 +97,7 @@ const COMPARE_ITEM: &str = "Compare across clusters";
 const YAML_KEYS: &str = "⌘Y";
 const YAML_LABEL: &str = "YAML";
 const YAML_INSPECTOR_WIDTH: Pixels = px(480.);
+const MAIN_ID: &str = "workload-main";
 
 pub struct WorkloadScreen {
     pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
@@ -1096,7 +1097,8 @@ impl Render for WorkloadScreen {
             return root.child(self.compact_view(&workload, open, cx));
         }
         let main = div()
-            .id("workload-main")
+            .id(MAIN_ID)
+            .debug_selector(|| MAIN_ID.to_owned())
             .flex()
             .flex_col()
             .flex_1()
