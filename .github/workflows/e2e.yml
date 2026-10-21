@@ -40,4 +40,33 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
-      - run: mise run e2e:test
+      - run: mise run e2e:test --no-teardown
+      - name: Loco diagnostics
+        if: failure()
+        continue-on-error: true
+        run: |
+          kubectl="mise exec -- kubectl --context kind-flock-loco"
+          namespaces="loco-system loco-builds loco-registry"
+          for ns in $namespaces; do
+            echo "::group::pods $ns"
+            $kubectl -n "$ns" get pods -o wide | head -60
+            echo "::endgroup::"
+          done
+          echo "::group::non-ready pods"
+          $kubectl get pods -A --no-headers | awk '{split($3,r,"/")} $4 != "Completed" && $4 != "Succeeded" && (r[1] != r[2] || $4 != "Running") {print $1, $2}' | head -10 | while read -r ns pod; do
+            $kubectl -n "$ns" describe pod "$pod" | tail -40
+          done
+          echo "::endgroup::"
+          echo "::group::loco-core-agent logs"
+          $kubectl -n loco-system logs deployment/loco-core-agent --all-containers --tail=100 || true
+          $kubectl -n loco-system logs deployment/loco-core-agent --all-containers --previous --tail=100 || true
+          $kubectl -n loco-system describe deployment loco-core-agent | tail -40
+          echo "::endgroup::"
+          echo "::group::recent events"
+          $kubectl get events -A --sort-by=.lastTimestamp | tail -60
+          echo "::endgroup::"
+          echo "::group::node allocatable and requests"
+          $kubectl describe nodes | grep -A 12 -E '^Allocatable|^Allocated resources'
+          $kubectl top nodes || true
+          nproc; free -m; df -h / | tail -1
+          echo "::endgroup::"
