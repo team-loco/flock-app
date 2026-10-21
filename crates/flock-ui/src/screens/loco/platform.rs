@@ -12,8 +12,8 @@ use gpui::{
 use super::LocoEvent;
 use crate::kit::status_symbols;
 use crate::kit::{
-    Column, KeyValue, Level, Link, LogLine, LogView, PageTitle, SectionHeader, StatusGlyph, Table,
-    TableEvent,
+    Column, KeyValue, Level, Link, LogLine, LogView, PageTitle, RawMessage, SectionHeader,
+    StatusGlyph, Table, TableEvent,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LOG_LINE, Palette, ROW_TABLE, RULE, SPACE_2, SPACE_3, SPACE_4, SPACE_8,
@@ -383,19 +383,22 @@ fn placement_columns() -> Vec<Column<PlacementRow>> {
         .mono()
         .fixed(PLACEMENT_REVISION),
         Column::new("Message", |row: &PlacementRow, palette| {
-            let issue = row.app.placement.issue.as_ref();
-            let message = issue.map_or_else(|| row.app.placement.detail(), |i| i.message.clone());
-            let status = issue.map_or(Status::Warn, |i| i.status);
-            let color = if status == Status::Err {
+            let Some(issue) = row.app.placement.issue.as_ref() else {
+                return div()
+                    .truncate()
+                    .text_size(TEXT_SMALL)
+                    .text_color(palette.fg2)
+                    .child(row.app.placement.detail())
+                    .into_any_element();
+            };
+            let color = if issue.status == Status::Err {
                 palette.err
             } else {
                 palette.fg2
             };
-            div()
-                .truncate()
-                .text_size(TEXT_SMALL)
-                .text_color(color)
-                .child(message)
+            RawMessage::new(issue.message.clone())
+                .color(color)
+                .line()
                 .into_any_element()
         })
         .mono()

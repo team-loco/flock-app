@@ -102,7 +102,7 @@ impl Shell {
             WatchState::Failed(reason) => {
                 let retry = Button::new("page-retry", RETRY)
                     .on_click(cx.listener(move |this, _, _, cx| this.retry(ix, id.clone(), cx)));
-                ErrorState::new(&reason, retry).into_any_element()
+                ErrorState::raw(&reason, retry).into_any_element()
             }
             WatchState::Pending(step) => {
                 let progress = (cluster.status == Status::Progress)

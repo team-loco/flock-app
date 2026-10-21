@@ -1,14 +1,15 @@
 use flock_core::{Condition, Diagnosis, Status};
 use gpui::{
     AnyElement, App, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
-    Styled, Window, div, relative,
+    Styled, Window, div,
 };
 
+use super::message::RawMessage;
 use super::selectable::SelectableText;
 use super::status::StatusGlyph;
 use crate::theme::{
-    ActiveTheme, CONDITION_AGE, CONDITION_VALUE, FONT_MONO, GLYPH_SLOT, LINE_PROSE, SPACE_1,
-    SPACE_3, SPACE_4, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, CONDITION_AGE, CONDITION_VALUE, FONT_MONO, GLYPH_SLOT, SPACE_1, SPACE_3, SPACE_4,
+    TEXT_LABEL, TEXT_MONO,
 };
 
 pub const CONDITIONS: &str = "Conditions";
@@ -72,10 +73,8 @@ impl RenderOnce for ConditionTable {
             });
             let message = (!condition.message.is_empty()).then(|| {
                 div()
-                    .text_size(TEXT_SMALL)
-                    .text_color(palette.fg2)
-                    .line_height(relative(LINE_PROSE))
-                    .child(SelectableText::new(condition.message.clone()))
+                    .min_w_0()
+                    .child(RawMessage::new(condition.message.clone()))
             });
             let detail = (reason.is_some() || message.is_some()).then(|| {
                 div()

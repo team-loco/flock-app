@@ -9,8 +9,8 @@ use gpui::{
 };
 
 use crate::kit::{
-    EventList, IconButton, Inspector, KeyValue, Link, Presence, SelectableText, StatusText,
-    slide_in, slide_out,
+    EventList, IconButton, Inspector, KeyValue, Link, Presence, RawMessage, SelectableText,
+    StatusText, slide_in, slide_out,
 };
 use crate::theme::INSPECTOR;
 
@@ -76,7 +76,7 @@ impl EventInspector<'_> {
                 div()
                     .debug_selector(|| MESSAGE_SELECTOR.to_owned())
                     .min_w_0()
-                    .child(SelectableText::new(event.message.clone())),
+                    .child(RawMessage::new(event.message.clone())),
             )
             .section(Some("Details"), facts)
             .section(Some("Involved object"), object)

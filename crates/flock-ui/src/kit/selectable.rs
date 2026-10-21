@@ -303,7 +303,8 @@ impl Element for Selectable {
         self.child.prepaint(window, cx);
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let retained = global_id.map(|id| Self::retained(id, window, cx));
-        if let Some(retained) = &retained {
+        let visible = window.content_mask().bounds.intersects(&bounds);
+        if let Some(retained) = retained.as_ref().filter(|_| visible) {
             let text_bounds = self
                 .runs
                 .iter()

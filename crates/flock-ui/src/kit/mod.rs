@@ -14,6 +14,7 @@ mod load;
 mod log;
 mod matrix;
 mod menu;
+mod message;
 mod modal;
 mod navigation;
 mod overlay;
@@ -54,6 +55,7 @@ pub use log::{
 };
 pub use matrix::{Matrix, MatrixCell};
 pub use menu::{ActionMenu, MenuItem};
+pub use message::RawMessage;
 pub use modal::Modal;
 pub use navigation::{HeaderNavigation, HistoryJump};
 pub use overlay::{

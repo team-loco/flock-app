@@ -81,6 +81,21 @@ values are selectable already. A drag that selects text in a table row does not 
 terminal has its own cell-grid selection (drag, ⇧-click); ⌘C copies it, or the transcript when
 nothing is selected.
 
+### Raw messages
+
+Text that comes verbatim from Kubernetes or another API (event, condition, error block, Problems and
+Loco placement messages, error toast details, failed-load reasons) renders in `RawMessage`, a compact
+inline code block: Plex Mono `TEXT_SMALL`, `raise` ground, 1px `line2` border, `RADIUS_SMALL`,
+`SPACE_1` / `SPACE_3` padding. It wraps only at spaces (`SelectableWords`), so refs stay whole, and
+copies the exact text. The border is always drawn, so hover and selection never change its size.
+Labels, reasons and our own sentences stay plain text.
+
+```rust
+RawMessage::new(event.message.clone())          // block: wraps at spaces, selectable
+RawMessage::new(message).color(palette.err)     // text colour, default fg2
+RawMessage::new(message).line()                 // one truncated line, for table cells
+```
+
 `PageHeader` is the document header of a resource page (title, status, one primary action, the
 ⋯ menu, the one-sentence summary, a mono meta line):
 
@@ -279,7 +294,8 @@ The dialog is 440px, 4px radius, over a scrim; Esc or Cancel dismisses, ⌘↵ c
 bottom-right above the status bar. Each has a leading status glyph in the severity colour, a
 severity-tinted ground (`okbg` / `warnbg` / `errbg`, `accbg` for progress) with a flat 1px `line2` border and no shadow, and a ×; a click
 dismisses it. Errors persist until dismissed. Success auto-dismisses after `theme::TOAST_SUCCESS_TIMEOUT`,
-warnings after `TOAST_WARNING_TIMEOUT`, progress after `TOAST_PROGRESS_TIMEOUT`.
+warnings after `TOAST_WARNING_TIMEOUT`, progress after `TOAST_PROGRESS_TIMEOUT`. An error toast's
+detail is the raw failure and renders as a `RawMessage`; other details are plain `fg2` text.
 
 ```rust
 toast(Toast::new(Status::Err, "Could not update Flock").detail(reason).action("Retry", |_, cx| ..), cx);
@@ -638,7 +654,8 @@ a skeleton again (decision 32). The shell renders:
 - `EmptyState::new(sentence).detail(text).action(button)`: no icon, one sentence, an optional muted line and buttons.
   `.centered()` centres it, for a chart's plot area.
   `EmptyState::for_list(&Emptiness, Noun, cluster, &filter, show_all)` builds the list variants below
-- `ErrorState::new(reason, retry)`: status glyph, the backend reason on one line, Retry
+- `ErrorState::new(note, retry)`: status glyph, our own note on one line, Retry;
+  `ErrorState::raw(reason, retry)` shows a backend or API reason in a `RawMessage` instead
 
 The filter bar is always the first row of a list page, so every state sits under it: the shell draws
 the page's `FilterBar` above the skeleton, connection progress and error, and each list screen draws
