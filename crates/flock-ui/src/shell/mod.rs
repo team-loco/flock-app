@@ -356,6 +356,19 @@ impl Shell {
                 self.dispatch(Command::SelectPage(Page::Events), cx);
                 self.focused_screens().pages.show_event_filter(*filter, cx);
             }
+            ScreenEvent::ShowEvent(key) => {
+                self.dispatch(Command::SelectPage(Page::Events), cx);
+                self.focused_screens().pages.show_event(key.clone(), cx);
+            }
+        }
+    }
+
+    pub(super) fn apply_preferences_now(&mut self, command: &Command) {
+        let Command::SetPreferences(cluster, preferences) = command else {
+            return;
+        };
+        if let Some(settings) = self.state.snapshot.catalog.get_mut(cluster) {
+            settings.preferences.clone_from(preferences);
         }
     }
 

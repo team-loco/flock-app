@@ -147,6 +147,7 @@ pub enum ScreenEvent {
     Command(Command),
     Navigate(Page),
     ShowEvents(flock_core::events::EventFilter),
+    ShowEvent(String),
 }
 
 pub struct ClusterPages {
@@ -410,6 +411,11 @@ impl ClusterPages {
     pub fn show_event_filter(&self, filter: flock_core::events::EventFilter, cx: &mut App) {
         self.events
             .update(cx, |screen, cx| screen.show_filter(filter, cx));
+    }
+
+    pub fn show_event(&self, key: String, cx: &mut App) {
+        self.events
+            .update(cx, |screen, cx| screen.show_event(key, cx));
     }
 
     pub fn list_focus(&self, page: Page, cx: &mut App) -> Option<FocusHandle> {

@@ -5,7 +5,7 @@ use flock_core::watch::WatchState;
 use flock_core::{Command, Counts, Page, ResourceRef};
 use gpui::{
     AnyElement, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, StatefulInteractiveElement, Styled, Window, div,
+    MouseButton, ParentElement, StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
 use flock_core::AddClusterStep;
@@ -13,6 +13,7 @@ use flock_core::AddClusterStep;
 use super::Shell;
 use crate::assets::GEAR;
 use crate::kit::{Button, EmptyState, IconButton, Skeleton, status_symbols};
+use crate::screens::ScreenEvent;
 use crate::screens::add_cluster::empty_flock;
 use crate::screens::detail::DetailScreen;
 use crate::screens::edit::EditScreen;
@@ -221,11 +222,16 @@ impl Shell {
         let screen = cx.new(|cx| NamespaceScreen::new(target, window, cx));
         let navigation = self.screens(ix).navigation.clone();
         let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
+            shell.apply_preferences_now(command);
             shell.pane_command(pane, command.clone(), cx);
+        });
+        let events = cx.subscribe(&screen, move |shell, _, event: &ScreenEvent, cx| {
+            shell.pane_screen_event(pane, event, cx);
         });
         screen.update(cx, |screen, _| screen.navigation = Some(navigation));
         self.sync_namespace(&screen, location, cx);
-        self.screens_mut(ix).namespace = Some((screen.clone(), subscription));
+        self.screens_mut(ix).namespace =
+            Some((screen.clone(), Subscription::join(subscription, events)));
         Some(screen)
     }
 

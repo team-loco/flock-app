@@ -3145,6 +3145,13 @@ fn a_namespace_page_opens_what_needs_attention_its_contents_and_its_events() -> 
         Some("checkout-api-7f9c6d-x2lqp".to_owned())
     );
     ui.click("pane-0-back")?;
+    assert!(ui.bounds("close-event").is_none());
+    ui.click("namespace-event-0")?;
+    assert_eq!(ui.state().location().page, Page::Events);
+    assert!(ui.bounds("close-event").is_some());
+    assert!(ui.bounds("event-message").is_some());
+    ui.click("pane-0-back")?;
+    assert_eq!(ui.state().location(), &namespace);
     ui.click("namespace-all-events")?;
     assert_eq!(ui.state().location().page, Page::Events);
     let scoped = ui
@@ -3159,6 +3166,46 @@ fn a_namespace_page_opens_what_needs_attention_its_contents_and_its_events() -> 
     );
     ui.click("pane-0-back")?;
     assert_eq!(ui.state().location(), &namespace);
+    Ok(())
+}
+
+#[test]
+fn a_namespace_page_scopes_the_list_it_opens_before_the_backend_answers() -> anyhow::Result<()> {
+    let (mut ui, updates) = Ui::scripted(Screen::Namespace)?;
+    let target = ui
+        .state()
+        .location()
+        .detail()
+        .cloned()
+        .context("the namespace page has a target")?;
+    let mut snapshot = flock_demo::snapshot();
+    let detail = snapshot
+        .details
+        .get_mut(&target.cluster)
+        .context("the demo cluster has a detail")?;
+    let contents = flock_core::related::Group {
+        title: "Deployments".into(),
+        items: Vec::new(),
+        total: 0,
+        counts: flock_core::Counts::default(),
+        list: None,
+    };
+    detail.related.insert(
+        0,
+        flock_core::related::Related {
+            target,
+            groups: vec![contents],
+        },
+    );
+    updates.try_send(flock_core::Update::Snapshot(Box::new(snapshot)))?;
+    ui.settle()?;
+    ui.click("namespace-all-events")?;
+    assert_eq!(ui.state().location().page, Page::Events);
+    let scoped = picked(&ui, "prod-us-east", "Event");
+    assert_eq!(
+        scoped.as_ref().and_then(|selection| selection.namespace()),
+        Some("payments")
+    );
     Ok(())
 }
 
