@@ -8,8 +8,6 @@ pub(crate) mod switcher;
 mod tab_motion;
 mod tabs;
 
-use std::time::Instant;
-
 use flock_core::history::Location;
 use flock_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use flock_core::resource::short_kind;
@@ -63,8 +61,6 @@ pub struct Shell {
     tab_menu: Entity<crate::kit::ActionMenu>,
     _switcher_events: Subscription,
     _updates: Task<()>,
-    synced_at: Instant,
-    _clock: Task<()>,
     _store: Entity<Store>,
     _window_closed: Subscription,
     _focus_recovery: Subscription,
@@ -90,14 +86,6 @@ impl Shell {
                     shell.receive(update, window, cx);
                 });
                 if applied.is_err() {
-                    break;
-                }
-            }
-        });
-        let clock = cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor().timer(status_bar::SYNC_TICK).await;
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
                     break;
                 }
             }
@@ -137,8 +125,6 @@ impl Shell {
             tab_menu,
             _switcher_events: switcher_events,
             _updates: listen,
-            synced_at: Instant::now(),
-            _clock: clock,
             _store: store,
             _window_closed: window_closed,
             _focus_recovery: focus_recovery,
@@ -229,7 +215,6 @@ impl Shell {
         }
         if let Update::Snapshot(_) = update {
             self.loaded = true;
-            self.synced_at = Instant::now();
         }
         self.state.update(update);
         self.run_pending(window, cx);
@@ -1128,7 +1113,7 @@ mod tests {
         assert!(backend.try_send(Update::Snapshot(Box::default())).is_ok());
         cx.run_until_parked();
         while received.try_recv().is_ok() {}
-        cx.simulate_keystrokes(window, "cmd-shift-r");
+        cx.simulate_keystrokes(window, "cmd-alt-r");
         cx.run_until_parked();
         let sent: Vec<_> = std::iter::from_fn(|| received.try_recv().ok()).collect();
         assert!(scope_of(&sent, &Command::Refresh(None)).is_some());

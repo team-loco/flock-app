@@ -1,10 +1,7 @@
-use std::time::{Duration, Instant};
-
 use flock_core::action::forwards_label;
 use flock_core::gitops::flux_ready;
 use flock_core::overview::plural;
 use flock_core::palette::{COMMAND_PREFIX, STOP_FORWARD};
-use flock_core::time::age;
 use flock_core::{Command, Page, Status};
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
@@ -15,20 +12,15 @@ use super::Shell;
 use crate::assets::REFRESH;
 use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, ICON, Palette, RADIUS_SMALL, RULE, SPACE_2, SPACE_3, SPACE_5, SPACE_6,
-    SPACE_8, STATUS_BAR, STATUS_BUTTON, TEXT_SMALL,
+    ActiveTheme, FONT_MONO, ICON, Palette, RADIUS_SMALL, RULE, SPACE_2, SPACE_5, SPACE_6, SPACE_8,
+    STATUS_BAR, STATUS_BUTTON, TEXT_SMALL,
 };
 
 const FLUX: &str = "flux";
 const VERSION_TOOLTIP: &str = "Kubernetes version";
-const REFRESH_TOOLTIP: &str = "Refresh this view";
+const REFRESH_TOOLTIP: &str = "Refresh";
 pub const REFRESH_SELECTOR: &str = "status-refresh";
-const REFRESH_KEY: &str = "⇧⌘R";
-pub(super) const SYNC_TICK: Duration = Duration::from_secs(1);
-
-fn synced_label(elapsed: Duration) -> String {
-    format!("synced {} ago", age(elapsed))
-}
+const REFRESH_KEY: &str = "⌥⌘R";
 
 impl Shell {
     pub(super) fn status_bar(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -85,7 +77,7 @@ impl Shell {
             .child(div().min_w_0().truncate().child(left))
             .children(self.kubernetes_version())
             .child(div().flex_1())
-            .child(self.refresh_button(&palette, cx))
+            .child(Self::refresh_button(&palette, cx))
             .children(crate::updater::status_item(cx))
             .children(self.forwards(cx))
             .child(self.switcher.clone())
@@ -94,7 +86,6 @@ impl Shell {
 
     pub(super) fn refresh_view(&mut self, cx: &mut Context<Self>) {
         let scope = self.state.location().cluster.clone();
-        self.synced_at = Instant::now();
         self.dispatch(Command::Refresh(scope), cx);
     }
 
@@ -108,15 +99,13 @@ impl Shell {
         Some(element)
     }
 
-    fn refresh_button(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn refresh_button(palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let hover = palette.hover;
-        let label = synced_label(self.synced_at.elapsed());
         div()
             .id(REFRESH_SELECTOR)
             .debug_selector(|| REFRESH_SELECTOR.to_owned())
             .flex()
             .items_center()
-            .gap(SPACE_3)
             .h(STATUS_BUTTON)
             .px(SPACE_2)
             .rounded(RADIUS_SMALL)
@@ -125,7 +114,6 @@ impl Shell {
             .tooltip(Tooltip::text(format!("{REFRESH_TOOLTIP}  {REFRESH_KEY}")))
             .on_click(cx.listener(|this, _, _, cx| this.refresh_view(cx)))
             .child(svg().path(REFRESH).size(ICON).text_color(palette.mute))
-            .child(label)
             .into_any_element()
     }
 
@@ -141,24 +129,5 @@ impl Shell {
             .child(label)
             .into_any_element();
         Some(element)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_synced_label_counts_up_in_the_largest_whole_unit() {
-        let cases = [
-            (0, "synced 0s ago"),
-            (4, "synced 4s ago"),
-            (59, "synced 59s ago"),
-            (60, "synced 1m ago"),
-            (3600, "synced 1h ago"),
-        ];
-        for (secs, expected) in cases {
-            assert_eq!(synced_label(Duration::from_secs(secs)), expected);
-        }
     }
 }

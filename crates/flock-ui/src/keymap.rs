@@ -171,7 +171,7 @@ pub const BINDINGS: &[Binding] = &[
         |k, c| KeyBinding::new(k, ToggleClusterSwitcher, c),
     ),
     Binding::new(
-        &["cmd-shift-r"],
+        &["cmd-alt-r"],
         "Refresh this view",
         Group::General,
         |k, c| KeyBinding::new(k, RefreshView, c),
