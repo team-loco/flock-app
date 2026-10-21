@@ -1797,16 +1797,23 @@ fn live_flux_events_stream_from_every_cluster_and_open_their_object() -> anyhow:
         .context("running kubectl")?;
     anyhow::ensure!(created.success(), "kubectl create event failed");
     let arrived = ui.wait_until(PAGE_TIMEOUT, |state| {
-        state.snapshot.flux_events.first().is_some_and(|row| {
+        let rows = &state.snapshot.flux_events;
+        let is_ours = |row: &&flock_core::events::ClusterEvent| {
             row.cluster.as_str() == "fleet-a" && row.event.reason == LIVE_EVENT_REASON
-        })
+        };
+        let Some(ours) = rows.iter().find(is_ours) else {
+            return false;
+        };
+        rows.iter()
+            .take_while(|row| !is_ours(row))
+            .all(|row| row.event.age <= ours.event.age)
     });
     let _ = std::process::Command::new("kubectl")
         .args(["--context", "kind-fleet-a", "delete", "-f"])
         .arg(&manifest)
         .status();
     let _ = std::fs::remove_file(&manifest);
-    arrived.context("a new Flux event did not stream in at the top")?;
+    arrived.context("a new Flux event did not stream in above every older event")?;
     let rows = ui.state().snapshot.flux_events;
     let newest = rows.first().map(|row| row.event.age);
     let oldest = rows.last().map(|row| row.event.age);
@@ -2140,14 +2147,27 @@ fn related_titles(state: &AppState) -> Vec<String> {
 fn follow(ui: &mut Ui, page: &'static str, group: &str, name: &str) -> anyhow::Result<ResourceRef> {
     let link = selector(format!("related-{group}-{name}"));
     let start = std::time::Instant::now();
-    while ui.bounds(link).is_none() {
+    loop {
+        let shown = ui.bounds(link);
+        let body = ui.bounds(page);
+        if let (Some(shown), Some(body)) = (shown, body)
+            && body.contains(&shown.center())
+        {
+            break;
+        }
         anyhow::ensure!(
             start.elapsed() < PAGE_TIMEOUT,
-            "Related never linked {group} {name}; it shows {:?}",
+            "Related never showed a {group} {name} link inside {page}; it shows {:?}",
             related_titles(&ui.state())
         );
-        if ui.bounds(page).is_some() {
-            ui.scroll(page, gpui::point(gpui::px(0.), gpui::px(-RELATED_SCROLL)))?;
+        if let Some(body) = body {
+            let above = shown.is_some_and(|shown| shown.top() < body.top());
+            let step = if above {
+                RELATED_SCROLL
+            } else {
+                -RELATED_SCROLL
+            };
+            ui.scroll(page, gpui::point(gpui::px(0.), gpui::px(step)))?;
         }
         ui.pause(Duration::from_millis(500))?;
     }

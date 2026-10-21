@@ -19,6 +19,7 @@ const YAML: &str = "YAML";
 const ALL_LOGS: &str = "Logs for all pods";
 const SEPARATOR: &str = " · ";
 const GONE: &str = "is not on this cluster any more.";
+const BODY_ID: &str = "detail-body";
 
 pub struct DetailScreen {
     pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
@@ -215,7 +216,8 @@ impl Render for DetailScreen {
             None => vec![Skeleton::rows().into_any_element()],
         };
         let body = div()
-            .id("detail-body")
+            .id(BODY_ID)
+            .debug_selector(|| BODY_ID.to_owned())
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
