@@ -48,6 +48,8 @@ const NOTIFICATIONS: &str = "Notifications";
 const NEW_PROBLEMS: &str = "New problems";
 const NEW_PROBLEMS_HINT: &str =
     "A macOS notification when a resource starts failing. A flapping pod is announced once.";
+const PAUSED_HINT: &str = "Paused from the menu bar.";
+const RESUME: &str = "Resume";
 const WARNINGS: &str = "Include warnings";
 const WARNINGS_HINT: &str = "Also notify for warnings, not only errors.";
 const MUTE_PREFIX: &str = "Mute a cluster from its settings in ";
@@ -361,11 +363,23 @@ impl AppSettingsScreen {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let notifications = current.notifications;
-        let enabled =
-            Toggle::new("settings-notify", notifications.enabled).on_toggle(|on, _, cx| {
-                let on = *on;
-                change(cx, |s| s.notifications.enabled = on);
-            });
+        let enabled = if notifications.paused {
+            Button::new("settings-resume", RESUME)
+                .on_click(|_, _, cx| change(cx, |s| s.notifications.paused = false))
+                .into_any_element()
+        } else {
+            Toggle::new("settings-notify", notifications.enabled)
+                .on_toggle(|on, _, cx| {
+                    let on = *on;
+                    change(cx, |s| s.notifications.enabled = on);
+                })
+                .into_any_element()
+        };
+        let enabled_hint = if notifications.paused {
+            PAUSED_HINT
+        } else {
+            NEW_PROBLEMS_HINT
+        };
         let warnings =
             Toggle::new("settings-warnings", notifications.warnings).on_toggle(|on, _, cx| {
                 let on = *on;
@@ -388,7 +402,7 @@ impl AppSettingsScreen {
                 .child(UNBUNDLED)
         });
         section(NOTIFICATIONS, palette)
-            .child(row(NEW_PROBLEMS, NEW_PROBLEMS_HINT, enabled, palette))
+            .child(row(NEW_PROBLEMS, enabled_hint, enabled, palette))
             .child(row(WARNINGS, WARNINGS_HINT, warnings, palette))
             .child(mute)
             .children(unbundled)

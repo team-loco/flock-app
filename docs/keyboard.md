@@ -10,7 +10,7 @@ Generated from the binding table in `crates/flock-ui/src/keymap.rs`; run `mise r
 | ⌘⇧P | Run a command |
 | ⌘K | Command palette |
 | ⌘⇧C | Switch cluster |
-| ⌘⇧R | Refresh this view |
+| ⌥⌘R | Refresh this view |
 | ⌘0 | All clusters in this tab |
 | ⌘, | Settings |
 | ⌘N | New window |

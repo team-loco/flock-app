@@ -283,6 +283,24 @@ fn command_comma_opens_settings_and_its_controls_change_the_app_settings() -> an
 }
 
 #[test]
+fn settings_shows_paused_notifications_and_resume_clears_the_pause() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Settings)?;
+    let current = |ui: &Ui| ui.read(|_, cx| flock_ui::settings::current(cx).clone());
+    assert!(ui.bounds("settings-notify").is_some());
+    assert!(ui.bounds("settings-resume").is_none());
+    let paused =
+        ui.update_app(|cx| flock_ui::settings::update(cx, |s| s.notifications.paused = true));
+    assert!(paused.is_ok());
+    assert!(ui.bounds("settings-notify").is_none());
+    assert!(ui.bounds("settings-resume").is_some());
+    ui.click("settings-resume")?;
+    assert!(!current(&ui).notifications.paused);
+    assert!(current(&ui).notifications.enabled);
+    assert!(ui.bounds("settings-notify").is_some());
+    Ok(())
+}
+
+#[test]
 fn menu_bar_toggle_updates_and_saves_the_setting() -> anyhow::Result<()> {
     use std::{cell::RefCell, rc::Rc};
     let mut ui = Ui::open(Screen::Settings)?;
@@ -3638,7 +3656,7 @@ fn the_status_bar_refresh_button_is_clickable_and_keeps_the_page() -> anyhow::Re
     let before = ui.state().location().clone();
     assert!(ui.bounds("status-refresh").is_some());
     ui.click("status-refresh")?;
-    ui.press("cmd-shift-r")?;
+    ui.press("cmd-alt-r")?;
     assert_eq!(ui.state().location(), &before);
     assert!(ui.bounds("status-refresh").is_some());
     Ok(())
