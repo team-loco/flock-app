@@ -45,6 +45,7 @@ jobs:
         if: failure()
         continue-on-error: true
         run: |
+          mise exec -- kind export kubeconfig --name flock-loco
           kubectl="mise exec -- kubectl --context kind-flock-loco"
           namespaces="loco-system loco-builds loco-registry"
           for ns in $namespaces; do
