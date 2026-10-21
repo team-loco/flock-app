@@ -61,8 +61,8 @@ pub use overlay::{
     toast_statuses, toast_titles,
 };
 pub use panel::{
-    EVENTS_EMPTY, ErrorBlock, ErrorBlocks, EventList, EventRow, LabelChips, PanelSection,
-    events_count, events_empty, issue_stack, section_id,
+    EVENTS_EMPTY, ErrorBlock, ErrorBlocks, EventList, EventRow, LabelChips, PanelHeader,
+    PanelSection, events_count, events_empty, issue_stack, section_id,
 };
 pub(crate) use popover::{Dismissal, Step, above_right, appear, shadow, step, surface};
 pub use presence::{Entrance, Motion, Presence, slide_in, slide_out, swap_in};

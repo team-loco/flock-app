@@ -1,17 +1,20 @@
 use flock_core::Status;
 use gpui::{
     AnyElement, App, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    RenderOnce, SharedString, Styled, Window, div, prelude::FluentBuilder, relative,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder, relative,
 };
 
 use super::selectable::SelectableText;
 use super::status::StatusText;
+use super::tooltip::Tooltip;
 use crate::theme::{
-    ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, RULE, SPACE_4, SPACE_5, SPACE_7, SPACE_8,
-    TEXT_BODY, TEXT_HEADING, TEXT_MONO, TEXT_SMALL, TEXT_TITLE, TEXT_UI,
+    ActiveTheme, CONTROL, FONT_MONO, LINE_PROSE, PAGE_HEADER, RULE, SPACE_4, SPACE_5, SPACE_7,
+    SPACE_8, TEXT_BODY, TEXT_HEADING, TEXT_MONO, TEXT_SMALL, TEXT_TITLE, TEXT_UI,
 };
 
 const META_LINE: &str = "meta-line";
+const PAGE_TITLE: &str = "page-title";
 
 #[derive(IntoElement)]
 pub struct PageHeader {
@@ -86,16 +89,22 @@ impl RenderOnce for PageHeader {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = cx.palette();
         let (fg2, mute, line) = (palette.fg2, palette.mute, palette.line);
+        let tooltip = self.title.clone();
         let title = div()
+            .id(PAGE_TITLE)
+            .flex_initial()
+            .min_w_0()
             .text_size(TEXT_HEADING)
             .font_weight(FontWeight::SEMIBOLD)
             .truncate()
             .when(self.mono, |title| title.font_family(FONT_MONO))
+            .tooltip(Tooltip::text(tooltip))
             .child(SelectableText::new(self.title));
         let top = div()
             .flex()
             .items_center()
             .gap(SPACE_5)
+            .h(CONTROL)
             .children(self.leading)
             .when_some(self.kicker, |row, kicker| {
                 row.child(
@@ -111,12 +120,17 @@ impl RenderOnce for PageHeader {
             .when_some(self.status, |row, (status, label)| {
                 row.child(
                     div()
+                        .flex_none()
                         .text_size(TEXT_BODY)
                         .child(StatusText::new(status, label)),
                 )
             })
             .child(div().flex_1())
-            .children(self.actions);
+            .children(
+                self.actions
+                    .into_iter()
+                    .map(|action| div().flex_none().child(action)),
+            );
         div()
             .flex()
             .flex_col()

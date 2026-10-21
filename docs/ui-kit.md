@@ -552,9 +552,8 @@ Values outside 0..=1 (or 0..=max) are clamped; NaN reads as 0.
 
 ## Inspector
 
-The side panel next to a list (`panel` background, rule on the left, scrolls on its own). A header
-with the title, an optional status line and actions, error blocks when something is wrong, then
-collapsible sections.
+The side panel next to a list (`panel` background, rule on the left, scrolls on its own). A
+`PanelHeader`, error blocks when something is wrong, then collapsible sections.
 
 ```rust
 Inspector::new("node-inspector", "ip-10-4-31-12")
@@ -580,12 +579,18 @@ PanelSection::new("pod-inspector", "Containers")   // id pod-inspector-container
     .child(body)
 PanelSection::events(panel, events)                // "N · last 1h", EventList body
 PanelSection::labels(panel, labels)                // count + LabelChips
+PanelHeader::new("pod-inspector", name)          // one row, theme::PANEL_HEADER high
+    .mono()
+    .status(pod.status, pod.reason.clone())        // glyph + word beside the name, never wraps
+    .action(shell)                                 // right-aligned
 ErrorBlocks::new(issues).on_open(|ix, window, cx| ..)  // top of a panel
 issue_stack(issues)                                // the same blocks inside a header (split panes)
 EventRow::new(event).on_click("namespace-event-0", ..)
 ```
 
-The header toggles on click (`{id}-toggle`, body `{id}-body`) and the state is saved in
+`PanelHeader` truncates the name first (full name in a tooltip) and keeps the same height for every
+object and status; it carries `{panel}-header`, `-header-title` and `-header-status`. `PageHeader`
+follows the same rule on its title row. A section header toggles on click (`{id}-toggle`, body `{id}-body`) and the state is saved in
 `AppSettings::open_sections` under the section id. Error blocks carry `error-block-{ix}`; an empty
 event list renders `events-empty` ("No events in the last 1h").
 

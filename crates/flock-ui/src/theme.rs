@@ -170,6 +170,7 @@ pub const REASON_MIN: Pixels = px(240.);
 pub const REASON_WEIGHT: f32 = 2.;
 pub const ERROR_BAR: Pixels = px(3.);
 pub const SECTION_HEADER: Pixels = px(30.);
+pub const PANEL_HEADER: Pixels = px(40.);
 pub const SECTION_INDENT: Pixels = px(18.);
 pub const EVENT_AGE: Pixels = px(28.);
 pub const INSPECTOR_MIN: Pixels = px(280.);

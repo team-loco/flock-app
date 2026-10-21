@@ -368,6 +368,8 @@ const ROWS_UNDER_POPOVER: usize = 8;
 const AVAILABLE: usize = 4;
 const POD_ROWS: usize = 12;
 const INSPECTOR_SCROLL: f32 = 400.;
+const INSPECTOR_SCROLL_TO_END: f32 = -4000.;
+const FIRST_POD: &str = "checkout-api-7f9c6d-x2lqp";
 const AVAILABLE_DEFAULT: f32 = 72.;
 
 fn selector(text: String) -> &'static str {
@@ -3695,6 +3697,102 @@ fn crashing_pod_inspector_leads_with_its_error_block_above_conditions_and_events
         .bounds("pod-inspector-pane")
         .ok_or_else(|| anyhow::anyhow!("no inspector"))?;
     assert_eq!(pane.size.width, flock_ui::theme::INSPECTOR_POD);
+    Ok(())
+}
+
+#[test]
+fn the_pod_picked_when_the_list_opens_loads_its_related_objects() -> anyhow::Result<()> {
+    let ui = Ui::open(Screen::Pods)?;
+    let target = flock_core::ResourceRef {
+        cluster: ClusterId::new(SAMPLE),
+        kind: "Pod".into(),
+        namespace: Some("payments".into()),
+        name: FIRST_POD.into(),
+    };
+    let state = ui.state();
+    let related = state
+        .snapshot
+        .details
+        .get(&target.cluster)
+        .and_then(|detail| detail.related(&target));
+    assert!(related.is_some(), "Related never loaded for {target:?}");
+    Ok(())
+}
+
+#[test]
+fn a_loading_related_section_reserves_one_row() -> anyhow::Result<()> {
+    let (mut ui, _updates) = Ui::scripted(Screen::Pods)?;
+    ui.press("cmd-j")?;
+    ui.scroll(
+        "pod-inspector-pane",
+        gpui::point(gpui::px(0.), gpui::px(INSPECTOR_SCROLL_TO_END)),
+    )?;
+    assert!(ui.bounds("loading-skeleton").is_none());
+    let loading = ui
+        .bounds("related-loading")
+        .context("Related shows no loading row")?;
+    assert_eq!(loading.size.height, flock_ui::theme::ROW_DOCUMENT);
+    Ok(())
+}
+
+#[test]
+fn picking_another_pod_starts_its_inspector_at_the_top() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.press("cmd-j")?;
+    let header = ui.bounds("pod-inspector-header").context("no pod header")?;
+    ui.scroll(
+        "pod-inspector-pane",
+        gpui::point(gpui::px(0.), gpui::px(-INSPECTOR_SCROLL)),
+    )?;
+    assert!(top(&mut ui, "error-block-0")? < header.bottom());
+    ui.click("pods-row-1")?;
+    ui.click("pods-row-0")?;
+    assert!(top(&mut ui, "error-block-0")? >= header.bottom());
+    assert!(top(&mut ui, "pod-inspector-details")? >= header.bottom());
+    Ok(())
+}
+
+fn inline_header(ui: &mut Ui, panel: &str) -> anyhow::Result<Pixels> {
+    let bounds = |ui: &mut Ui, part: &str| {
+        let selector: &'static str = format!("{panel}-header{part}").leak();
+        ui.bounds(selector)
+            .with_context(|| format!("no {selector}"))
+    };
+    let header = bounds(ui, "")?;
+    let title = bounds(ui, "-title")?;
+    let status = bounds(ui, "-status")?;
+    assert!(
+        status.left() >= title.right(),
+        "{panel}: the status is not right of the name"
+    );
+    assert!(
+        status.top() < title.bottom() && title.top() < status.bottom(),
+        "{panel}: the status is not on the name's row"
+    );
+    assert!(status.right() <= header.right());
+    Ok(header.size.height)
+}
+
+#[test]
+fn panel_headers_keep_the_status_beside_the_name_at_one_height() -> anyhow::Result<()> {
+    let mut pods = Ui::open(Screen::Pods)?;
+    let crashing = inline_header(&mut pods, "pod-inspector")?;
+    let shell = pods.bounds("pod-shell").context("no Shell")?;
+    let status = pods
+        .bounds("pod-inspector-header-status")
+        .context("no pod status")?;
+    assert!(shell.left() >= status.right());
+    pods.click("pods-row-1")?;
+    let running = inline_header(&mut pods, "pod-inspector")?;
+    assert_eq!(crashing, flock_ui::theme::PANEL_HEADER);
+    assert_eq!(running, crashing);
+    let mut nodes = Ui::open(Screen::Nodes)?;
+    nodes.click("nodes-row-0")?;
+    let ready = inline_header(&mut nodes, "node-inspector")?;
+    nodes.click("nodes-row-9")?;
+    let cordoned = inline_header(&mut nodes, "node-inspector")?;
+    assert_eq!(ready, flock_ui::theme::PANEL_HEADER);
+    assert_eq!(cordoned, ready);
     Ok(())
 }
 

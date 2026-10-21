@@ -3,16 +3,15 @@ use std::collections::BTreeMap;
 use flock_core::Status;
 use flock_core::issue::Issue;
 use gpui::{
-    AnyElement, App, CursorStyle, DispatchPhase, ElementId, FontWeight, Global, InteractiveElement,
+    AnyElement, App, CursorStyle, DispatchPhase, ElementId, Global, InteractiveElement,
     IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, RenderOnce,
     SharedString, StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder,
 };
 
-use super::panel::{ErrorBlocks, PanelSection};
-use super::status::StatusText;
+use super::panel::{ErrorBlocks, PanelHeader, PanelSection};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, INSPECTOR, INSPECTOR_MAX, INSPECTOR_MIN, RULE, SPACE_3, SPACE_4,
-    SPACE_5, SPACE_6, SPLITTER, TEXT_BODY, TEXT_UI,
+    ActiveTheme, INSPECTOR, INSPECTOR_MAX, INSPECTOR_MIN, RULE, SPACE_5, SPACE_6, SPLITTER,
+    TEXT_BODY,
 };
 
 #[derive(IntoElement)]
@@ -96,36 +95,16 @@ impl RenderOnce for Inspector {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = cx.palette();
         let line = palette.line;
-        let title = div()
-            .flex_1()
-            .min_w_0()
-            .truncate()
-            .text_size(TEXT_UI)
-            .font_weight(FontWeight::SEMIBOLD)
-            .when(self.mono, |title| title.font_family(FONT_MONO))
-            .child(super::selectable::SelectableText::new(self.title));
-        let header = div()
-            .flex()
-            .flex_col()
-            .gap(SPACE_3)
-            .p(SPACE_6)
-            .border_b(RULE)
-            .border_color(line)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(SPACE_4)
-                    .child(title)
-                    .children(self.actions),
-            )
-            .when_some(self.status, |header, (status, label)| {
-                header.child(
-                    div()
-                        .text_size(TEXT_BODY)
-                        .child(StatusText::new(status, label)),
-                )
-            });
+        let header = PanelHeader::new(&self.id.to_string(), self.title);
+        let header = if self.mono { header.mono() } else { header };
+        let header = match self.status {
+            Some((status, label)) => header.status(status, label),
+            None => header,
+        };
+        let header = match self.actions {
+            Some(actions) => header.action(actions),
+            None => header,
+        };
         let sections = self.sections.into_iter().map(|part| match part {
             Part::Section(section) => section.into_any_element(),
             Part::Plain(content) => div()

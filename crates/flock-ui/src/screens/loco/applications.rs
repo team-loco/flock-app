@@ -14,12 +14,12 @@ use gpui::{
 
 use crate::kit::{
     Button, Column, ErrorBlocks, FilterBar, FilterEvent, InspectorPane, KeyValue, Link, MenuItem,
-    PageTitle, PanelSection, StatusGlyph, StatusText, Table, TableEvent, chip_label,
+    PageHeader, PageTitle, PanelSection, StatusGlyph, Table, TableEvent, chip_label,
 };
 use crate::screens::{ListShape, empty_list};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, Palette, ROW_TABLE_MAX, ROW_TABLE_MIN, RULE, SPACE_3, SPACE_5, SPACE_6,
-    SPACE_7, SPACE_8, TEXT_BODY, TEXT_HEADING, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, FONT_MONO, Palette, ROW_TABLE_MAX, ROW_TABLE_MIN, RULE, SPACE_3, SPACE_5, SPACE_7,
+    SPACE_8, TEXT_BODY, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
 };
 
 const DETAIL_WIDTH: Pixels = px(440.);
@@ -289,7 +289,7 @@ impl ApplicationsScreen {
                 .child(NOTHING_SELECTED)
                 .into_any_element();
         };
-        let summary = Self::summary(workspace, app, palette, cx);
+        let summary = Self::summary(workspace, app, cx);
         let issues: Vec<Issue> = app
             .degraded
             .as_ref()
@@ -313,12 +313,7 @@ impl ApplicationsScreen {
             .into_any_element()
     }
 
-    fn summary(
-        workspace: &Workspace,
-        app: &Application,
-        palette: &Palette,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn summary(workspace: &Workspace, app: &Application, cx: &mut Context<Self>) -> AnyElement {
         let logs_target = app.deployment();
         let logs = Button::new("loco-app-logs", LOGS)
             .disabled(logs_target.is_none())
@@ -327,40 +322,10 @@ impl ApplicationsScreen {
                     cx.emit(Command::FollowLogs(LogTarget::Workload(target)));
                 }
             }));
-        let status = div()
-            .text_size(TEXT_BODY)
-            .child(StatusText::new(app.phase.status(), app.phase.label()));
-        let top = div()
-            .flex()
-            .items_center()
-            .gap(SPACE_5)
-            .child(
-                div()
-                    .text_size(TEXT_HEADING)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .truncate()
-                    .child(app.name.clone()),
-            )
-            .child(status)
-            .child(div().flex_1())
-            .child(logs);
-        div()
-            .flex()
-            .flex_col()
-            .gap(SPACE_3)
-            .px(SPACE_8)
-            .pt(SPACE_7)
-            .pb(SPACE_6)
-            .border_b(RULE)
-            .border_color(palette.line)
-            .child(top)
-            .child(
-                div()
-                    .font_family(FONT_MONO)
-                    .text_size(TEXT_MONO)
-                    .text_color(palette.mute)
-                    .child(location(workspace, app)),
-            )
+        PageHeader::new(app.name.clone())
+            .status(app.phase.status(), app.phase.label())
+            .action(logs)
+            .meta(location(workspace, app))
             .into_any_element()
     }
 

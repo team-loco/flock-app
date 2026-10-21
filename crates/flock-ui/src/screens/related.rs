@@ -4,10 +4,11 @@ use flock_core::ResourceRef;
 use flock_core::related::{Group, Item, ListLink, Related};
 use flock_core::time::age;
 use gpui::{
-    AnyElement, App, FontWeight, IntoElement, ParentElement, SharedString, Styled, Window, div,
+    AnyElement, App, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString,
+    Styled, Window, div,
 };
 
-use crate::kit::{Link, Rule, SectionHeader, Skeleton, StatusGlyph};
+use crate::kit::{Link, Rule, SectionHeader, StatusGlyph};
 use crate::theme::{
     ActiveTheme, FONT_MONO, GLYPH_SLOT, Palette, ROW_DOCUMENT, SPACE_2, SPACE_4, SPACE_5, SPACE_8,
     TEXT_MONO, TEXT_SMALL,
@@ -18,6 +19,8 @@ const NOTHING: &str = "Nothing else in the cluster refers to it.";
 const NONE: &str = "None";
 const OPEN_LIST: &str = "Open list →";
 const SELECTOR: &str = "related";
+const LOADING: &str = "Loading…";
+const LOADING_SELECTOR: &str = "related-loading";
 
 pub enum Pick {
     Object(ResourceRef),
@@ -108,7 +111,14 @@ fn rows(group: &Group, pick: &OnPick, palette: &Palette) -> Vec<AnyElement> {
 pub fn inspector_section(related: Option<&Related>, pick: &OnPick, cx: &App) -> AnyElement {
     let palette = cx.palette();
     let Some(related) = related else {
-        return Skeleton::rows().into_any_element();
+        return div()
+            .debug_selector(|| LOADING_SELECTOR.to_owned())
+            .h(ROW_DOCUMENT)
+            .flex()
+            .items_center()
+            .text_color(palette.mute)
+            .child(LOADING)
+            .into_any_element();
     };
     if related.groups.is_empty() {
         return div()
