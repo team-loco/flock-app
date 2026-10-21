@@ -1,6 +1,7 @@
 use std::time::Duration;
 
-use flock_core::workload::{Event, Pending, Pod, Revision};
+use flock_core::pods::PodEvent;
+use flock_core::workload::{Pending, Pod, Revision};
 use flock_core::{Status, Workload};
 
 use super::data::{BROKEN_IMAGE, crashing_pod, healthy_conditions, running_pod};
@@ -179,7 +180,7 @@ fn rollback(workload: &mut Workload, revision: u64, names: &mut Names) {
 fn record(workload: &mut Workload, status: Status, reason: &str, message: String) {
     workload.events.insert(
         0,
-        Event {
+        PodEvent {
             age: Duration::ZERO,
             status,
             reason: reason.into(),
@@ -216,13 +217,7 @@ mod tests {
         assert_eq!(current.map(|r| r.pods_label()).as_deref(), Some("3/3"));
         assert_eq!(workload.status(), Status::Ok);
         assert!(!workload.stalled());
-        assert_eq!(
-            workload
-                .condition_line()
-                .map(|line| line.compact())
-                .as_deref(),
-            Some("Available=True · MinimumReplicasAvailable")
-        );
+        assert_eq!(workload.issues(), Vec::new());
         assert_eq!(
             workload.events.first().map(|e| e.reason.as_str()),
             Some("DeploymentRollback")

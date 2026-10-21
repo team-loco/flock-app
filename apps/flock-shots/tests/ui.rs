@@ -5,10 +5,9 @@ use flock_core::resources::{EVENT_LIST, POD_LIST};
 use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
-use flock_ui::kit::TOOLTIP_SELECTOR;
 use flock_ui::theme::{
-    ICON_BUTTON, INSPECTOR_IN, LINE_PROSE, NAMESPACE_EVENT_LINES, SIDEBAR, SPACE_3, TAB_ENTER,
-    TAB_LEAVE, TEXT_MONO, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
+    ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SPACE_3, TAB_ENTER, TAB_LEAVE, TITLE_ROW,
+    TRAFFIC_LIGHTS_INSET,
 };
 use gpui::Pixels;
 
@@ -3243,7 +3242,7 @@ fn top(ui: &mut Ui, selector: &'static str) -> anyhow::Result<Pixels> {
 }
 
 #[test]
-fn unhealthy_job_inspector_leads_with_whats_wrong_then_conditions_events_and_yaml()
+fn unhealthy_job_inspector_leads_with_its_error_block_then_conditions_events_and_yaml()
 -> anyhow::Result<()> {
     for appearance in [
         flock_ui::theme::Appearance::Dark,
@@ -3251,7 +3250,7 @@ fn unhealthy_job_inspector_leads_with_whats_wrong_then_conditions_events_and_yam
     ] {
         let mut ui = Ui::with(Screen::JobInspector, flock::Preset::default(), appearance)?;
         assert!(ui.bounds("reason-cell").is_some());
-        let wrong = top(&mut ui, "whats-wrong")?;
+        let wrong = top(&mut ui, "error-block-0")?;
         let conditions = top(&mut ui, "condition-table")?;
         let events = top(&mut ui, "object-events")?;
         let yaml = top(&mut ui, "code-horizontal")?;
@@ -3260,7 +3259,7 @@ fn unhealthy_job_inspector_leads_with_whats_wrong_then_conditions_events_and_yam
             .bounds("resource-inspector-pane")
             .ok_or_else(|| anyhow::anyhow!("no inspector"))?;
         let block = ui
-            .bounds("whats-wrong")
+            .bounds("error-block-0")
             .ok_or_else(|| anyhow::anyhow!("no summary"))?;
         assert!(block.origin.x + block.size.width <= pane.origin.x + pane.size.width);
     }
@@ -3301,70 +3300,8 @@ fn back_from_a_related_link_reopens_the_inspector_it_left() -> anyhow::Result<()
     Ok(())
 }
 
-const HELM_LOG_LINES: usize = 40;
-const TOOLTIP_DELAY: std::time::Duration = std::time::Duration::from_millis(600);
-
 #[test]
-fn a_namespace_page_clamps_long_event_messages_and_shows_them_in_full_on_hover()
--> anyhow::Result<()> {
-    let (mut ui, updates) = Ui::scripted(Screen::Namespace)?;
-    let target = ui
-        .state()
-        .location()
-        .detail()
-        .cloned()
-        .context("the namespace page has a target")?;
-    let message = (0..HELM_LOG_LINES)
-        .map(|line| format!("Last Helm logs: performing update for checkout-api step {line}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let mut snapshot = flock_demo::snapshot();
-    let detail = snapshot
-        .details
-        .get_mut(&target.cluster)
-        .context("the demo cluster has a detail")?;
-    let newest = detail
-        .events
-        .iter_mut()
-        .filter(|event| event.namespace.as_deref() == Some(target.name.as_str()))
-        .min_by_key(|event| event.age)
-        .context("the namespace has events")?;
-    newest.message.clone_from(&message);
-    let contents = flock_core::related::Group {
-        title: "Deployments".into(),
-        items: Vec::new(),
-        total: 0,
-        counts: flock_core::Counts::default(),
-        list: None,
-    };
-    detail.related.insert(
-        0,
-        flock_core::related::Related {
-            target,
-            groups: vec![contents],
-        },
-    );
-    updates.try_send(flock_core::Update::Snapshot(Box::new(snapshot)))?;
-    ui.settle()?;
-    let clamped = ui
-        .bounds("namespace-event-message-0")
-        .context("the newest event message renders")?;
-    let most =
-        (0..NAMESPACE_EVENT_LINES).fold(Pixels::ZERO, |height, _| height + TEXT_MONO * LINE_PROSE);
-    assert!(
-        clamped.size.height <= most,
-        "{:?} is taller than {:?}",
-        clamped.size.height,
-        most
-    );
-    ui.hover("namespace-event-message-0")?;
-    ui.advance_clock(TOOLTIP_DELAY)?;
-    assert!(ui.bounds(TOOLTIP_SELECTOR).is_some());
-    Ok(())
-}
-
-#[test]
-fn a_namespace_page_opens_what_needs_attention_its_contents_and_its_events() -> anyhow::Result<()> {
+fn a_namespace_page_opens_its_error_blocks_contents_and_events() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Namespace)?;
     let namespace = ui.state().location().clone();
     assert_eq!(
@@ -3379,7 +3316,7 @@ fn a_namespace_page_opens_what_needs_attention_its_contents_and_its_events() -> 
         .iter()
         .find(|problem| problem.target.namespace.as_deref() == Some("payments"))
         .map(|problem| problem.target.name.clone());
-    assert!(ui.bounds("namespace-attention-row-0").is_some());
+    assert!(ui.bounds("error-block-0").is_some());
     let services = ui
         .state()
         .snapshot
@@ -3391,7 +3328,7 @@ fn a_namespace_page_opens_what_needs_attention_its_contents_and_its_events() -> 
         )
         .map(|detail| detail.overview.unready_services.len());
     assert_eq!(services, Some(1));
-    ui.click("namespace-attention-row-0")?;
+    ui.click("error-block-0")?;
     assert_eq!(
         ui.state().workload().map(|target| target.name.clone()),
         first
@@ -3571,12 +3508,58 @@ fn a_namespace_pick_survives_stale_snapshots_and_navigation_before_the_backend_a
 }
 
 #[test]
-fn healthy_objects_have_no_reason_or_whats_wrong() -> anyhow::Result<()> {
+fn healthy_objects_have_no_reason_or_error_block() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::ResourceInspector)?;
     assert!(ui.bounds("resource-inspector-pane").is_some());
-    assert!(ui.bounds("whats-wrong").is_none());
+    assert!(ui.bounds("error-block-0").is_none());
+    assert!(ui.bounds("error-blocks").is_none());
     assert!(ui.bounds("reason-cell").is_none());
     assert!(ui.bounds("object-events").is_none());
+    assert!(ui.bounds("events-empty").is_some());
+    Ok(())
+}
+
+#[test]
+fn inspector_sections_collapse_and_expand_without_moving_the_sections_above() -> anyhow::Result<()>
+{
+    let mut ui = Ui::open(Screen::Pods)?;
+    assert!(ui.bounds("pod-inspector-labels-body").is_some());
+    assert!(ui.bounds("pod-inspector-events-body").is_none());
+    let details = top(&mut ui, "pod-inspector-details")?;
+    let labels = top(&mut ui, "pod-inspector-labels")?;
+    let containers = top(&mut ui, "pod-inspector-containers")?;
+    ui.click("pod-inspector-labels-toggle")?;
+    assert!(ui.bounds("pod-inspector-labels-body").is_none());
+    assert_eq!(top(&mut ui, "pod-inspector-details")?, details);
+    assert_eq!(top(&mut ui, "pod-inspector-labels")?, labels);
+    assert!(top(&mut ui, "pod-inspector-containers")? < containers);
+    ui.click("pod-inspector-labels-toggle")?;
+    assert!(ui.bounds("pod-inspector-labels-body").is_some());
+    assert_eq!(top(&mut ui, "pod-inspector-containers")?, containers);
+    Ok(())
+}
+
+#[test]
+fn the_workload_events_tab_lists_events_as_rows_with_the_message_underneath() -> anyhow::Result<()>
+{
+    let mut ui = Ui::open(Screen::Workload)?;
+    ui.click("dock-tab-1")?;
+    assert!(ui.bounds("workload-events").is_some());
+    let list = bounds_of(&mut ui, "object-events")?;
+    let pane = bounds_of(&mut ui, "workload-events")?;
+    assert!(list.origin.y >= pane.origin.y);
+    Ok(())
+}
+
+#[test]
+fn workload_and_flux_pages_show_error_blocks_in_the_panel_not_under_the_name() -> anyhow::Result<()>
+{
+    for screen in [Screen::Workload, Screen::Kustomization] {
+        let mut ui = Ui::open(screen)?;
+        let block = bounds_of(&mut ui, "error-block-0")?;
+        let blocks = bounds_of(&mut ui, "error-blocks")?;
+        assert!(blocks.origin.x <= block.origin.x);
+    }
     Ok(())
 }
 
@@ -3641,7 +3624,8 @@ fn a_node_inspector_links_the_pods_scheduled_on_it() -> anyhow::Result<()> {
 }
 
 #[test]
-fn crashing_pod_inspector_says_whats_wrong_above_conditions_and_events() -> anyhow::Result<()> {
+fn crashing_pod_inspector_leads_with_its_error_block_above_conditions_and_events()
+-> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
     ui.press("cmd-j")?;
     ui.scroll(
@@ -3649,12 +3633,15 @@ fn crashing_pod_inspector_says_whats_wrong_above_conditions_and_events() -> anyh
         gpui::point(gpui::px(0.), gpui::px(-INSPECTOR_SCROLL)),
     )?;
     assert!(ui.bounds("condition-table").is_none());
-    ui.click("pod-conditions-toggle")?;
-    assert!(ui.bounds("condition-table").is_some());
-    let wrong = top(&mut ui, "whats-wrong")?;
-    let conditions = top(&mut ui, "pod-conditions-toggle")?;
-    let events = top(&mut ui, "object-events")?;
+    assert!(ui.bounds("object-events").is_none());
+    let wrong = top(&mut ui, "error-block-0")?;
+    let conditions = top(&mut ui, "pod-inspector-conditions-toggle")?;
+    let events = top(&mut ui, "pod-inspector-events-toggle")?;
     assert!(wrong < conditions && conditions < events);
+    ui.click("pod-inspector-events-toggle")?;
+    assert!(ui.bounds("object-events").is_some());
+    ui.click("pod-inspector-conditions-toggle")?;
+    assert!(ui.bounds("condition-table").is_some());
     let pane = ui
         .bounds("pod-inspector-pane")
         .ok_or_else(|| anyhow::anyhow!("no inspector"))?;
@@ -3667,10 +3654,10 @@ fn cordoned_node_shows_its_reason_in_the_list_and_inspector() -> anyhow::Result<
     let mut ui = Ui::open(Screen::Nodes)?;
     assert!(ui.bounds("reason-cell").is_some());
     ui.click("nodes-row-9")?;
-    assert!(ui.bounds("whats-wrong").is_some());
+    assert!(ui.bounds("error-block-0").is_some());
     assert!(ui.bounds("condition-table").is_some());
     ui.click("nodes-row-0")?;
-    assert!(ui.bounds("whats-wrong").is_none());
+    assert!(ui.bounds("error-block-0").is_none());
     assert!(ui.bounds("condition-table").is_some());
     Ok(())
 }
@@ -3680,7 +3667,7 @@ fn failing_flux_list_and_page_name_the_reason() -> anyhow::Result<()> {
     let mut list = Ui::open(Screen::Kustomizations)?;
     assert!(list.bounds("reason-cell").is_some());
     let mut page = Ui::open(Screen::Kustomization)?;
-    let wrong = top(&mut page, "whats-wrong")?;
+    let wrong = top(&mut page, "error-block-0")?;
     let conditions = top(&mut page, "condition-table")?;
     assert!(wrong < conditions);
     Ok(())
@@ -4221,13 +4208,14 @@ fn the_shell_button_is_disabled_in_place_when_no_container_runs() -> anyhow::Res
 }
 
 #[test]
-fn the_pod_condition_block_sits_in_the_header_and_copies_its_exact_text() -> anyhow::Result<()> {
+fn the_pod_error_block_sits_above_the_details_and_copies_its_exact_text() -> anyhow::Result<()> {
     use gpui::{point, px};
     let mut ui = Ui::open(Screen::Pods)?;
-    let wrong = bounds_of(&mut ui, "whats-wrong")?;
+    let block = bounds_of(&mut ui, "error-block-0")?;
     let facts = top(&mut ui, "pod-container-head")?;
-    assert!(wrong.bottom() < facts);
-    let from = wrong.origin + point(px(SELECT_INSET), wrong.size.height - px(SELECT_INSET));
+    assert!(block.bottom() < facts);
+    let wrong = bounds_of(&mut ui, "error-block-0-message")?;
+    let from = wrong.origin + point(-px(SELECT_INSET), wrong.size.height - px(SELECT_INSET));
     let to = point(wrong.right(), wrong.bottom()) - point(px(SELECT_INSET), px(SELECT_INSET));
     ui.drag_between(from, to)?;
     ui.press("cmd-c")?;

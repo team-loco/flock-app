@@ -3,14 +3,15 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::condition_line::ConditionLine;
 use crate::filter::{FilterSpec, TextFilter};
 
+use crate::issue::{Issue, failing_condition, object_line};
 use crate::{
     ClusterId, Condition, Diagnosis, Page, ResourceRef, Snapshot, Status, Uid, time, units,
 };
 
 const FILTER_HIDES_ALL: &str = "Nothing matches this filter.";
+const PEER_SEPARATOR: &str = " · ";
 const NOTHING_APPLIED_RECONCILING: &str =
     "Nothing applied yet: the first reconcile is still running.";
 const NOTHING_APPLIED_FAILING: &str = "Nothing applied: the last reconcile failed.";
@@ -442,12 +443,17 @@ impl FluxObject {
         self.phase.status()
     }
 
-    pub fn condition_line(&self) -> Option<ConditionLine> {
-        if self.phase.is_suspended() {
-            let applied = self.applied.as_ref().map(|revision| revision.id.as_str());
-            return Some(ConditionLine::suspended(applied));
-        }
-        ConditionLine::pick(&self.conditions)
+    pub fn issues(&self) -> Vec<Issue> {
+        let Some(diagnosis) = self.current_diagnosis() else {
+            return Vec::new();
+        };
+        let condition = failing_condition(&self.conditions);
+        let object = object_line([
+            Some(format!("{} {}", self.key.kind.label(), self.key.name)),
+            condition.map(|c| format!("{}={}", c.kind, c.value)),
+            condition.and_then(|c| c.age).map(time::age),
+        ]);
+        vec![Issue::from_diagnosis(self.status(), diagnosis, object)]
     }
 
     pub fn current_diagnosis(&self) -> Option<&Diagnosis> {
@@ -489,6 +495,24 @@ impl FluxObject {
 pub struct Dependency {
     pub key: FluxKey,
     pub status: Status,
+}
+
+pub fn peer_summary(peers: &[FluxObject]) -> String {
+    let mut counts: Vec<(&'static str, usize)> = Vec::new();
+    for peer in peers {
+        let label = peer.phase.label();
+        match counts.iter_mut().find(|(known, _)| *known == label) {
+            Some(entry) => entry.1 += 1,
+            None => counts.push((label, 1)),
+        }
+    }
+    let parts = counts
+        .into_iter()
+        .map(|(label, count)| format!("{count} {}", label.to_lowercase()));
+    let summary: Vec<String> = std::iter::once(peers.len().to_string())
+        .chain(parts)
+        .collect();
+    summary.join(PEER_SEPARATOR)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -598,20 +622,40 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_suspended_object_names_its_spec_field_instead_of_a_condition() {
-        let mut held = object("west", Phase::Suspended { since: None }, "7c2d9e0");
-        held.conditions = vec![Condition::new("Ready", "True").reason("ReconciliationSucceeded")];
-        let line = held.condition_line().map(|line| line.compact());
-        assert_eq!(
-            line.as_deref(),
-            Some("spec.suspend=true · last applied 7c2d9e0")
-        );
-        held.phase = Phase::Ready;
-        let line = held.condition_line().map(|line| line.compact());
-        assert_eq!(
-            line.as_deref(),
-            Some("Ready=True · ReconciliationSucceeded")
-        );
+    fn a_failing_object_has_one_issue_naming_its_condition_and_others_have_none() {
+        let mut failing = object("east", Phase::Failing, "a41e07c");
+        failing.diagnosis = Some(Diagnosis::new("HealthCheckFailed", "timeout waiting"));
+        failing.conditions = vec![
+            Condition::new("Ready", "False")
+                .reason("HealthCheckFailed")
+                .age(Some(Duration::from_secs(4 * MINUTE))),
+        ];
+        let issues = failing.issues();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].reason, "HealthCheckFailed");
+        assert_eq!(issues[0].message, "timeout waiting");
+        assert_eq!(issues[0].object, "Kustomization apps · Ready=False · 4m");
+        let held = FluxObject {
+            phase: Phase::Suspended { since: None },
+            ..failing.clone()
+        };
+        assert_eq!(held.issues(), Vec::new());
+        let ready = FluxObject {
+            phase: Phase::Ready,
+            ..failing
+        };
+        assert_eq!(ready.issues(), Vec::new());
+    }
+
+    #[test]
+    fn peers_summarise_as_a_count_then_one_count_per_phase() {
+        let peers = [
+            object("a", Phase::Ready, "x"),
+            object("b", Phase::Suspended { since: None }, "x"),
+            object("c", Phase::Ready, "x"),
+        ];
+        assert_eq!(peer_summary(&peers), "3 · 2 ready · 1 suspended");
+        assert_eq!(peer_summary(&[]), "0");
     }
 
     #[test]

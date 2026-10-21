@@ -4,6 +4,7 @@ use std::time::Duration;
 use crate::diagnosis::{self, Condition, Diagnosis};
 use crate::events::Event;
 use crate::filter::{FilterSpec, StatusFilter, TextFilter};
+use crate::issue::{Issue, named};
 use crate::pods::PodFilter;
 use crate::{Page, Status, Uid};
 
@@ -176,6 +177,12 @@ pub struct Resource {
 }
 
 impl Resource {
+    pub fn issue(&self, kind: &str) -> Option<Issue> {
+        let diagnosis = self.diagnosis.as_ref()?;
+        let object = named(kind, &self.name, None);
+        Some(Issue::from_diagnosis(self.status, diagnosis, object))
+    }
+
     pub fn events<'a>(&self, kind: ResourceKind, events: &'a [Event]) -> Vec<&'a Event> {
         diagnosis::about(events, kind.name(), Some(&self.namespace), &self.name)
     }

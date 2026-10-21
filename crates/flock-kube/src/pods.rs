@@ -595,12 +595,12 @@ mod tests {
         let last = web.last_termination.clone().unwrap_or_default();
         assert_eq!(
             (last.reason.as_str(), last.detail()),
-            ("Error", "exit 1 · 15h ago".into())
+            ("Error", "Error · exit 1 · 15h ago".into())
         );
         assert_eq!(last.ran, Some(Duration::from_mins(366)));
         assert_eq!(
-            last.span().as_deref(),
-            Some("ran 2027-01-14 10:54 → 2027-01-14 17:00 · 6h 6m")
+            last.run().as_deref(),
+            Some("2027-01-14 10:54 → 2027-01-14 17:00 · 6h 6m")
         );
         let migrate = &row.containers[1];
         assert_eq!(migrate.state_label(), "Terminated · Completed · exit 0");

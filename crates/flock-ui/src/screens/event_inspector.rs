@@ -2,19 +2,21 @@ use std::rc::Rc;
 
 use flock_core::ResourceRef;
 use flock_core::events::Event;
+use flock_core::pods::PodEvent;
 use flock_core::time::age;
 use gpui::{
     AnyElement, App, Context, InteractiveElement, IntoElement, ParentElement, Styled, Window, div,
 };
 
 use crate::kit::{
-    IconButton, Inspector, KeyValue, Link, Presence, SelectableText, StatusText, slide_in,
-    slide_out,
+    EventList, IconButton, Inspector, KeyValue, Link, Presence, SelectableText, StatusText,
+    slide_in, slide_out,
 };
-use crate::theme::{INSPECTOR, SPACE_3, SPACE_4};
+use crate::theme::INSPECTOR;
 
 pub const INSPECTOR_ID: &str = "event-inspector";
 const MESSAGE_SELECTOR: &str = "event-message";
+const NO_OTHER_EVENTS: &str = "No other events for this object.";
 
 pub type Close = Rc<dyn Fn(&mut Window, &mut App)>;
 pub type OpenObject = Rc<dyn Fn(ResourceRef, &mut Window, &mut App)>;
@@ -55,26 +57,16 @@ impl EventInspector<'_> {
             }
             None => SelectableText::new(value(&event.object)).into_any_element(),
         };
-        let related = self
+        let others: Vec<PodEvent> = self
             .events
             .iter()
             .filter(|other| event.same_object(other) && event.key() != other.key())
-            .map(|other| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(SPACE_3)
-                    .child(StatusText::new(
-                        other.status,
-                        format!("{} · {} ago", other.reason, age(other.age)),
-                    ))
-                    .child(SelectableText::new(other.message.clone()))
-            })
-            .collect::<Vec<_>>();
-        let related = if related.is_empty() {
-            div().child("No other events for this object.")
+            .map(PodEvent::from)
+            .collect();
+        let related = if others.is_empty() {
+            div().child(NO_OTHER_EVENTS).into_any_element()
         } else {
-            div().flex().flex_col().gap(SPACE_4).children(related)
+            EventList::new(others).into_any_element()
         };
         Inspector::new(INSPECTOR_ID, event.reason.clone())
             .status(event.status, event_type(event))

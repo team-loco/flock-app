@@ -1,16 +1,13 @@
-use flock_core::Status;
 use flock_core::control_plane::{ControlPlane, Probe, Traffic, grouped, latency};
 use gpui::{
-    AnyElement, Context, Div, InteractiveElement, IntoElement, ParentElement, Styled, div,
-    prelude::FluentBuilder, relative,
+    AnyElement, Context, Div, InteractiveElement, IntoElement, ParentElement, Styled, div, relative,
 };
 
 use super::{OverviewScreen, mono};
-use crate::kit::{IconButton, Inspector, KeyValue, SectionLabel, Segmented};
+use crate::kit::{IconButton, Inspector, KeyValue, PanelSection, Segmented};
 use crate::theme::{
-    FONT_MONO, FONT_STATUS, OVERVIEW_DRILL_BAR_GAP, OVERVIEW_DRILL_BARS, OVERVIEW_DRILL_CODE,
-    OVERVIEW_DRILL_LABEL, Palette, RULE, SPACE_2, SPACE_4, TEXT_GLYPH, TEXT_LABEL, TEXT_MONO,
-    TEXT_SMALL,
+    FONT_MONO, OVERVIEW_DRILL_BAR_GAP, OVERVIEW_DRILL_BARS, OVERVIEW_DRILL_CODE,
+    OVERVIEW_DRILL_LABEL, Palette, RULE, SPACE_2, SPACE_4, TEXT_MONO, TEXT_SMALL,
 };
 
 pub(super) const INSPECTOR_ID: &str = "overview-api-drill";
@@ -19,6 +16,10 @@ const CLOSE_ID: &str = "overview-api-drill-close";
 const CODES_ID: &str = "overview-api-drill-codes";
 const REQUEST_ID: &str = "overview-api-drill-request";
 const ALL: &str = "All";
+const DETAILS: &str = "Details";
+const PER_MINUTE: &str = "5xx per minute";
+const REQUESTS: &str = "Requests";
+const RESPONSES: &str = "responses";
 const TOP_FAILURES: usize = 5;
 const NO_FAILURES: &str = "No 5xx responses in this window.";
 
@@ -90,8 +91,6 @@ fn line(ix: usize, code: &str, title: String, value: String, palette: &Palette) 
         .items_baseline()
         .gap(SPACE_4)
         .py(SPACE_2)
-        .border_t(RULE)
-        .border_color(palette.line)
         .child(
             mono(code.to_owned(), palette.err)
                 .flex_none()
@@ -113,7 +112,7 @@ fn requests(
     code: Option<&str>,
     palette: &Palette,
     cx: &mut Context<OverviewScreen>,
-) -> AnyElement {
+) -> PanelSection {
     let codes = traffic.codes();
     let code = code.filter(|code| codes.iter().any(|(known, _)| known == code));
     let total: u64 = codes.iter().map(|(_, count)| count).sum();
@@ -139,14 +138,9 @@ fn requests(
                 .update(cx, |screen, cx| screen.filter_code(pick, cx))
                 .ok();
         });
-    let header = div()
-        .flex()
-        .items_center()
-        .gap(SPACE_4)
-        .child(div().flex_1().child(SectionLabel::new("Requests")))
-        .when(total > 0, |header| header.child(segmented));
-    let rows: Vec<Div> = traffic
-        .failures_with(code)
+    let failures = traffic.failures_with(code);
+    let shown: u64 = failures.iter().map(|failure| failure.count).sum();
+    let rows: Vec<Div> = failures
         .into_iter()
         .take(TOP_FAILURES)
         .enumerate()
@@ -158,57 +152,14 @@ fn requests(
     let empty = rows
         .is_empty()
         .then(|| div().text_color(palette.mute).child(NO_FAILURES));
-    div()
-        .flex()
-        .flex_col()
-        .gap(SPACE_2)
-        .child(header)
-        .child(div().flex().flex_col().children(rows).children(empty))
-        .into_any_element()
-}
-
-fn related(plane: &ControlPlane, palette: &Palette) -> Option<AnyElement> {
-    let services = plane.unavailable_services.iter().map(|service| {
-        (
-            Status::Err,
-            format!("APIService {}", service.name),
-            format!("Available=False {}", service.reason),
-        )
-    });
-    let webhooks = plane.slow_webhooks().into_iter().map(|webhook| {
-        let detail = webhook.detail();
-        (Status::Warn, webhook.configuration, detail)
-    });
-    let rows: Vec<Div> = services
-        .chain(webhooks)
-        .map(|(status, name, cond)| {
-            div()
-                .flex()
-                .items_baseline()
-                .gap(SPACE_4)
-                .py(SPACE_2)
-                .border_t(RULE)
-                .border_color(palette.line)
-                .child(
-                    div()
-                        .flex_none()
-                        .font_family(FONT_STATUS)
-                        .text_size(TEXT_GLYPH)
-                        .text_color(palette.status(status))
-                        .child(status.glyph()),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_w_0()
-                        .child(mono(name, palette.fg).text_size(TEXT_MONO).truncate())
-                        .child(mono(cond, palette.mute).text_size(TEXT_LABEL).truncate()),
-                )
-        })
-        .collect();
-    (!rows.is_empty()).then(|| div().flex().flex_col().children(rows).into_any_element())
+    let section = PanelSection::new(INSPECTOR_ID, REQUESTS)
+        .count(format!("{} {RESPONSES}", grouped(shown)))
+        .child(div().flex().flex_col().children(rows).children(empty));
+    if total > 0 {
+        section.trailing(segmented)
+    } else {
+        section
+    }
 }
 
 pub(super) fn render(
@@ -238,13 +189,11 @@ pub(super) fn render(
                 .into_any_element();
         }
     };
-    let inspector = inspector
-        .section(None, facts(traffic, palette))
-        .section(Some("5xx per minute"), bars(traffic, palette))
-        .section(None, requests(traffic, code, palette, cx));
-    match related(plane, palette) {
-        Some(related) => inspector.section(Some("Related objects"), related),
-        None => inspector,
-    }
-    .into_any_element()
+    let requests = requests(traffic, code, palette, cx);
+    inspector
+        .issues(plane.issues())
+        .section(Some(DETAILS), facts(traffic, palette))
+        .section(Some(PER_MINUTE), bars(traffic, palette))
+        .panel(requests)
+        .into_any_element()
 }

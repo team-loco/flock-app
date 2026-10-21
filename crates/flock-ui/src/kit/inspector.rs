@@ -1,14 +1,15 @@
 use std::collections::BTreeMap;
 
 use flock_core::Status;
+use flock_core::issue::Issue;
 use gpui::{
     AnyElement, App, CursorStyle, DispatchPhase, ElementId, FontWeight, Global, InteractiveElement,
     IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, RenderOnce,
     SharedString, StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder,
 };
 
+use super::panel::{ErrorBlocks, PanelSection};
 use super::status::StatusText;
-use super::text::SectionLabel;
 use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR, INSPECTOR_MAX, INSPECTOR_MIN, RULE, SPACE_3, SPACE_4,
     SPACE_5, SPACE_6, SPLITTER, TEXT_BODY, TEXT_UI,
@@ -20,10 +21,15 @@ pub struct Inspector {
     title: SharedString,
     mono: bool,
     status: Option<(Status, SharedString)>,
-    condition: Option<AnyElement>,
+    issues: Vec<Issue>,
     actions: Option<AnyElement>,
     width: Pixels,
-    sections: Vec<(Option<SharedString>, AnyElement)>,
+    sections: Vec<Part>,
+}
+
+enum Part {
+    Plain(AnyElement),
+    Section(PanelSection),
 }
 
 impl Inspector {
@@ -33,7 +39,7 @@ impl Inspector {
             title: title.into(),
             mono: false,
             status: None,
-            condition: None,
+            issues: Vec::new(),
             actions: None,
             width: INSPECTOR,
             sections: Vec::new(),
@@ -50,8 +56,8 @@ impl Inspector {
         self
     }
 
-    pub fn condition(mut self, condition: Option<impl IntoElement>) -> Self {
-        self.condition = condition.map(IntoElement::into_any_element);
+    pub fn issues(mut self, issues: impl IntoIterator<Item = Issue>) -> Self {
+        self.issues.extend(issues);
         self
     }
 
@@ -66,9 +72,23 @@ impl Inspector {
     }
 
     pub fn section(mut self, label: Option<&str>, content: impl IntoElement) -> Self {
-        let label = label.map(|l| SharedString::from(l.to_owned()));
-        self.sections.push((label, content.into_any_element()));
+        let section = match label {
+            Some(label) => {
+                Part::Section(PanelSection::new(&self.panel_id(), label.to_owned()).child(content))
+            }
+            None => Part::Plain(content.into_any_element()),
+        };
+        self.sections.push(section);
         self
+    }
+
+    pub fn panel(mut self, section: PanelSection) -> Self {
+        self.sections.push(Part::Section(section));
+        self
+    }
+
+    pub fn panel_id(&self) -> String {
+        self.id.to_string()
     }
 }
 
@@ -105,20 +125,16 @@ impl RenderOnce for Inspector {
                         .text_size(TEXT_BODY)
                         .child(StatusText::new(status, label)),
                 )
-            })
-            .children(self.condition);
-        let sections = self.sections.into_iter().map(|(label, content)| {
-            div()
-                .flex()
-                .flex_col()
-                .gap(SPACE_5)
-                .p(SPACE_6)
+            });
+        let sections = self.sections.into_iter().map(|part| match part {
+            Part::Section(section) => section.into_any_element(),
+            Part::Plain(content) => div()
+                .px(SPACE_6)
+                .py(SPACE_5)
                 .border_b(RULE)
                 .border_color(line)
-                .when_some(label, |section, label| {
-                    section.child(SectionLabel::new(label))
-                })
                 .child(content)
+                .into_any_element(),
         });
         let body = div()
             .id(self.id.clone())
@@ -130,6 +146,7 @@ impl RenderOnce for Inspector {
             .bg(palette.panel)
             .text_size(TEXT_BODY)
             .child(header)
+            .child(ErrorBlocks::new(self.issues))
             .children(sections);
         InspectorPane::new(self.id.to_string(), body).width(self.width)
     }

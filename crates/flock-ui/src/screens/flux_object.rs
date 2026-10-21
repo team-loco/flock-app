@@ -1,6 +1,7 @@
 use crate::kit::SelectableText;
 use flock_core::flux::{
     FluxDetail, HelmDetail, HelmRevision, HistoryEntry, InventoryFilter, ManagedObject, SpecRow,
+    peer_summary,
 };
 use flock_core::{Command, FluxAction, FluxKind, FluxObject, FluxPage, Page, Status, time};
 use gpui::{
@@ -11,16 +12,17 @@ use gpui::{
 };
 
 use crate::kit::{
-    ActionMenu, Button, CONDITIONS, CodeView, Column, ConditionTable, ConditionText, ConfirmDialog,
-    DiffView, InspectorPane, KeyValue, MenuItem, PageHeader, Prose, SectionHeader, SectionLabel,
-    Segmented, StatusGlyph, Table, TableEvent, Toast, WhatsWrong, confirm, parse_unified, toast,
+    ActionMenu, Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, DiffView,
+    ErrorBlocks, InspectorPane, KeyValue, Link, MenuItem, PageHeader, PanelSection, Prose,
+    SectionHeader, Segmented, StatusGlyph, Table, TableEvent, Toast, confirm, issue_stack,
+    parse_unified, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{EDIT_DESCRIPTION, EDIT_YAML};
 use crate::screens::{FullView, full_view_link};
 use crate::theme::{
     ASIDE_WIDTH, ActiveTheme, FONT_MONO, FONT_SANS, Palette, ROW_DOCUMENT, ROW_TABLE_MIN, RULE,
-    SPACE_2, SPACE_3, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
+    SPACE_2, SPACE_3, SPACE_5, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
 };
 
 pub(crate) const FLUX_CONTEXT: &str = "FluxObject";
@@ -50,7 +52,12 @@ const RECONCILE_KEYS: &str = "⌘R";
 const WITH_SOURCE_KEYS: &str = "⇧⌘R";
 const DIFF_KEYS: &str = "⌘D";
 const YAML_KEYS: &str = "⌘Y";
-const COMPARE: &str = "Compare rendered output →";
+const COMPARE: &str = "Compare →";
+const ASIDE_ID: &str = "flux-inspector";
+const OTHER_CLUSTERS: &str = "Other clusters";
+const DEPENDS_ON: &str = "Depends on";
+const VALUES: &str = "Values";
+const SPEC: &str = "Spec";
 
 gpui::actions!(
     flux_object,
@@ -161,7 +168,7 @@ impl FluxObjectPage {
             .leading(self.navigation.clone())
             .mono()
             .status(object.status(), object.phase.label())
-            .detail(Self::compact_status_line(object))
+            .detail(issue_stack(object.issues()))
             .meta(Self::meta(object, cx))
             .footer(full_view_link("flux-full-view", open))
             .into_any_element()
@@ -391,25 +398,8 @@ impl FluxObjectPage {
             .status(object.status(), object.phase.label())
             .action(primary.primary())
             .action(self.menu.clone())
-            .detail(Self::status_line(object))
             .meta(Self::meta(object, cx))
             .into_any_element()
-    }
-
-    fn status_line(object: &FluxObject) -> Option<AnyElement> {
-        if let Some(diagnosis) = object.current_diagnosis() {
-            let block = WhatsWrong::new(object.status(), diagnosis.clone());
-            return Some(block.into_any_element());
-        }
-        object
-            .condition_line()
-            .map(|line| ConditionText::new(line).into_any_element())
-    }
-
-    fn compact_status_line(object: &FluxObject) -> Option<SelectableText> {
-        object
-            .condition_line()
-            .map(|line| SelectableText::new(line.compact()))
     }
 
     fn meta(object: &FluxObject, cx: &mut Context<Self>) -> AnyElement {
@@ -597,16 +587,13 @@ impl FluxObjectPage {
             .map(|(ix, peer)| peer_row(ix, peer, &this, palette))
             .collect();
         let comparing = this.clone();
-        let compare = div()
-            .px(SPACE_6)
-            .pt(SPACE_3)
-            .child(Prose::new("flux-compare").link(COMPARE, move |_, cx| {
-                comparing
-                    .update(cx, |_, cx| {
-                        cx.emit(Command::SelectPage(Page::Changes));
-                    })
-                    .ok();
-            }));
+        let compare = Link::new("flux-compare", COMPARE).on_click(move |_, _, cx| {
+            comparing
+                .update(cx, |_, cx| {
+                    cx.emit(Command::SelectPage(Page::Changes));
+                })
+                .ok();
+        });
         let dependencies: Vec<AnyElement> = page
             .dependencies
             .iter()
@@ -631,6 +618,26 @@ impl FluxObjectPage {
             })
             .collect();
         let values = values_block(object, palette);
+        let peers = (!peers.is_empty()).then(|| {
+            PanelSection::new(ASIDE_ID, OTHER_CLUSTERS)
+                .count(peer_summary(&page.peers))
+                .trailing(compare)
+                .child(div().flex().flex_col().children(peers))
+        });
+        let dependencies = (!dependencies.is_empty()).then(|| {
+            PanelSection::new(ASIDE_ID, DEPENDS_ON)
+                .count(dependencies.len().to_string())
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(SPACE_2)
+                        .font_family(FONT_MONO)
+                        .text_size(TEXT_MONO)
+                        .children(dependencies),
+                )
+        });
+        let values = values.map(|values| PanelSection::new(ASIDE_ID, VALUES).child(values));
         div()
             .id("flux-aside")
             .w_full()
@@ -641,40 +648,11 @@ impl FluxObjectPage {
             .border_color(palette.line)
             .bg(palette.panel)
             .text_size(TEXT_BODY)
-            .when(!peers.is_empty(), |aside| {
-                aside.child(
-                    aside_block(palette)
-                        .child(aside_label("Other clusters"))
-                        .children(peers)
-                        .child(compare),
-                )
-            })
-            .when(!dependencies.is_empty(), |aside| {
-                aside.child(
-                    aside_block(palette).child(aside_label("Depends on")).child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(SPACE_2)
-                            .px(SPACE_6)
-                            .font_family(FONT_MONO)
-                            .text_size(TEXT_MONO)
-                            .children(dependencies),
-                    ),
-                )
-            })
-            .when_some(values, |aside, values| {
-                aside.child(
-                    aside_block(palette)
-                        .child(aside_label("Values"))
-                        .child(values),
-                )
-            })
-            .child(
-                aside_block(palette)
-                    .child(aside_label("Spec"))
-                    .child(spec_list(&object.spec, SPEC_LABEL)),
-            )
+            .child(ErrorBlocks::new(object.issues()))
+            .children(peers)
+            .children(dependencies)
+            .children(values)
+            .child(PanelSection::new(ASIDE_ID, SPEC).child(spec_list(&object.spec, SPEC_LABEL)))
             .into_any_element()
     }
 }
@@ -698,7 +676,7 @@ impl Render for FluxObjectPage {
                     .child(self.compact_header(&page.object, open, cx));
             }
             let aside = Self::aside(&page, &palette, cx);
-            let aside = InspectorPane::new("flux-inspector", aside).width(ASIDE_WIDTH);
+            let aside = InspectorPane::new(ASIDE_ID, aside).width(ASIDE_WIDTH);
             div()
                 .flex()
                 .size_full()
@@ -857,18 +835,6 @@ fn ruled(table: impl IntoElement, palette: &Palette) -> impl IntoElement {
     div().border_t(RULE).border_color(palette.line).child(table)
 }
 
-fn aside_block(palette: &Palette) -> gpui::Div {
-    div().pb(SPACE_7).border_b(RULE).border_color(palette.line)
-}
-
-fn aside_label(text: &'static str) -> impl IntoElement {
-    div()
-        .px(SPACE_6)
-        .pt(SPACE_7)
-        .pb(SPACE_3)
-        .child(SectionLabel::new(text))
-}
-
 fn wrappable(value: &str) -> String {
     let phrases: Vec<String> = value
         .split(PHRASE_SEPARATOR)
@@ -894,7 +860,6 @@ fn values_block(object: &FluxObject, palette: &Palette) -> Option<AnyElement> {
 
 fn no_values(palette: &Palette) -> AnyElement {
     div()
-        .px(SPACE_6)
         .text_size(TEXT_SMALL)
         .text_color(palette.mute)
         .child(NO_VALUES)
@@ -906,7 +871,6 @@ fn spec_list(rows: &[SpecRow], label_width: Pixels) -> impl IntoElement {
         list.row(row.label.clone(), spec_value(&row.value))
     });
     div()
-        .px(SPACE_6)
         .font_family(FONT_MONO)
         .text_size(TEXT_SMALL)
         .child(list.label_width(label_width))
@@ -932,7 +896,6 @@ fn peer_row(
         .items_center()
         .gap(SPACE_3)
         .h(ROW_TABLE_MIN)
-        .px(SPACE_6)
         .cursor_pointer()
         .hover(move |style| style.bg(hover))
         .on_click(move |_, _, cx| {
@@ -967,7 +930,8 @@ fn peer_row(
         .child(
             div()
                 .flex_1()
-                .whitespace_nowrap()
+                .min_w_0()
+                .truncate()
                 .text_color(palette.mute)
                 .child(peer.phase.note()),
         )

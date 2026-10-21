@@ -1,5 +1,6 @@
 use flock_core::emptiness::Noun;
 use flock_core::filter::{TextFilter, label_values};
+use flock_core::issue::Issue;
 use flock_core::loco::{
     AppFilter, Application, Applications, ControllerObject, LocoCommand, Workspace, short_digest,
 };
@@ -12,17 +13,20 @@ use gpui::{
 };
 
 use crate::kit::{
-    Button, Column, FilterBar, FilterEvent, InspectorPane, KeyValue, Link, MenuItem, PageTitle,
-    SectionHeader, StatusGlyph, StatusText, Table, TableEvent, chip_label,
+    Button, Column, ErrorBlocks, FilterBar, FilterEvent, InspectorPane, KeyValue, Link, MenuItem,
+    PageTitle, PanelSection, StatusGlyph, StatusText, Table, TableEvent, chip_label,
 };
 use crate::screens::{ListShape, empty_list};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, LINE_PROSE, Palette, RADIUS, ROW_TABLE_MAX, ROW_TABLE_MIN, RULE,
-    SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_HEADING, TEXT_LABEL,
-    TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, FONT_MONO, Palette, ROW_TABLE_MAX, ROW_TABLE_MIN, RULE, SPACE_3, SPACE_5, SPACE_6,
+    SPACE_7, SPACE_8, TEXT_BODY, TEXT_HEADING, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
 };
 
 const DETAIL_WIDTH: Pixels = px(440.);
+const DETAIL_ID: &str = "loco-application-inspector";
+const DEPLOYMENT: &str = "Deployment";
+const CREATED_BY: &str = "Created by the controller";
+const ROUTE: &str = "Route";
 const GLYPH: Pixels = px(14.);
 const NAME_MIN: Pixels = px(100.);
 const ENVIRONMENT: Pixels = px(84.);
@@ -286,8 +290,15 @@ impl ApplicationsScreen {
                 .into_any_element();
         };
         let summary = Self::summary(workspace, app, palette, cx);
-        let deployment = deployment_section(app, palette);
-        let route = Self::route_section(app, palette, cx);
+        let issues: Vec<Issue> = app
+            .degraded
+            .as_ref()
+            .map(|degraded| degraded.issue(app.phase.status(), &app.name))
+            .into_iter()
+            .collect();
+        let objects = PanelSection::new(DETAIL_ID, CREATED_BY)
+            .count(app.objects.len().to_string())
+            .child(self.objects.clone());
         div()
             .id("loco-app-detail")
             .flex()
@@ -295,15 +306,10 @@ impl ApplicationsScreen {
             .size_full()
             .overflow_y_scroll()
             .child(summary)
-            .child(deployment)
-            .child(SectionHeader::new("Created by the controller"))
-            .child(
-                div()
-                    .border_b(RULE)
-                    .border_color(palette.line)
-                    .child(self.objects.clone()),
-            )
-            .child(route)
+            .child(ErrorBlocks::new(issues))
+            .child(deployment_section(app))
+            .child(objects)
+            .child(Self::route_section(app, palette, cx))
             .into_any_element()
     }
 
@@ -338,26 +344,6 @@ impl ApplicationsScreen {
             .child(status)
             .child(div().flex_1())
             .child(logs);
-        let problem = app.degraded.as_ref().map(|degraded| {
-            div()
-                .mt(SPACE_3)
-                .px(SPACE_5)
-                .py(SPACE_4)
-                .rounded(RADIUS)
-                .bg(palette.errbg)
-                .border(RULE)
-                .border_color(palette.err)
-                .text_size(TEXT_BODY)
-                .line_height(relative(LINE_PROSE))
-                .child(degraded.message.clone())
-                .child(
-                    div()
-                        .font_family(FONT_MONO)
-                        .text_size(TEXT_SMALL)
-                        .text_color(palette.mute)
-                        .child(degraded.summary()),
-                )
-        });
         div()
             .flex()
             .flex_col()
@@ -375,11 +361,10 @@ impl ApplicationsScreen {
                     .text_color(palette.mute)
                     .child(location(workspace, app)),
             )
-            .children(problem)
             .into_any_element()
     }
 
-    fn route_section(app: &Application, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn route_section(app: &Application, palette: &Palette, cx: &mut Context<Self>) -> PanelSection {
         let summary = app
             .route
             .as_ref()
@@ -387,30 +372,23 @@ impl ApplicationsScreen {
         let link = Link::new("loco-app-route", ROUTE_LINK).on_click(cx.listener(|_, _, _, cx| {
             cx.emit(Command::SelectPage(Page::LocoRoutes));
         }));
-        div()
-            .flex()
-            .flex_col()
-            .child(SectionHeader::new("Route"))
-            .child(
-                div()
-                    .flex()
-                    .items_baseline()
-                    .gap(SPACE_3)
-                    .px(SPACE_8)
-                    .pb(SPACE_8)
-                    .font_family(FONT_MONO)
-                    .text_size(TEXT_MONO)
-                    .line_height(relative(ROUTE_LINE))
-                    .text_color(palette.fg2)
-                    .child(div().min_w_0().child(summary))
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_family(crate::theme::FONT_SANS)
-                            .child(link),
-                    ),
-            )
-            .into_any_element()
+        PanelSection::new(DETAIL_ID, ROUTE).child(
+            div()
+                .flex()
+                .items_baseline()
+                .gap(SPACE_3)
+                .font_family(FONT_MONO)
+                .text_size(TEXT_MONO)
+                .line_height(relative(ROUTE_LINE))
+                .text_color(palette.fg2)
+                .child(div().min_w_0().child(summary))
+                .child(
+                    div()
+                        .flex_none()
+                        .font_family(crate::theme::FONT_SANS)
+                        .child(link),
+                ),
+        )
     }
 }
 
@@ -440,7 +418,7 @@ impl Render for ApplicationsScreen {
             .child(self.filter.clone())
             .child(div().flex_1().min_h_0().child(rows));
         let content = self.detail(&palette, cx);
-        let detail = InspectorPane::new("loco-application-inspector", content).width(DETAIL_WIDTH);
+        let detail = InspectorPane::new(DETAIL_ID, content).width(DETAIL_WIDTH);
         div().flex().size_full().child(list).child(detail)
     }
 }
@@ -459,7 +437,7 @@ fn location(workspace: &Workspace, app: &Application) -> String {
         .join(SEPARATOR)
 }
 
-fn deployment_section(app: &Application, palette: &Palette) -> impl IntoElement {
+fn deployment_section(app: &Application) -> PanelSection {
     let value = |text: Option<String>| text.unwrap_or_else(|| MISSING.to_owned());
     let image = value(app.image.as_deref().map(short_digest));
     let rollout = value(app.rollout.as_ref().map(flock_core::loco::Rollout::summary));
@@ -480,19 +458,7 @@ fn deployment_section(app: &Application, palette: &Palette) -> impl IntoElement 
         .text("Placement", app.placement.detail())
         .text("Resources", resources)
         .text("Health check", health);
-    div()
-        .flex()
-        .flex_col()
-        .border_b(RULE)
-        .border_color(palette.line)
-        .child(SectionHeader::new("Deployment"))
-        .child(
-            div()
-                .px(SPACE_8)
-                .pb(SPACE_6)
-                .text_size(TEXT_BODY)
-                .child(grid),
-        )
+    PanelSection::new(DETAIL_ID, DEPLOYMENT).child(div().text_size(TEXT_BODY).child(grid))
 }
 
 fn app_rows(applications: &Applications, filter: AppFilter, query: &TextFilter) -> Vec<AppRow> {

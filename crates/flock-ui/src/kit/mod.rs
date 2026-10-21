@@ -17,6 +17,7 @@ mod menu;
 mod modal;
 mod navigation;
 mod overlay;
+mod panel;
 mod popover;
 mod presence;
 mod prose;
@@ -34,10 +35,7 @@ mod tooltip;
 pub use button::{Button, ButtonSize, ButtonVariant, Checkbox, IconButton, Segmented, Toggle};
 pub use chart::{CapacityMeter, LineChart, Meter, MiniMeter, Series, StackedBar};
 pub use code::CodeView;
-pub use diagnosis::{
-    CONDITIONS, ConditionTable, ConditionText, EVENTS, EventList, WhatsWrong, reason_cell,
-    reason_tooltip,
-};
+pub use diagnosis::{CONDITIONS, ConditionTable, EVENTS, reason_cell, reason_tooltip};
 pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};
 pub use editor::{CodeEditor, CodeEditorState, highlight_yaml, mark_error, yaml_editor};
@@ -61,6 +59,10 @@ pub use navigation::{HeaderNavigation, HistoryJump};
 pub use overlay::{
     ConfirmDialog, Overlays, Toast, confirm, layer as overlay_layer, toast, toast_statuses,
     toast_titles,
+};
+pub use panel::{
+    EVENTS_EMPTY, ErrorBlock, ErrorBlocks, EventList, EventRow, LabelChips, PanelSection,
+    events_count, events_empty, issue_stack, section_id,
 };
 pub(crate) use popover::{Dismissal, Step, above_right, appear, shadow, step, surface};
 pub use presence::{Entrance, Motion, Presence, slide_in, slide_out, swap_in};

@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use flock_core::events::Event;
-use flock_core::home::Problem;
+use flock_core::issue::Issue;
 use flock_core::namespace::{Listing, NamespacePage, Policy, Quota, Requested, Tile};
+use flock_core::pods::PodEvent;
 use flock_core::related::{Group, Item};
 use flock_core::resource::short_kind;
 use flock_core::resources::{EVENT_LIST, namespace_list};
@@ -18,25 +18,22 @@ use gpui::{
 
 use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::kit::{
-    ActionMenu, Activate, EmptyState, HealthTile, HealthTiles, InputEvent, InspectorPane, Link,
-    PageHeader, SectionLabel, Skeleton, StackedBar, StatusGlyph, TextField, TextFieldState,
-    TileNote, Tooltip,
+    ActionMenu, Activate, EmptyState, ErrorBlocks, EventRow, HealthTile, HealthTiles, InputEvent,
+    InspectorPane, Link, PageHeader, PanelSection, SectionLabel, Skeleton, StackedBar, TextField,
+    TextFieldState, TileNote, events_count, events_empty,
 };
 use crate::screens::edit::{EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{ScreenEvent, edit_item};
 use crate::theme::{
-    ASIDE_WIDTH, ActiveTheme, FONT_MONO, ICON, NAMESPACE_AGE_WIDTH, NAMESPACE_CONTENT_AGE,
-    NAMESPACE_CONTENT_NAME, NAMESPACE_EVENT_AGE, NAMESPACE_EVENT_LINES, NAMESPACE_FILTER_WIDTH,
-    NAMESPACE_KIND_WIDTH, NAMESPACE_NAME_WIDTH, NAMESPACE_USAGE_BAR, NAMESPACE_USAGE_LABEL,
-    Palette, RADIUS, ROW_TABLE, ROW_TABLE_MAX, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5,
-    SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
+    ASIDE_WIDTH, ActiveTheme, FONT_MONO, ICON, NAMESPACE_CONTENT_AGE, NAMESPACE_CONTENT_NAME,
+    NAMESPACE_FILTER_WIDTH, NAMESPACE_USAGE_BAR, NAMESPACE_USAGE_LABEL, Palette, ROW_TABLE,
+    ROW_TABLE_MAX, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_8, TEXT_BODY,
+    TEXT_MONO, TEXT_SMALL,
 };
 
 const KICKER: &str = "Namespace";
 const SHORT_KICKER: &str = "ns";
 const ACTIONS: &str = "namespace-actions";
-const NEEDS_ATTENTION: &str = "Needs attention";
-const NOTHING: &str = "Nothing needs attention in this namespace.";
 const CONTENTS: &str = "Contents";
 const FILTER: &str = "Filter by name";
 const NO_MATCH: &str = "Nothing in this namespace matches the filter.";
@@ -45,10 +42,11 @@ const USAGE: &str = "Usage";
 const CPU: &str = "CPU";
 const MEMORY: &str = "Memory";
 const QUOTA: &str = "Quota";
-const LABELS: &str = "Labels";
 const POLICIES: &str = "Network policies";
-const EVENTS: &str = "Recent events";
-const ALL: &str = "All";
+const EVENTS: &str = "Events";
+const ALL: &str = "All →";
+const INSPECTOR_ID: &str = "namespace-inspector";
+const EVENT_ROW: &str = "namespace-event";
 const NONE: &str = "None";
 const LOADING: &str = "Loading…";
 const MANAGED_BY: &str = "managed by ";
@@ -77,13 +75,6 @@ impl EventEmitter<ScreenEvent> for NamespaceScreen {}
 impl Focusable for NamespaceScreen {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
-    }
-}
-
-fn status_color(palette: &Palette, status: Status) -> gpui::Hsla {
-    match status {
-        Status::Ok => palette.fg2,
-        other => palette.status(other),
     }
 }
 
@@ -267,33 +258,6 @@ impl NamespaceScreen {
         HealthTiles::new(tiles).into_any_element()
     }
 
-    fn attention(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let rows: Vec<AnyElement> = self
-            .page
-            .attention
-            .iter()
-            .enumerate()
-            .map(|(ix, problem)| attention_row(ix, problem, palette, cx))
-            .collect();
-        let body: AnyElement = if rows.is_empty() {
-            div()
-                .px(SPACE_8)
-                .py(SPACE_5)
-                .text_size(TEXT_BODY)
-                .text_color(palette.mute)
-                .child(NOTHING)
-                .into_any_element()
-        } else {
-            div().flex().flex_col().children(rows).into_any_element()
-        };
-        div()
-            .flex()
-            .flex_col()
-            .child(section_title(NEEDS_ATTENTION, None))
-            .child(div().border_t(RULE).border_color(palette.line).child(body))
-            .into_any_element()
-    }
-
     fn contents(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let query = self.filter.read(cx).value().to_string();
         let filtering = !query.trim().is_empty();
@@ -451,6 +415,12 @@ impl NamespaceScreen {
             .into_any_element()
     }
 
+    fn open_issue(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if let Some(issue) = self.page.issues.get(ix) {
+            cx.emit(Command::OpenResource(issue.target.clone()));
+        }
+    }
+
     fn aside(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let detail = self.page.detail.as_ref();
         let cpu = self.page.cpu();
@@ -465,45 +435,42 @@ impl NamespaceScreen {
                     .children(lines)
                     .into_any_element()
             });
-            div()
-                .flex()
-                .flex_col()
-                .gap(SPACE_4)
-                .px(SPACE_6)
-                .pb(SPACE_6)
+            PanelSection::new(INSPECTOR_ID, USAGE)
                 .child(usage_row(CPU, &cpu, &cpu.cpu_label(), palette))
                 .child(usage_row(MEMORY, &memory, &memory.memory_label(), palette))
                 .child(aside_row(QUOTA, quota, palette))
         });
         let labels = self.page.namespace.as_ref().map(|namespace| {
-            let chips: Vec<AnyElement> = namespace
+            let labels: Vec<String> = namespace
                 .labels
                 .iter()
-                .map(|(key, value)| chip(&format!("{key}={value}"), palette))
+                .map(|(key, value)| format!("{key}={value}"))
                 .collect();
-            div()
-                .flex()
-                .flex_wrap()
-                .gap(SPACE_2)
-                .px(SPACE_6)
-                .pb(SPACE_6)
-                .when(chips.is_empty(), |row| {
-                    row.text_color(palette.mute).child(NONE)
-                })
-                .children(chips)
+            PanelSection::labels(INSPECTOR_ID, labels)
         });
         let policies = detail.map(|detail| {
             let lines = fallback(&detail.policies, palette)
                 .unwrap_or_else(|| policy_lines(&detail.policies.items, palette));
-            div()
-                .px(SPACE_6)
-                .pb(SPACE_6)
-                .font_family(FONT_MONO)
-                .text_size(TEXT_MONO)
-                .text_color(palette.fg2)
-                .child(lines)
+            PanelSection::new(INSPECTOR_ID, POLICIES)
+                .count(detail.policies.items.len().to_string())
+                .child(
+                    div()
+                        .font_family(FONT_MONO)
+                        .text_size(TEXT_SMALL)
+                        .text_color(palette.fg2)
+                        .child(lines),
+                )
         });
-        let events = self.events(palette, cx);
+        let issues: Vec<Issue> = self
+            .page
+            .issues
+            .iter()
+            .map(|issue| issue.issue.clone())
+            .collect();
+        let screen = cx.weak_entity();
+        let blocks = ErrorBlocks::new(issues).on_open(move |ix, _, cx| {
+            screen.update(cx, |this, cx| this.open_issue(ix, cx)).ok();
+        });
         div()
             .id("namespace-aside")
             .size_full()
@@ -512,56 +479,44 @@ impl NamespaceScreen {
             .border_color(palette.line)
             .bg(palette.panel)
             .text_size(TEXT_BODY)
-            .when_some(usage, |aside, usage| {
-                aside.child(block(palette).child(aside_label(USAGE)).child(usage))
-            })
-            .when_some(labels, |aside, labels| {
-                aside.child(block(palette).child(aside_label(LABELS)).child(labels))
-            })
-            .when_some(policies, |aside, policies| {
-                aside.child(block(palette).child(aside_label(POLICIES)).child(policies))
-            })
-            .child(events)
+            .child(blocks)
+            .children(usage)
+            .children(labels)
+            .children(policies)
+            .child(self.events(cx))
             .into_any_element()
     }
 
-    fn events(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn events(&self, cx: &mut Context<Self>) -> PanelSection {
         let total = self.page.events.len();
-        let all = Link::new("namespace-all-events", format!("{ALL} {total}"))
+        let recent = self.page.recent_events();
+        let all = Link::new("namespace-all-events", ALL)
             .on_click(cx.listener(|this, _, _, cx| this.open_list(Page::Events, EVENT_LIST, cx)));
-        let rows: Vec<AnyElement> = self
-            .page
-            .recent_events()
+        let screen = cx.weak_entity();
+        let rows: Vec<EventRow> = recent
             .iter()
             .enumerate()
-            .map(|(ix, event)| event_row(ix, event, palette, cx))
+            .map(|(ix, event)| {
+                let screen = screen.clone();
+                EventRow::new(PodEvent::from(event)).on_click(
+                    format!("{EVENT_ROW}-{ix}"),
+                    move |_, cx| {
+                        screen.update(cx, |this, cx| this.open_event(ix, cx)).ok();
+                    },
+                )
+            })
             .collect();
-        let title = div()
-            .flex()
-            .items_center()
-            .px(SPACE_6)
-            .pt(SPACE_7)
-            .pb(SPACE_3)
-            .child(SectionLabel::new(EVENTS))
-            .child(div().flex_1())
-            .when(total > 0, |row| row.child(all));
-        div()
-            .flex()
-            .flex_col()
-            .child(title)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(SPACE_3)
-                    .px(SPACE_6)
-                    .pb(SPACE_7)
-                    .when(rows.is_empty(), |list| {
-                        list.text_color(palette.mute).child(NONE)
-                    })
-                    .children(rows),
-            )
-            .into_any_element()
+        let section =
+            PanelSection::new(INSPECTOR_ID, EVENTS).count(events_count(recent.len(), total));
+        let section = if total > 0 {
+            section.trailing(all)
+        } else {
+            section
+        };
+        if rows.is_empty() {
+            return section.child(events_empty(cx.palette()));
+        }
+        section.child(div().flex().flex_col().gap(SPACE_4).children(rows))
     }
 }
 
@@ -583,70 +538,6 @@ fn section_title(title: &'static str, count: Option<String>) -> gpui::Div {
             )
         })
         .child(div().flex_1())
-}
-
-fn attention_row(
-    ix: usize,
-    problem: &Problem,
-    palette: &Palette,
-    cx: &mut Context<NamespaceScreen>,
-) -> AnyElement {
-    let target = problem.target.clone();
-    let selector = row_selector("namespace-attention", ix);
-    div()
-        .debug_selector(move || selector)
-        .id(("namespace-attention", ix))
-        .flex()
-        .items_center()
-        .gap(SPACE_6)
-        .h(ROW_TABLE_MAX)
-        .px(SPACE_8)
-        .border_b(RULE)
-        .border_color(palette.line)
-        .text_size(TEXT_BODY)
-        .cursor_pointer()
-        .hover(|style| style.bg(palette.hover))
-        .on_click(cx.listener(move |_, _, _, cx| {
-            cx.emit(Command::OpenResource(target.clone()));
-        }))
-        .child(StatusGlyph::new(problem.status))
-        .child(
-            div()
-                .w(NAMESPACE_KIND_WIDTH)
-                .flex_none()
-                .truncate()
-                .text_color(palette.mute)
-                .child(problem.target.kind.clone()),
-        )
-        .child(
-            div()
-                .w(NAMESPACE_NAME_WIDTH)
-                .flex_none()
-                .truncate()
-                .font_family(FONT_MONO)
-                .text_size(TEXT_MONO)
-                .child(problem.target.name.clone()),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_color(palette.fg2)
-                .child(problem.message.clone()),
-        )
-        .child(
-            div()
-                .w(NAMESPACE_AGE_WIDTH)
-                .flex_none()
-                .flex()
-                .justify_end()
-                .font_family(FONT_MONO)
-                .text_size(TEXT_SMALL)
-                .text_color(palette.mute)
-                .child(age(problem.age)),
-        )
-        .into_any_element()
 }
 
 fn content_row(
@@ -713,22 +604,6 @@ fn content_row(
         .into_any_element()
 }
 
-fn block(palette: &Palette) -> gpui::Div {
-    div()
-        .flex()
-        .flex_col()
-        .border_b(RULE)
-        .border_color(palette.line)
-}
-
-fn aside_label(text: &'static str) -> impl IntoElement {
-    div()
-        .px(SPACE_6)
-        .pt(SPACE_7)
-        .pb(SPACE_3)
-        .child(SectionLabel::new(text))
-}
-
 fn aside_row(label: &'static str, value: impl IntoElement, palette: &Palette) -> impl IntoElement {
     div()
         .flex()
@@ -762,7 +637,7 @@ fn usage_row(
             .w_full()
             .flex()
             .bg(palette.line2)
-            .child(div().h_full().w(relative(share)).bg(palette.fg2))
+            .child(div().h_full().w(relative(share)).bg(palette.acc))
     });
     let value = div()
         .flex()
@@ -806,65 +681,6 @@ fn policy_lines(policies: &[Policy], palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
-fn chip(text: &str, palette: &Palette) -> AnyElement {
-    div()
-        .px(SPACE_3)
-        .py(SPACE_1)
-        .rounded(RADIUS)
-        .bg(palette.raise)
-        .font_family(FONT_MONO)
-        .text_size(TEXT_LABEL)
-        .text_color(palette.fg2)
-        .child(text.to_owned())
-        .into_any_element()
-}
-
-fn event_row(
-    ix: usize,
-    event: &Event,
-    palette: &Palette,
-    cx: &mut Context<NamespaceScreen>,
-) -> AnyElement {
-    let message = div()
-        .id(("namespace-event-message", ix))
-        .debug_selector(move || format!("namespace-event-message-{ix}"))
-        .text_color(palette.fg2)
-        .line_clamp(NAMESPACE_EVENT_LINES)
-        .text_ellipsis()
-        .tooltip(Tooltip::text(event.message.clone()))
-        .child(event.message.clone());
-    div()
-        .id(("namespace-event", ix))
-        .debug_selector(move || format!("namespace-event-{ix}"))
-        .cursor_pointer()
-        .on_click(cx.listener(move |this, _, _, cx| this.open_event(ix, cx)))
-        .flex()
-        .gap(SPACE_4)
-        .text_size(TEXT_MONO)
-        .line_height(relative(crate::theme::LINE_PROSE))
-        .child(
-            div()
-                .w(NAMESPACE_EVENT_AGE)
-                .flex_none()
-                .font_family(FONT_MONO)
-                .text_size(TEXT_SMALL)
-                .text_color(palette.mute)
-                .child(age(event.age)),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(
-                    div()
-                        .text_color(status_color(palette, event.status))
-                        .child(event.reason.clone()),
-                )
-                .child(message),
-        )
-        .into_any_element()
-}
-
 impl Render for NamespaceScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
@@ -895,11 +711,9 @@ impl Render for NamespaceScreen {
         }
         let main = main
             .child(self.tiles(&palette, cx))
-            .child(self.attention(&palette, cx))
             .child(self.contents(&palette, cx))
             .child(div().h(SPACE_8));
-        let aside =
-            InspectorPane::new("namespace-inspector", self.aside(&palette, cx)).width(ASIDE_WIDTH);
+        let aside = InspectorPane::new(INSPECTOR_ID, self.aside(&palette, cx)).width(ASIDE_WIDTH);
         root.child(main).child(aside)
     }
 }

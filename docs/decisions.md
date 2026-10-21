@@ -474,3 +474,26 @@ Settled; change only with a new entry that says why.
     after its cards. The status bar shows the problem counts, the Kubernetes version of the
     selected cluster, refresh and the cluster switcher; the connected-clusters, Flux-ready and
     fetched texts are gone.
+50. **One section system for every side panel** (design v3 `PodList`, `Workload`, `Kustomization`,
+    `Namespace`, `ClusterOverview` and `Split`; product owner; supersedes 46 and the condition
+    placement in 48): every side panel (pod, node, resource, custom resource and event
+    inspectors, the workload and Flux object panels, the namespace aside, the API server 5xx
+    drill-in and Loco applications) is built from `kit::PanelSection`: a 30px header with a
+    chevron, the label, a short count and optional links or filters on the right, the body
+    indented under the label, and a rule only between sections. Whether a section is open is
+    saved per panel and label in `AppSettings::open_sections` next to the inspector widths, so a
+    collapsed Events section stays collapsed for every pod. Problems are shown only when there
+    is one, as `kit::ErrorBlocks` at the top of the panel: a status-coloured left bar, the reason
+    in colour, the raw Kubernetes message, then one muted line naming the object
+    (`flock_core::issue::Issue`, built by each model's `issues()`/`issue()`). The condition line
+    under Deployment and Flux names is gone, and so are `ConditionLine` and the What's wrong
+    block; split panes show the same blocks under each name. The namespace page's Needs
+    attention list became the aside's error blocks (a problem without a Kubernetes reason shows
+    its message in the reason line), and the API panel's Related objects became error blocks
+    (a slow webhook has no reported reason, so its name stands in). Labels everywhere are gray
+    `kit::LabelChips`. Every event list, including the Deployment screen's Events tab, uses
+    `kit::EventRow`: age, the reason in colour (muted for Normal) with `×count`, and the full
+    message underneath. An empty Events section reads "No events in the last 1h": Flock keeps
+    what the cluster returns (newest 1000), and Kubernetes keeps events for 1h by default. The
+    pod panel drops its status line and shows the last termination as plain container rows;
+    env-var notes are terse facts instead of a boxed sentence.

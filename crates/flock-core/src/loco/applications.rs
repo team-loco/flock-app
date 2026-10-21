@@ -3,11 +3,13 @@ use std::time::Duration;
 
 use super::Workspace;
 use crate::filter::{FilterSpec, TextFilter};
+use crate::issue::{Issue, object_line};
 use crate::time::age;
 use crate::{ClusterId, ResourceRef, Seen, Status, Uid};
 
 const MISSING: &str = "—";
 const SEPARATOR: &str = " · ";
+const APPLICATION: &str = "Application";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppPhase {
@@ -91,10 +93,12 @@ pub struct Degraded {
 }
 
 impl Degraded {
-    pub fn summary(&self) -> String {
-        let mut parts = vec!["Degraded".to_owned(), self.reason.clone()];
-        parts.extend(self.since.map(|since| format!("since {}", age(since))));
-        parts.join(SEPARATOR)
+    pub fn issue(&self, status: Status, application: &str) -> Issue {
+        let object = object_line([
+            Some(format!("{APPLICATION} {application}")),
+            self.since.map(|since| format!("since {}", age(since))),
+        ]);
+        Issue::new(status, self.reason.clone(), self.message.clone(), object)
     }
 }
 
@@ -498,10 +502,9 @@ pub(crate) mod tests {
             message: String::new(),
             since: Some(Duration::from_secs(360)),
         };
-        assert_eq!(
-            degraded.summary(),
-            "Degraded · CreateContainerConfigError · since 6m"
-        );
+        let issue = degraded.issue(Status::Err, "checkout");
+        assert_eq!(issue.reason, "CreateContainerConfigError");
+        assert_eq!(issue.object, "Application checkout · since 6m");
     }
 
     #[test]

@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use crate::cluster::{ClusterDetail, Namespace};
 use crate::events::Event;
 use crate::home::Problem;
+use crate::issue::{Issue, named};
 use crate::overview::{WorkloadHealth, plural};
 use crate::related::{Group, Related};
 use crate::resources::ResourceKind;
@@ -207,11 +208,48 @@ impl Tile {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NamespaceIssue {
+    pub target: ResourceRef,
+    pub issue: Issue,
+}
+
+impl NamespaceIssue {
+    fn of(problem: &Problem, detail: Option<&ClusterDetail>) -> Self {
+        let target = &problem.target;
+        let diagnosis = detail.and_then(|detail| {
+            let kind = ResourceKind::ALL
+                .into_iter()
+                .find(|kind| kind.name() == target.kind)?;
+            detail
+                .resources
+                .get(&kind)?
+                .iter()
+                .find(|row| {
+                    target.namespace.as_deref() == Some(row.namespace.as_str())
+                        && row.name == target.name
+                })?
+                .diagnosis
+                .as_ref()
+        });
+        let object = named(&target.kind, &target.name, Some(problem.age));
+        let issue = match diagnosis {
+            Some(diagnosis) => Issue::from_diagnosis(problem.status, diagnosis, object),
+            None => Issue::new(problem.status, problem.message.clone(), "", object),
+        };
+        Self {
+            target: target.clone(),
+            issue,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NamespacePage {
     pub target: Option<ResourceRef>,
     pub namespace: Option<Namespace>,
     pub attention: Vec<Problem>,
+    pub issues: Vec<NamespaceIssue>,
     pub groups: Vec<Group>,
     pub events: Vec<Event>,
     pub detail: Option<NamespaceDetail>,
@@ -301,13 +339,17 @@ impl NamespacePage {
         let unready = detail
             .map(|d| d.overview.unready_services.as_slice())
             .unwrap_or_default();
-        let attention = problems
+        let attention: Vec<Problem> = problems
             .iter()
             .chain(unready)
             .filter(here)
             .cloned()
             .collect();
         let unready_services = unready.iter().filter(here).count();
+        let issues = attention
+            .iter()
+            .map(|problem| NamespaceIssue::of(problem, detail))
+            .collect();
         let managed_by = namespace
             .as_ref()
             .and_then(|n| crate::flux::managed_by(&target.cluster, &n.labels));
@@ -315,6 +357,7 @@ impl NamespacePage {
             target: Some(target.clone()),
             namespace,
             attention,
+            issues,
             groups,
             events,
             detail: detail.and_then(|d| d.namespace_detail(name)).cloned(),
@@ -628,6 +671,55 @@ mod tests {
     #[test]
     fn only_this_namespaces_problems_need_attention() {
         assert_eq!(page().attention.len(), 2);
+    }
+
+    #[test]
+    fn issues_use_the_resource_diagnosis_and_fall_back_to_the_problem_message() {
+        let mut detail = detail();
+        let row = crate::resources::Resource {
+            namespace: NS.into(),
+            name: "checkout-api".into(),
+            uid: crate::Uid::default(),
+            status: Status::Err,
+            cells: Vec::new(),
+            age: Duration::ZERO,
+            yaml: String::new(),
+            labels: BTreeMap::new(),
+            conditions: Vec::new(),
+            diagnosis: Some(crate::Diagnosis::new("CrashLoopBackOff", "back-off 5m0s")),
+        };
+        detail.resources.insert(ResourceKind::Deployment, vec![row]);
+        let mut service = problem(NS, Status::Warn);
+        service.target.kind = "Service".into();
+        service.message = "1 of 3 endpoints not ready".into();
+        let problems = [problem(NS, Status::Err), service];
+        let page = NamespacePage::build(&target(), Some(&detail), &problems);
+        let issues: Vec<(&str, &str, &str)> = page
+            .issues
+            .iter()
+            .map(|i| {
+                (
+                    i.issue.reason.as_str(),
+                    i.issue.message.as_str(),
+                    i.issue.object.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            issues,
+            [
+                (
+                    "CrashLoopBackOff",
+                    "back-off 5m0s",
+                    "Deployment checkout-api · 3h"
+                ),
+                (
+                    "1 of 3 endpoints not ready",
+                    "",
+                    "Service checkout-api · 3h"
+                ),
+            ]
+        );
     }
 
     #[test]
