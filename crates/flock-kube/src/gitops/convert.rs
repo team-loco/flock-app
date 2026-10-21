@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use flock_core::diagnosis::needs_diagnosis;
 use flock_core::flux::{
-    FluxDetail, HelmDetail, HelmRevision, HistoryEntry, ManagedObject, Phase, Revision, Sentence,
+    FluxDetail, HelmDetail, HelmRevision, HistoryEntry, ManagedObject, Phase, Revision,
     SourceDetail, SpecRow,
 };
 use flock_core::{ClusterId, Condition, Diagnosis, FluxKey, FluxKind, FluxObject, Status, Uid};
@@ -26,13 +26,10 @@ const VALUES_MAX: usize = 40;
 const DEFAULT_BRANCH: &str = "master";
 const ANY_VERSION: &str = "*";
 const LATEST_VERSION: &str = "latest version";
-const DEPLOYED: &str = "deployed";
 const SUCCEEDED_SUFFIX: &str = "Succeeded";
 const UID_POINTER: &str = "/metadata/uid";
 const MANAGED_FIELDS: &str = "/metadata/managedFields";
 const LABELS_POINTER: &str = "/metadata/labels";
-const SUSPENDED_SENTENCE: &str =
-    "Reconciliation is suspended, so Flux applies nothing here until it is resumed.";
 
 #[derive(Clone, Debug)]
 pub struct Parsed {
@@ -271,7 +268,6 @@ pub fn flux_object(parsed: &Parsed, inputs: Inputs<'_>) -> Option<FluxObject> {
     let history = inputs
         .history
         .unwrap_or_else(|| reconcile_history(parsed, now));
-    let sentence = sentence(parsed, &summary, applied.as_ref());
     let detail = detail(parsed, now, inputs.releases, inputs.drift);
     let uid = parsed.uid().map(Uid::new).unwrap_or_default();
     let labels = parsed.labels();
@@ -282,7 +278,6 @@ pub fn flux_object(parsed: &Parsed, inputs: Inputs<'_>) -> Option<FluxObject> {
         key,
         uid,
         phase,
-        sentence,
         applied,
         last_healthy,
         source,
@@ -383,67 +378,6 @@ fn source_key(parsed: &Parsed, objects: &[Parsed], cluster: &ClusterId) -> Optio
         found = source(found, objects)?;
     }
     key(cluster, found)
-}
-
-fn sentence(parsed: &Parsed, summary: &Summary, applied: Option<&Revision>) -> Sentence {
-    match summary.status {
-        flock_flux::Status::Ok => Sentence::text(ready_sentence(parsed, applied)),
-        flock_flux::Status::Suspended => Sentence::text(SUSPENDED_SENTENCE),
-        flock_flux::Status::Warn => problem_sentence(summary),
-        flock_flux::Status::Err => problem_sentence(summary),
-        flock_flux::Status::Progress => problem_sentence(summary),
-        flock_flux::Status::Offline => problem_sentence(summary),
-    }
-}
-
-fn problem_sentence(summary: &Summary) -> Sentence {
-    let detail = summary
-        .detail
-        .as_deref()
-        .and_then(|detail| detail.lines().next())
-        .filter(|line| !line.is_empty());
-    match detail {
-        Some(line) => Sentence::text(format!("{} {line}", summary.sentence)),
-        None => Sentence::text(summary.sentence.clone()),
-    }
-}
-
-fn ready_sentence(parsed: &Parsed, applied: Option<&Revision>) -> String {
-    let revision = applied.map(|r| r.id.clone()).unwrap_or_default();
-    let age = applied
-        .map(|r| flock_core::time::age(r.age))
-        .unwrap_or_default();
-    match parsed.kind() {
-        ObjectKind::Kustomization => {
-            format!("Applied {revision} {age} ago; everything it manages is ready.")
-        }
-        ObjectKind::HelmRelease => {
-            let deployed = parsed
-                .object
-                .history
-                .iter()
-                .filter(|snapshot| snapshot.status == DEPLOYED)
-                .max_by_key(|snapshot| snapshot.version);
-            match deployed {
-                Some(snapshot) => format!(
-                    "Revision {} ({}) is deployed and every object it manages is ready.",
-                    snapshot.version, snapshot.chart_version
-                ),
-                None => "The release is deployed and every object it manages is ready.".to_owned(),
-            }
-        }
-        ObjectKind::GitRepository => format!(
-            "Fetched {} at {revision}; the artifact was stored {age} ago.",
-            git_reference(parsed)
-        ),
-        ObjectKind::HelmRepository => {
-            format!("Fetched the chart index; the artifact was stored {age} ago.")
-        }
-        ObjectKind::HelmChart => format!("Pulled {revision}; the artifact was stored {age} ago."),
-        ObjectKind::OCIRepository => {
-            format!("Pulled {revision}; the artifact was stored {age} ago.")
-        }
-    }
 }
 
 pub fn git_reference(parsed: &Parsed) -> String {
@@ -1021,17 +955,13 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn healthy_kustomization_reads_like_the_design() {
+    fn healthy_kustomization_converts_like_the_design() {
         let objects = [parsed(&git_repository())];
         let object = convert(&kustomization("apps", "True", "3e0ff8ae123b"), &objects);
         let Some(object) = object else {
             panic!("converted");
         };
         assert_eq!(object.phase, Phase::Ready);
-        assert_eq!(
-            object.sentence.plain(),
-            "Applied 3e0ff8a 2h ago; everything it manages is ready."
-        );
         assert_eq!(
             object.source,
             Some(FluxKey::new(
@@ -1083,10 +1013,6 @@ pub(super) mod tests {
             panic!("converted");
         };
         assert_eq!(object.phase, Phase::Failing);
-        assert_eq!(
-            object.sentence.plain(),
-            "Managed resources failed their health checks. timeout waiting for Deployment/web/podinfo"
-        );
         assert_eq!(object.history[0].status, Status::Err);
         assert_eq!(object.history[0].age_label(), "1h");
     }
@@ -1100,10 +1026,6 @@ pub(super) mod tests {
         assert_eq!(
             object.applied.as_ref().map(|r| r.id.as_str()),
             Some("3e0ff8a")
-        );
-        assert_eq!(
-            object.sentence.plain(),
-            "Fetched master at 3e0ff8a; the artifact was stored 4m ago."
         );
         assert_eq!(
             object.detail,

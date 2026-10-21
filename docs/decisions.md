@@ -449,3 +449,17 @@ Settled; change only with a new entry that says why.
     namespace is inspected (`flock_kube::namespace::WATCHES`); when RBAC denies them the section
     says why instead of failing the page. Services "with unready endpoints" wait for an
     EndpointSlice watch.
+48. **No generated summary sentences anywhere** (#345, product owner; overrides the v2 design;
+    amends 22, 37 and 46): Flock never writes a prose sentence that paraphrases data shown next to
+    it ("Running and ready on ip-10-4-30-5.", "All three pods are ready on revision 37.",
+    "Healthy elsewhere at the same revision."), on any page, for healthy and failing objects
+    alike, even where a design draws one. Headers show the name and status. When something is
+    wrong, the raw condition block (reason in the status colour, then the reported message) sits
+    directly under the status inside the header, without a "What's wrong" heading, so the reason
+    appears once; pod, node, resource and custom inspectors use the `kit::Inspector` condition
+    slot. Workload and Flux pages keep the raw condition line from 46 and show nothing when no
+    condition is reported. The Flux list's Status column shows the phase label, the Flux page's
+    Other clusters block lists each cluster's status and revision with a Compare link, and the
+    `Pod`, `Workload` and `Comparison` sentence builders and `FluxObject.sentence` are gone.
+    Condition messages wrap only at spaces, so resource refs such as `payments/stripe` stay whole
+    and copying returns the exact message.

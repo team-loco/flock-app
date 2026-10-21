@@ -239,7 +239,7 @@ impl WorkloadScreen {
             .mono()
             .status(workload.status(), workload.ready_label())
             .action(cluster)
-            .sentence(compact_status_line(workload))
+            .detail(compact_status_line(workload))
             .footer(full_view_link("workload-full-view", open));
         let fields: Vec<AnyElement> = workload
             .fields()
@@ -471,7 +471,7 @@ impl WorkloadScreen {
             .mono()
             .status(workload.status(), workload.ready_label())
             .action(self.menu.clone())
-            .sentence(status_line(workload))
+            .detail(status_line(workload))
             .meta(meta)
     }
 
@@ -1135,18 +1135,14 @@ fn unavailable_note(target: &ResourceRef) -> String {
     )
 }
 
-fn status_line(workload: &Workload) -> AnyElement {
-    match workload.condition_line() {
-        Some(line) => ConditionText::new(line).into_any_element(),
-        None => SelectableText::new(workload.sentence()).into_any_element(),
-    }
+fn status_line(workload: &Workload) -> Option<ConditionText> {
+    workload.condition_line().map(ConditionText::new)
 }
 
-fn compact_status_line(workload: &Workload) -> SelectableText {
-    let text = workload
+fn compact_status_line(workload: &Workload) -> Option<SelectableText> {
+    workload
         .condition_line()
-        .map_or_else(|| workload.sentence(), |line| line.compact());
-    SelectableText::new(text)
+        .map(|line| SelectableText::new(line.compact()))
 }
 
 #[cfg(test)]

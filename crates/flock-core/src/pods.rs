@@ -369,23 +369,6 @@ impl Pod {
             .or_else(|| failing(Status::Warn))
             .or_else(|| Some(Diagnosis::new(self.reason.clone(), String::new())))
     }
-
-    pub fn sentence(&self) -> String {
-        if self.status == Status::Ok {
-            let node = self.node_short().unwrap_or_default();
-            return format!("Running and ready on {node}.");
-        }
-        let worst = self
-            .containers
-            .iter()
-            .filter(|c| c.status != Status::Ok)
-            .max_by_key(|c| c.status);
-        match (self.status, worst) {
-            (Status::Progress, _) => format!("{}.", self.reason),
-            (_, Some(container)) => container_sentence(container),
-            (_, None) => format!("{}.", self.reason),
-        }
-    }
 }
 
 pub fn owner_segment(owner: &ResourceRef) -> String {
@@ -410,20 +393,6 @@ impl FailingElsewhere {
     pub fn label(&self) -> String {
         let count = self.count;
         format!("{FAILING_GLYPH} {count} failing in other namespaces {LINK_ARROW}")
-    }
-}
-
-fn container_sentence(container: &Container) -> String {
-    let name = &container.name;
-    let note = container.note.as_deref().unwrap_or(&container.reason);
-    match container.state {
-        ContainerState::Running => format!("{name} is running but not ready ({note})."),
-        ContainerState::Waiting if container.restarts > 0 => format!(
-            "{name} keeps crashing ({note}) and has restarted {} times.",
-            container.restarts
-        ),
-        ContainerState::Waiting => format!("{name} is waiting to start: {note}."),
-        ContainerState::Terminated => format!("{name} has terminated ({note})."),
     }
 }
 
@@ -691,38 +660,6 @@ mod tests {
         let mut pod = healthy("worker", "payments");
         pod.containers[0].restarts = 2;
         assert_eq!(pod.restart_status(), Some(Status::Warn));
-    }
-
-    #[test]
-    fn sentences_say_what_is_wrong_first() {
-        assert_eq!(
-            crashing().sentence(),
-            "api keeps crashing (exit 1) and has restarted 14 times."
-        );
-        assert_eq!(
-            pending().sentence(),
-            "trainer is waiting to start: unschedulable · nvidia.com/gpu: 1."
-        );
-        assert_eq!(
-            healthy("db-0", "payments").sentence(),
-            "Running and ready on ip-10-4-30-5."
-        );
-        let mut terminating = healthy("db-0", "payments");
-        terminating.status = Status::Progress;
-        terminating.reason = "Terminating".into();
-        assert_eq!(terminating.sentence(), "Terminating.");
-    }
-
-    #[test]
-    fn not_ready_containers_explain_the_probe() {
-        let mut pod = healthy("search-indexer-0", "search");
-        pod.status = Status::Warn;
-        pod.containers[0].status = Status::Warn;
-        pod.containers[0].note = Some("readiness 503".into());
-        assert_eq!(
-            pod.sentence(),
-            "web is running but not ready (readiness 503)."
-        );
     }
 
     #[test]

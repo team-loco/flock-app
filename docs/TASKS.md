@@ -128,3 +128,4 @@ Spec column points at `design/`.
 | TBL1 | table column dividers visible in light and dark; namespace CPU/memory in m/Mi below one core/GiB (#321); Namespace page event messages clamp to two lines with the full text on hover (#322) | claude | table-polish | done |
 | REL2 | Related shows HPAs, HTTPRoutes (when the Gateway API is installed) and PersistentVolumes from watches started while an object is open; PV and HPA detail pages (#256) | claude | related-watches | done |
 | MENUBAR3 | Menu bar status item shows a plain monospaced-digit count; unavailable cluster rows render grayed with no state text (#355) | claude | menubar-status-polish | done |
+| UI345 | No generated summary sentences; condition block in inspector headers; Shell disabled without a running container; toolbars keep their layout when filters, Clear and selection controls change (#344, #345, decision 48) | claude | ui-polish | done |

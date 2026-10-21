@@ -199,33 +199,6 @@ impl Revision {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Span {
-    Text(String),
-    Object(String),
-    Revision(String),
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Sentence(pub Vec<Span>);
-
-impl Sentence {
-    pub fn text(text: impl Into<String>) -> Self {
-        Self(vec![Span::Text(text.into())])
-    }
-
-    pub fn plain(&self) -> String {
-        self.0
-            .iter()
-            .map(|span| match span {
-                Span::Text(text) => text.as_str(),
-                Span::Object(name) => name.as_str(),
-                Span::Revision(id) => id.as_str(),
-            })
-            .collect()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ManagedObject {
     pub status: Status,
     pub kind: String,
@@ -438,7 +411,6 @@ pub struct FluxObject {
     pub uid: Uid,
     pub labels: BTreeMap<String, String>,
     pub phase: Phase,
-    pub sentence: Sentence,
     pub applied: Option<Revision>,
     pub last_healthy: Option<Revision>,
     pub source: Option<FluxKey>,
@@ -513,23 +485,6 @@ impl FluxObject {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PeerVerdict {
-    HealthyElsewhere,
-    HealthyAtAnotherRevision,
-    FailingEverywhere,
-}
-
-impl PeerVerdict {
-    pub const fn sentence(self) -> &'static str {
-        match self {
-            Self::HealthyElsewhere => "Healthy elsewhere at the same revision.",
-            Self::HealthyAtAnotherRevision => "Healthy elsewhere, at a different revision.",
-            Self::FailingEverywhere => "Failing on every cluster at this revision.",
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dependency {
     pub key: FluxKey,
@@ -542,7 +497,6 @@ pub struct FluxPage {
     pub peers: Vec<FluxObject>,
     pub dependencies: Vec<Dependency>,
     pub dependents: Vec<FluxObject>,
-    pub verdict: Option<PeerVerdict>,
 }
 
 impl Snapshot {
@@ -561,7 +515,6 @@ impl Snapshot {
         Some(FluxPage {
             peers: self.flux_peers(key).into_iter().cloned().collect(),
             dependents: self.flux_dependents(key).into_iter().cloned().collect(),
-            verdict: self.peer_verdict(key),
             dependencies,
             object,
         })
@@ -599,31 +552,6 @@ impl Snapshot {
             .filter(|object| object.source.as_ref() == Some(source))
             .collect()
     }
-
-    pub fn peer_verdict(&self, key: &FluxKey) -> Option<PeerVerdict> {
-        let object = self.flux_object(key)?;
-        if object.status() == Status::Ok {
-            return None;
-        }
-        let applied = object.applied.as_ref()?;
-        let peers = self.flux_peers(key);
-        let same_revision: Vec<_> = peers
-            .into_iter()
-            .filter(|peer| peer.applied.as_ref().map(|r| &r.id) == Some(&applied.id))
-            .collect();
-        if same_revision.is_empty() {
-            let healthy_elsewhere = self
-                .flux_peers(key)
-                .iter()
-                .any(|peer| peer.status() == Status::Ok);
-            return healthy_elsewhere.then_some(PeerVerdict::HealthyAtAnotherRevision);
-        }
-        if same_revision.iter().any(|peer| peer.status() == Status::Ok) {
-            Some(PeerVerdict::HealthyElsewhere)
-        } else {
-            Some(PeerVerdict::FailingEverywhere)
-        }
-    }
 }
 
 pub fn managed_by(cluster: &ClusterId, labels: &BTreeMap<String, String>) -> Option<ResourceRef> {
@@ -655,7 +583,6 @@ pub(crate) mod tests {
             uid: Uid::default(),
             key: FluxKey::new(cluster, FluxKind::Kustomization, "flux-system", "apps"),
             phase,
-            sentence: Sentence::default(),
             applied: Some(Revision::new(revision, Duration::from_secs(MINUTE))),
             last_healthy: None,
             source: None,
@@ -841,41 +768,6 @@ pub(crate) mod tests {
             .map(|peer| peer.key.cluster.as_str())
             .collect();
         assert_eq!(peers, ["staging", "dev", "west"]);
-        assert_eq!(
-            snapshot.peer_verdict(&key),
-            Some(PeerVerdict::HealthyElsewhere)
-        );
-    }
-
-    #[test]
-    fn verdicts_need_an_unhealthy_object_and_same_revision_peers() {
-        let failing_everywhere = flock(vec![
-            object("east", Phase::Failing, "a41e07c"),
-            object("west", Phase::Failing, "a41e07c"),
-        ]);
-        let east = FluxKey::new("east", FluxKind::Kustomization, "flux-system", "apps");
-        assert_eq!(
-            failing_everywhere.peer_verdict(&east),
-            Some(PeerVerdict::FailingEverywhere)
-        );
-        let healthy = flock(vec![
-            object("east", Phase::Ready, "a41e07c"),
-            object("west", Phase::Ready, "a41e07c"),
-        ]);
-        assert_eq!(healthy.peer_verdict(&east), None);
-        let alone = flock(vec![
-            object("east", Phase::Failing, "a41e07c"),
-            object("west", Phase::Ready, "7c2d9e0"),
-        ]);
-        assert_eq!(
-            alone.peer_verdict(&east),
-            Some(PeerVerdict::HealthyAtAnotherRevision)
-        );
-        let nobody_healthy = flock(vec![
-            object("east", Phase::Failing, "a41e07c"),
-            object("west", Phase::Failing, "7c2d9e0"),
-        ]);
-        assert_eq!(nobody_healthy.peer_verdict(&east), None);
     }
 
     #[test]
@@ -951,15 +843,6 @@ pub(crate) mod tests {
             releases: vec![release(16, ""), release(15, "-a\n+b\n"), release(14, "")],
         };
         assert_eq!(detail.first_change(), Some(15));
-    }
-
-    #[test]
-    fn sentence_plain_text_joins_spans() {
-        let sentence = Sentence(vec![
-            Span::Object("checkout-api".into()),
-            Span::Text(" did not become ready.".into()),
-        ]);
-        assert_eq!(sentence.plain(), "checkout-api did not become ready.");
     }
 
     #[test]

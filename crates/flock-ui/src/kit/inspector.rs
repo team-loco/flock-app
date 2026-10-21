@@ -20,6 +20,7 @@ pub struct Inspector {
     title: SharedString,
     mono: bool,
     status: Option<(Status, SharedString)>,
+    condition: Option<AnyElement>,
     actions: Option<AnyElement>,
     width: Pixels,
     sections: Vec<(Option<SharedString>, AnyElement)>,
@@ -32,6 +33,7 @@ impl Inspector {
             title: title.into(),
             mono: false,
             status: None,
+            condition: None,
             actions: None,
             width: INSPECTOR,
             sections: Vec::new(),
@@ -45,6 +47,11 @@ impl Inspector {
 
     pub fn status(mut self, status: Status, label: impl Into<SharedString>) -> Self {
         self.status = Some((status, label.into()));
+        self
+    }
+
+    pub fn condition(mut self, condition: Option<impl IntoElement>) -> Self {
+        self.condition = condition.map(IntoElement::into_any_element);
         self
     }
 
@@ -98,7 +105,8 @@ impl RenderOnce for Inspector {
                         .text_size(TEXT_BODY)
                         .child(StatusText::new(status, label)),
                 )
-            });
+            })
+            .children(self.condition);
         let sections = self.sections.into_iter().map(|(label, content)| {
             div()
                 .flex()

@@ -16,12 +16,13 @@ use super::input::{
 };
 use super::{Kbd, popover};
 use crate::theme::{
-    ActiveTheme, CONTROL, FILTER_MIN, FILTER_WIDTH, FONT_MONO, MENU_MAX_HEIGHT, Palette, RADIUS,
-    ROW_TABLE, RULE, SPACE_4, SPACE_8, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, CONTROL, FILTER_MIN, FILTER_WIDTH, FONT_MONO, MATCH_NOTE, MENU_MAX_HEIGHT,
+    Palette, RADIUS, ROW_TABLE, RULE, SPACE_4, SPACE_8, TEXT_MONO, TEXT_SMALL,
 };
 
 const CLEAR: &str = "Clear";
 const REMOVE_TOKEN: &str = "×";
+const WIDEST_DIGIT: char = '0';
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilterEvent {
@@ -30,6 +31,19 @@ pub enum FilterEvent {
 
 pub fn chip_label(label: &str, count: usize) -> SharedString {
     format!("{label} {count}").into()
+}
+
+pub fn widest_label(label: &str, digits: usize) -> String {
+    let name = label.trim_end_matches(|c: char| c.is_ascii_digit());
+    if name.len() == label.len() {
+        return label.to_owned();
+    }
+    let count: String = std::iter::repeat_n(WIDEST_DIGIT, digits).collect();
+    format!("{name}{count}")
+}
+
+fn count_digits(label: &str) -> usize {
+    label.len() - label.trim_end_matches(|c: char| c.is_ascii_digit()).len()
 }
 
 pub fn match_note(shown: usize, total: usize) -> Option<String> {
@@ -51,6 +65,7 @@ pub struct FilterBar {
     scope: Option<AnyView>,
     aside: Option<AnyView>,
     chips: Vec<SharedString>,
+    chip_digits: usize,
     chip: usize,
     matches: Option<(usize, usize)>,
     query: TextFilter,
@@ -85,6 +100,7 @@ impl FilterBar {
             scope: None,
             aside: None,
             chips: Vec::new(),
+            chip_digits: 0,
             chip: 0,
             matches: None,
             query: TextFilter::default(),
@@ -243,6 +259,8 @@ impl FilterBar {
 
     pub fn set_chips(&mut self, chips: Vec<SharedString>, cx: &mut Context<Self>) {
         if self.chips != chips {
+            let digits = chips.iter().map(|chip| count_digits(chip)).max();
+            self.chip_digits = self.chip_digits.max(digits.unwrap_or_default());
             self.chip = self.chip.min(chips.len().saturating_sub(1));
             self.chips = chips;
             cx.notify();
@@ -421,17 +439,22 @@ impl Render for FilterBar {
             self.chips
                 .iter()
                 .fold(Segmented::new(format!("{}-chips", self.id)), |seg, chip| {
-                    seg.option(chip.clone())
+                    seg.reserved_option(chip.clone(), widest_label(chip, self.chip_digits))
                 })
                 .selected(self.chip)
                 .on_select(cx.listener(|this, ix: &usize, _, cx| this.select_chip(*ix, cx)))
         });
-        let clear = self.is_active().then(|| {
-            Button::new(format!("{}-clear", self.id), CLEAR)
-                .ghost()
-                .small()
-                .on_click(cx.listener(|this, _, window, cx| this.clear(window, cx)))
-        });
+        let active = self.is_active();
+        let slot = format!("{}-clear-slot", self.id);
+        let clear = div().debug_selector(move || slot).child(
+            div().when(!active, Styled::invisible).child(
+                Button::new(format!("{}-clear", self.id), CLEAR)
+                    .ghost()
+                    .small()
+                    .disabled(!active)
+                    .on_click(cx.listener(|this, _, window, cx| this.clear(window, cx))),
+            ),
+        );
         let note = self
             .matches
             .and_then(|(shown, total)| match_note(shown, total))
@@ -481,10 +504,19 @@ impl Render for FilterBar {
             .when_some(self.scope.clone(), ParentElement::child)
             .child(field)
             .children(chips)
+            .child(clear)
             .children(self.aside.clone())
-            .children(clear)
-            .child(div().flex_1())
-            .children(note)
+            .child(
+                div()
+                    .debug_selector(|| format!("{}-note", self.id))
+                    .ml_auto()
+                    .w(MATCH_NOTE)
+                    .flex_none()
+                    .flex()
+                    .justify_end()
+                    .whitespace_nowrap()
+                    .children(note),
+            )
     }
 }
 
@@ -496,6 +528,10 @@ mod tests {
     fn notes_only_a_narrowed_list() {
         assert_eq!(match_note(12, 48).as_deref(), Some("12 of 48"));
         assert_eq!(match_note(48, 48), None);
+        assert_eq!(widest_label("Running 3", 3), "Running 000");
+        assert_eq!(widest_label("Running 398", 3), "Running 000");
+        assert_eq!(widest_label("Warnings", 3), "Warnings");
+        assert_eq!(count_digits("All 412"), 3);
         assert_eq!(
             chip_label("Running", 398),
             SharedString::from("Running 398")

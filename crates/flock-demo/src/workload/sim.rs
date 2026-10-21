@@ -224,10 +224,6 @@ mod tests {
             Some("Available=True · MinimumReplicasAvailable")
         );
         assert_eq!(
-            workload.sentence(),
-            "All three pods are ready on revision 38."
-        );
-        assert_eq!(
             workload.events.first().map(|e| e.reason.as_str()),
             Some("DeploymentRollback")
         );

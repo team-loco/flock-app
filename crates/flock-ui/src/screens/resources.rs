@@ -23,8 +23,8 @@ use super::ScreenEvent;
 use crate::kit::{
     Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, EVENTS, EmptyState,
     EventList, FilterBar, FilterEvent, IconButton, Inspector, MenuItem, Presence, Select,
-    SelectEvent, ShowAll, Skeleton, Table, TableEvent, WHATS_WRONG, WhatsWrong, chip_label,
-    confirm, reason_cell, reason_tooltip, slide_in, slide_out,
+    SelectEvent, ShowAll, Skeleton, Table, TableEvent, WhatsWrong, chip_label, confirm,
+    reason_cell, reason_tooltip, slide_in, slide_out,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
@@ -549,11 +549,12 @@ impl ResourcesScreen {
             .mono()
             .width(inspector_width(self.kind))
             .status(row.status, subtitle)
+            .condition(
+                row.diagnosis
+                    .clone()
+                    .map(|diagnosis| WhatsWrong::new(row.status, diagnosis)),
+            )
             .actions(actions);
-        if let Some(diagnosis) = row.diagnosis.clone() {
-            inspector =
-                inspector.section(Some(WHATS_WRONG), WhatsWrong::new(row.status, diagnosis));
-        }
         if !row.conditions.is_empty() {
             inspector = inspector.section(Some(CONDITIONS), ConditionTable::new(&row.conditions));
         }

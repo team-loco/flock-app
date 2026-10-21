@@ -124,6 +124,7 @@ pub const MORE_BUTTON: Pixels = px(28.);
 pub const SEARCH_WIDTH: Pixels = px(180.);
 pub const FILTER_WIDTH: Pixels = px(390.);
 pub const FILTER_MIN: Pixels = px(240.);
+pub const MATCH_NOTE: Pixels = px(96.);
 pub const COLUMN_MIN: Pixels = px(32.);
 pub const COLUMN_HANDLE: Pixels = px(8.);
 pub const COLUMN_DIVIDER: Pixels = px(12.);
