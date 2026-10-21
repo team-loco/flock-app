@@ -5,6 +5,11 @@ const GIB: u64 = MIB * KIB;
 const BYTES_PER_MIB: u64 = MIB;
 const MILLIS_PER_CORE_F32: f32 = 1000.;
 const GIB_F32: f32 = 1024. * 1024. * 1024.;
+const MIB_PER_GIB_F32: f32 = 1024.;
+const WHOLE_UNIT: f32 = 1.;
+const MILLICORES: &str = "m";
+const MEBIBYTES: &str = "Mi";
+const BETWEEN: &str = " / ";
 
 pub const CPU_UNIT: &str = "cores";
 pub const MEMORY_UNIT: &str = "GiB";
@@ -49,6 +54,73 @@ pub fn memory_gib(gib: f32) -> String {
     memory_bytes((gib.max(0.) * GIB_F32) as u64)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Metric {
+    Cpu,
+    Memory,
+}
+
+impl Metric {
+    const fn unit(self) -> &'static str {
+        match self {
+            Self::Cpu => CPU_UNIT,
+            Self::Memory => MEMORY_UNIT,
+        }
+    }
+
+    const fn small_unit(self) -> &'static str {
+        match self {
+            Self::Cpu => MILLICORES,
+            Self::Memory => MEBIBYTES,
+        }
+    }
+
+    const fn small_per_unit(self) -> f32 {
+        match self {
+            Self::Cpu => MILLIS_PER_CORE_F32,
+            Self::Memory => MIB_PER_GIB_F32,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Amounts {
+    pub figures: String,
+    pub unit: Option<&'static str>,
+}
+
+impl Amounts {
+    pub fn labelled(&self) -> String {
+        match self.unit {
+            Some(unit) => format!("{} {unit}", self.figures),
+            None => self.figures.clone(),
+        }
+    }
+}
+
+pub fn amounts(metric: Metric, values: &[Option<f32>]) -> Amounts {
+    let largest = values
+        .iter()
+        .flatten()
+        .fold(0_f32, |most, &value| most.max(value));
+    let small = largest < WHOLE_UNIT;
+    let figures: Vec<String> = values
+        .iter()
+        .map(|value| match value {
+            None => NOT_MEASURED.to_owned(),
+            Some(value) if small => {
+                let scaled = value.max(0.) * metric.small_per_unit();
+                format!("{scaled:.0}{}", metric.small_unit())
+            }
+            Some(value) => fixed(*value),
+        })
+        .collect();
+    Amounts {
+        figures: figures.join(BETWEEN),
+        unit: (!small).then_some(metric.unit()),
+    }
+}
+
 pub fn times(count: u32) -> String {
     match count {
         1 => "once".into(),
@@ -85,6 +157,33 @@ mod tests {
         assert_eq!(memory_mib(768), "768 MiB");
         assert_eq!(memory_mib(2048), "2.0 GiB");
         assert_eq!(memory_gib(0.25), "256 MiB");
+    }
+
+    #[test]
+    fn small_amounts_read_in_millicores_and_mebibytes() {
+        let cpu = amounts(Metric::Cpu, &[Some(0.12), Some(0.066)]);
+        assert_eq!(cpu.figures, "120m / 66m");
+        assert_eq!(cpu.labelled(), "120m / 66m");
+        let memory = amounts(Metric::Memory, &[Some(0.25), Some(0.0625)]);
+        assert_eq!(memory.figures, "256Mi / 64Mi");
+        assert_eq!(amounts(Metric::Cpu, &[Some(0.004)]).figures, "4m");
+    }
+
+    #[test]
+    fn amounts_from_one_unit_read_in_cores_and_gibibytes() {
+        let cpu = amounts(Metric::Cpu, &[Some(1.25), Some(0.5)]);
+        assert_eq!(cpu.figures, "1.2 / 0.5");
+        assert_eq!(cpu.labelled(), "1.2 / 0.5 cores");
+        let memory = amounts(Metric::Memory, &[Some(2.6), Some(8.)]);
+        assert_eq!(memory.labelled(), "2.6 / 8.0 GiB");
+    }
+
+    #[test]
+    fn unmeasured_amounts_read_as_a_dash() {
+        let small = amounts(Metric::Cpu, &[None, Some(0.2)]);
+        assert_eq!(small.figures, "— / 200m");
+        let large = amounts(Metric::Memory, &[None, Some(3.)]);
+        assert_eq!(large.figures, "— / 3.0");
     }
 
     #[test]

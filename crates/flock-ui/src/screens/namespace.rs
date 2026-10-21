@@ -18,16 +18,17 @@ use gpui::{
 use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::kit::{
     Button, EmptyState, InputEvent, InspectorPane, Link, PageHeader, SectionLabel, Skeleton,
-    StatusGlyph, TextField, TextFieldState,
+    StatusGlyph, TextField, TextFieldState, Tooltip,
 };
 use crate::screens::EDIT_YAML;
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::theme::{
     ASIDE_WIDTH, ActiveTheme, FONT_MONO, ICON, NAMESPACE_AGE_WIDTH, NAMESPACE_CONTENT_AGE,
-    NAMESPACE_CONTENT_NAME, NAMESPACE_EVENT_AGE, NAMESPACE_FACT_GAP, NAMESPACE_FILTER_WIDTH,
-    NAMESPACE_KIND_WIDTH, NAMESPACE_NAME_WIDTH, NAMESPACE_USAGE_BAR, NAMESPACE_USAGE_LABEL,
-    Palette, RADIUS, ROW_TABLE, ROW_TABLE_MAX, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5,
-    SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
+    NAMESPACE_CONTENT_NAME, NAMESPACE_EVENT_AGE, NAMESPACE_EVENT_LINES, NAMESPACE_FACT_GAP,
+    NAMESPACE_FILTER_WIDTH, NAMESPACE_KIND_WIDTH, NAMESPACE_NAME_WIDTH, NAMESPACE_USAGE_BAR,
+    NAMESPACE_USAGE_LABEL, Palette, RADIUS, ROW_TABLE, ROW_TABLE_MAX, RULE, SPACE_1, SPACE_2,
+    SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_LABEL, TEXT_MONO,
+    TEXT_SMALL,
 };
 
 const KICKER: &str = "Namespace";
@@ -455,7 +456,8 @@ impl NamespaceScreen {
             .page
             .recent_events()
             .iter()
-            .map(|event| event_row(event, palette))
+            .enumerate()
+            .map(|(ix, event)| event_row(ix, event, palette))
             .collect();
         let title = div()
             .flex()
@@ -768,7 +770,15 @@ fn chip(text: &str, palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
-fn event_row(event: &Event, palette: &Palette) -> AnyElement {
+fn event_row(ix: usize, event: &Event, palette: &Palette) -> AnyElement {
+    let message = div()
+        .id(("namespace-event-message", ix))
+        .debug_selector(move || format!("namespace-event-message-{ix}"))
+        .text_color(palette.fg2)
+        .line_clamp(NAMESPACE_EVENT_LINES)
+        .text_ellipsis()
+        .tooltip(Tooltip::text(event.message.clone()))
+        .child(event.message.clone());
     div()
         .flex()
         .gap(SPACE_4)
@@ -792,7 +802,7 @@ fn event_row(event: &Event, palette: &Palette) -> AnyElement {
                         .text_color(status_color(palette, event.status))
                         .child(event.reason.clone()),
                 )
-                .child(div().text_color(palette.fg2).child(event.message.clone())),
+                .child(message),
         )
         .into_any_element()
 }

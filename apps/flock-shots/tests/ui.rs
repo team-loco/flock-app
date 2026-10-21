@@ -5,9 +5,10 @@ use flock_core::resources::{EVENT_LIST, POD_LIST};
 use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
+use flock_ui::kit::TOOLTIP_SELECTOR;
 use flock_ui::theme::{
-    ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SPACE_3, TAB_ENTER, TAB_LEAVE, TITLE_ROW,
-    TRAFFIC_LIGHTS_INSET,
+    ICON_BUTTON, INSPECTOR_IN, LINE_PROSE, NAMESPACE_EVENT_LINES, SIDEBAR, SPACE_3, TAB_ENTER,
+    TAB_LEAVE, TEXT_MONO, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
 };
 use gpui::Pixels;
 
@@ -1879,8 +1880,8 @@ fn a_row_click_still_selects_the_row_and_a_drag_in_a_cell_selects_its_text() -> 
     let mut ui = Ui::open(Screen::Events)?;
     let row = bounds_of(&mut ui, "events-row-1")?;
     let border = bounds_of(&mut ui, "events-resize-0")?;
-    let start = point(border.center().x + px(12.), row.center().y);
-    ui.drag_between(start, start + point(px(40.), px(0.)))?;
+    let start = point(border.right() + px(4.), row.center().y);
+    ui.drag_between(start, start + point(px(34.), px(0.)))?;
     assert!(ui.bounds("close-event").is_none());
     ui.press("cmd-c")?;
     let copied = ui.clipboard().unwrap_or_default();
@@ -1935,8 +1936,8 @@ fn text_selected_inside_a_selected_row_is_painted_with_its_own_colour() -> anyho
         ui.click("events-row-1")?;
         let row = bounds_of(&mut ui, "events-row-1")?;
         let border = bounds_of(&mut ui, "events-resize-0")?;
-        let start = point(border.center().x + px(12.), row.center().y);
-        ui.drag_between(start, start + point(px(40.), px(0.)))?;
+        let start = point(border.right() + px(4.), row.center().y);
+        ui.drag_between(start, start + point(px(34.), px(0.)))?;
         ui.press("cmd-c")?;
         assert_eq!(ui.clipboard().as_deref(), Some("deplo"));
         let palette = ui.read_app(|cx| *flock_ui::theme::ActiveTheme::palette(cx));
@@ -3030,6 +3031,68 @@ fn back_from_a_related_link_reopens_the_inspector_it_left() -> anyhow::Result<()
     assert_eq!(ui.state().location(), &deployment);
     ui.press("cmd-[")?;
     assert!(ui.bounds("resource-inspector-pane").is_some());
+    Ok(())
+}
+
+const HELM_LOG_LINES: usize = 40;
+const TOOLTIP_DELAY: std::time::Duration = std::time::Duration::from_millis(600);
+
+#[test]
+fn a_namespace_page_clamps_long_event_messages_and_shows_them_in_full_on_hover()
+-> anyhow::Result<()> {
+    let (mut ui, updates) = Ui::scripted(Screen::Namespace)?;
+    let target = ui
+        .state()
+        .location()
+        .detail()
+        .cloned()
+        .context("the namespace page has a target")?;
+    let message = (0..HELM_LOG_LINES)
+        .map(|line| format!("Last Helm logs: performing update for checkout-api step {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut snapshot = flock_demo::snapshot();
+    let detail = snapshot
+        .details
+        .get_mut(&target.cluster)
+        .context("the demo cluster has a detail")?;
+    let newest = detail
+        .events
+        .iter_mut()
+        .filter(|event| event.namespace.as_deref() == Some(target.name.as_str()))
+        .min_by_key(|event| event.age)
+        .context("the namespace has events")?;
+    newest.message.clone_from(&message);
+    let contents = flock_core::related::Group {
+        title: "Deployments".into(),
+        items: Vec::new(),
+        total: 0,
+        counts: flock_core::Counts::default(),
+        list: None,
+    };
+    detail.related.insert(
+        0,
+        flock_core::related::Related {
+            target,
+            groups: vec![contents],
+        },
+    );
+    updates.try_send(flock_core::Update::Snapshot(Box::new(snapshot)))?;
+    ui.settle()?;
+    let clamped = ui
+        .bounds("namespace-event-message-0")
+        .context("the newest event message renders")?;
+    let most =
+        (0..NAMESPACE_EVENT_LINES).fold(Pixels::ZERO, |height, _| height + TEXT_MONO * LINE_PROSE);
+    assert!(
+        clamped.size.height <= most,
+        "{:?} is taller than {:?}",
+        clamped.size.height,
+        most
+    );
+    ui.hover("namespace-event-message-0")?;
+    ui.advance_clock(TOOLTIP_DELAY)?;
+    assert!(ui.bounds(TOOLTIP_SELECTOR).is_some());
     Ok(())
 }
 

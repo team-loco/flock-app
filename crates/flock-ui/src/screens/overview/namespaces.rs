@@ -20,8 +20,7 @@ const RESTARTS_HIGH: u32 = 10;
 const FULL: f32 = 1.;
 const DESCENDING: &str = " ↓";
 const ASCENDING: &str = " ↑";
-const FOOTNOTE: &str =
-    "CPU in cores, memory in GiB · used / requested · bar fills at 100% of requests";
+const FOOTNOTE: &str = "CPU in cores (m below 1), memory in GiB (Mi below 1) · used / requested · bar fills at 100% of requests";
 
 #[derive(Clone, Copy)]
 enum Cell {

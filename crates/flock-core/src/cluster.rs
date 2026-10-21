@@ -9,7 +9,7 @@ use crate::nodes::{Node, NodeSummary};
 use crate::overview::{Capacity, Overview, WorkloadHealth};
 use crate::related::Related;
 use crate::resources::{Resource, ResourceKind};
-use crate::units::{self, CPU_UNIT, MEMORY_UNIT, NOT_MEASURED, WAITING_FOR_METRICS};
+use crate::units::{self, CPU_UNIT, MEMORY_UNIT, Metric, NOT_MEASURED, WAITING_FOR_METRICS};
 use crate::{Counts, Page, ResourceRef, Status};
 
 const CPU_NOTE: &str = "CPU in use by the pods in this namespace";
@@ -82,21 +82,16 @@ impl Namespace {
     }
 
     pub fn cpu_against_requests(&self) -> String {
-        against(self.cpu, self.cpu_requests)
+        units::amounts(Metric::Cpu, &[self.cpu, Some(self.cpu_requests)]).figures
     }
 
     pub fn memory_against_requests(&self) -> String {
-        against(self.memory, self.memory_requests)
+        units::amounts(Metric::Memory, &[self.memory, Some(self.memory_requests)]).figures
     }
 }
 
 fn share(used: Option<f32>, requested: f32) -> Option<f32> {
     used.filter(|_| requested > 0.).map(|used| used / requested)
-}
-
-fn against(used: Option<f32>, requested: f32) -> String {
-    let used = used.map_or_else(|| NOT_MEASURED.to_owned(), |used| format!("{used:.1}"));
-    format!("{used} / {requested:.1}")
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -346,8 +341,15 @@ mod tests {
         assert_eq!(search.cpu_against_requests(), "61.2 / 43.1");
         assert_eq!(search.cpu_share().map(|s| (s * 100.).round()), Some(142.));
         let unmeasured = namespace("new", Counts::default());
-        assert_eq!(unmeasured.memory_against_requests(), "— / 0.0");
+        assert_eq!(unmeasured.memory_against_requests(), "— / 0Mi");
         assert_eq!(unmeasured.memory_share(), None);
+    }
+
+    #[test]
+    fn small_namespace_usage_keeps_its_figures() {
+        let small = loaded("loco", 2, (0.004, 0.002), 0);
+        assert_eq!(small.cpu_against_requests(), "4m / 2m");
+        assert_eq!(small.cpu_share().map(|s| (s * 100.).round()), Some(200.));
     }
 
     #[test]
