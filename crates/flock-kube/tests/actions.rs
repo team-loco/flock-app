@@ -460,6 +460,15 @@ async fn http_get(port: u16) -> String {
     response
 }
 
+async fn assert_forward_torn_down(mut idle: tokio::net::TcpStream) {
+    let mut buffer = [0_u8; 1];
+    let read = tokio::time::timeout(WAIT, idle.read(&mut buffer)).await;
+    let Ok(closed) = read else {
+        panic!("open connection survived the forward being stopped");
+    };
+    assert!(!matches!(closed, Ok(read) if read > 0), "{closed:?}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn port_forward_a_service_then_stop_it() {
     let Some(harness) = Harness::start().await else {
@@ -482,14 +491,16 @@ async fn port_forward_a_service_then_stop_it() {
     let response = http_get(forward.local).await;
     assert!(response.starts_with("HTTP/1.0 200"), "{response}");
     assert!(response.contains("\"hostname\""), "{response}");
+    let Ok(idle) = tokio::net::TcpStream::connect(("127.0.0.1", forward.local)).await else {
+        panic!("connect to forward");
+    };
     harness.send(Command::StopPortForward {
         local: forward.local,
     });
     harness
         .snapshot_until(|snapshot| snapshot.forwards.is_empty())
         .await;
-    let refused = tokio::net::TcpStream::connect(("127.0.0.1", forward.local)).await;
-    assert!(refused.is_err());
+    assert_forward_torn_down(idle).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -510,20 +521,14 @@ async fn disconnect_closes_the_clusters_forwards() {
         panic!("forward listed");
     };
     assert!(http_get(forward.local).await.starts_with("HTTP/1.0 200"));
+    let Ok(idle) = tokio::net::TcpStream::connect(("127.0.0.1", forward.local)).await else {
+        panic!("connect to forward");
+    };
     harness.send(Command::Disconnect(cluster()));
     harness
         .snapshot_until(|snapshot| snapshot.forwards.is_empty())
         .await;
-    eventually(
-        "listener closed",
-        || async {
-            tokio::net::TcpStream::connect(("127.0.0.1", forward.local))
-                .await
-                .is_err()
-        },
-        |refused| *refused,
-    )
-    .await;
+    assert_forward_torn_down(idle).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
