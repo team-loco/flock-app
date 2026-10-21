@@ -237,7 +237,6 @@ pub const FLASH: Duration = Duration::from_millis(900);
 pub const TOAST_SUCCESS_TIMEOUT: Duration = Duration::from_secs(4);
 pub const TOAST_WARNING_TIMEOUT: Duration = Duration::from_secs(8);
 pub const TOAST_PROGRESS_TIMEOUT: Duration = Duration::from_secs(30);
-pub const TOAST_BORDER_OPACITY: f32 = 0.35;
 pub const SKELETON_SHIMMER: Duration = Duration::from_millis(1800);
 pub const SKELETON_SHIMMER_OPACITY: f32 = 0.35;
 pub const SKELETON_GRADIENT_ANGLE: f32 = 90.;
@@ -422,16 +421,6 @@ impl Palette {
             _ => self.tint(status),
         };
         tint.map_or(self.panel, |tint| crate::highlight::over(tint, self.panel))
-    }
-
-    pub fn toast_border(&self, status: Status) -> Hsla {
-        match status {
-            Status::Suspended | Status::Offline => self.line2,
-            _ => crate::highlight::over(
-                self.status(status).opacity(TOAST_BORDER_OPACITY),
-                self.toast_ground(status),
-            ),
-        }
     }
 }
 
