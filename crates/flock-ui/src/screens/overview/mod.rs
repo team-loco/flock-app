@@ -33,13 +33,13 @@ use gpui::{
 };
 
 use super::ScreenEvent;
-use crate::kit::{ActionMenu, Button, Link, MenuItem, SectionLabel, Segmented};
+use crate::kit::{
+    ActionMenu, Activate, Button, Link, MenuItem, SectionLabel, Segmented, problem_link,
+};
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, RULE, SPACE_3, SPACE_4, SPACE_5, SPACE_7, SPACE_8,
     TEXT_CONTROL, TEXT_SMALL,
 };
-
-type Activate = Rc<dyn Fn(&mut Window, &mut App)>;
 
 const CHANGES_BAND_WEIGHTS: [f32; 2] = [3., 2.];
 const LIVE: &str = "Live";
@@ -326,12 +326,12 @@ impl Render for OverviewScreen {
         let sections = [
             Some(header::render(&data, &palette, cx)),
             Some(summary::render(&data, &palette, cx)),
+            Some(charts::render(&data, self.range, &palette, cx)),
             weighted_band(changes_band, &CHANGES_BAND_WEIGHTS, &palette),
             band(pods::render(&data, &palette, cx), &palette),
             Some(namespaces::render(&data, self.sort, &palette, cx)),
             band(facts_band, &palette),
             Some(workloads::render(&data, &palette, cx)),
-            Some(charts::render(&data, self.range, &palette, cx)),
         ];
         let content = div()
             .flex()
@@ -447,20 +447,6 @@ fn head_row(label: &str, meta: Option<AnyElement>, link: Option<Link>) -> Div {
         .children(meta)
         .child(div().flex_1())
         .children(link)
-}
-
-fn problem_link(id: impl Into<SharedString>, content: Div, activate: Activate) -> Stateful<Div> {
-    let id: SharedString = id.into();
-    let selector = id.to_string();
-    content
-        .debug_selector(move || selector)
-        .id(ElementId::Name(id))
-        .cursor_pointer()
-        .hover(Styled::underline)
-        .on_click(move |_, window, cx| {
-            cx.stop_propagation();
-            activate(window, cx);
-        })
 }
 
 fn row_link(

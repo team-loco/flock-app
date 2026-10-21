@@ -570,7 +570,6 @@ pub const NAMESPACE_USAGE_LABEL: Pixels = px(70.);
 pub const NAMESPACE_USAGE_BAR: Pixels = px(4.);
 pub const NAMESPACE_EVENT_AGE: Pixels = px(30.);
 pub const NAMESPACE_EVENT_LINES: usize = 2;
-pub const NAMESPACE_FACT_GAP: Pixels = px(20.);
 
 pub const PROBLEM_CAUSES_WIDTH: Pixels = px(360.);
 pub const PROBLEM_HISTOGRAM: Pixels = px(84.);

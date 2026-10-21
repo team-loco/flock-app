@@ -463,3 +463,14 @@ Settled; change only with a new entry that says why.
     `Pod`, `Workload` and `Comparison` sentence builders and `FluxObject.sentence` are gone.
     Condition messages wrap only at spaces, so resource refs such as `payments/stripe` stay whole
     and copying returns the exact message.
+49. **Namespace pages open on health tiles; the status bar names no cluster details** (design v3;
+    amends 47): the namespace header is the name, the managing Flux object, its age and the ⋯
+    menu (Edit YAML). Under it sit the Overview's health tiles (`kit::HealthTile`) for Pods,
+    Deployments, StatefulSets and Services, each with its count, a bar and its own terms
+    (running/pending/failing, available/unavailable, ready/not ready, ready/endpoints not ready).
+    A problem count opens that list scoped to the namespace with the Needs attention filter; the
+    tile opens the list scoped to the namespace. Contents groups count instead of summarising
+    ("1 ready", not "all ready"). The cluster Overview puts the CPU and memory charts right
+    after its cards. The status bar shows the problem counts, the Kubernetes version of the
+    selected cluster, refresh and the cluster switcher; the connected-clusters, Flux-ready and
+    fetched texts are gone.

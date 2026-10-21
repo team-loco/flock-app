@@ -1,6 +1,4 @@
 use flock_core::action::forwards_label;
-use flock_core::gitops::flux_ready;
-use flock_core::overview::plural;
 use flock_core::palette::{COMMAND_PREFIX, STOP_FORWARD};
 use flock_core::{Command, Page, Status};
 use gpui::{
@@ -16,7 +14,8 @@ use crate::theme::{
     STATUS_BAR, STATUS_BUTTON, TEXT_SMALL,
 };
 
-const FLUX: &str = "flux";
+const PROBLEMS: &str = "status-problems";
+const VERSION: &str = "status-version";
 const VERSION_TOOLTIP: &str = "Kubernetes version";
 const REFRESH_TOOLTIP: &str = "Refresh";
 pub const REFRESH_SELECTOR: &str = "status-refresh";
@@ -27,18 +26,6 @@ impl Shell {
         let palette = *cx.palette();
         let snapshot = &self.state.snapshot;
         let problems = snapshot.problems();
-        let left = match self.state.location().page {
-            Page::Changes if self.selected_cluster().is_none() => snapshot.changes.fetched_label(),
-            Page::GitOps if self.selected_cluster().is_none() => {
-                let flux = flux_ready(&snapshot.clusters);
-                format!("{FLUX} {}/{} ready", flux.ready, flux.total)
-            }
-            _ => format!(
-                "{} of {} connected",
-                snapshot.connected(),
-                plural(snapshot.clusters.len(), "cluster", "clusters")
-            ),
-        };
         div()
             .flex()
             .items_center()
@@ -56,7 +43,8 @@ impl Shell {
             .overflow_hidden()
             .child(
                 div()
-                    .id("status-problems")
+                    .debug_selector(|| PROBLEMS.to_owned())
+                    .id(PROBLEMS)
                     .flex()
                     .gap(SPACE_5)
                     .cursor_pointer()
@@ -74,7 +62,6 @@ impl Shell {
                         problems.warn
                     )))),
             )
-            .child(div().min_w_0().truncate().child(left))
             .children(self.kubernetes_version())
             .child(div().flex_1())
             .child(Self::refresh_button(&palette, cx))
@@ -92,7 +79,8 @@ impl Shell {
     fn kubernetes_version(&self) -> Option<AnyElement> {
         let version = self.selected_cluster()?.version.clone()?;
         let element = div()
-            .id("status-version")
+            .debug_selector(|| VERSION.to_owned())
+            .id(VERSION)
             .tooltip(Tooltip::text(VERSION_TOOLTIP))
             .child(version)
             .into_any_element();

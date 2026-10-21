@@ -4,8 +4,9 @@ use std::collections::BTreeMap;
 use crate::cluster::{ClusterDetail, Namespace};
 use crate::events::Event;
 use crate::home::Problem;
-use crate::overview::plural;
+use crate::overview::{WorkloadHealth, plural};
 use crate::related::{Group, Related};
+use crate::resources::ResourceKind;
 use crate::time::age;
 use crate::units::{self, Metric};
 use crate::watch::WatchState;
@@ -18,29 +19,21 @@ const FAILING: &str = "failing";
 const DEGRADED: &str = "degraded";
 const SUSPENDED: &str = "suspended";
 const READY: &str = "ready";
-const ALL_READY: &str = "all ready";
+const RUNNING: &str = "running";
+const PENDING: &str = "pending";
+const UNREADY_ENDPOINTS: &str = "endpoints not ready";
 const REQUESTED: &str = "requested";
-const WARNING_ONE: &str = "warning";
-const WARNING_MANY: &str = "warnings";
-const POD_ONE: &str = "pod";
-const POD_MANY: &str = "pods";
 const OBJECT_ONE: &str = "object";
 const OBJECT_MANY: &str = "objects";
 const CREATED: &str = "created";
 const AGO: &str = "ago";
 const EVENTS: &str = "Events";
-const PODS_FACT: &str = "pods";
-const FACT_PAGES: [(Page, &str); 2] = [
-    (Page::Deployments, "deployments"),
-    (Page::Services, "services"),
-];
-const READY_PAGES: [Page; 6] = [
-    Page::Deployments,
-    Page::StatefulSets,
-    Page::DaemonSets,
-    Page::Jobs,
-    Page::CronJobs,
-    Page::Pods,
+const WORKLOADS: [ResourceKind; 5] = [
+    ResourceKind::Deployment,
+    ResourceKind::StatefulSet,
+    ResourceKind::DaemonSet,
+    ResourceKind::Job,
+    ResourceKind::CronJob,
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -180,10 +173,38 @@ pub struct NamespaceDetail {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HeaderFact {
-    pub label: &'static str,
+pub struct TilePart {
+    pub status: Status,
+    pub count: usize,
+    pub label: String,
+}
+
+impl TilePart {
+    fn new(status: Status, count: usize, word: &str) -> Self {
+        Self {
+            status,
+            count,
+            label: format!("{count} {word}"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tile {
+    pub page: Page,
     pub total: usize,
-    pub parts: Vec<(Status, String)>,
+    pub parts: Vec<TilePart>,
+}
+
+impl Tile {
+    fn new(page: Page, total: usize, ok: TilePart, flagged: Vec<TilePart>) -> Self {
+        let flagged = flagged.into_iter().filter(|part| part.count > 0);
+        Self {
+            page,
+            total,
+            parts: std::iter::once(ok).chain(flagged).collect(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -195,9 +216,10 @@ pub struct NamespacePage {
     pub events: Vec<Event>,
     pub detail: Option<NamespaceDetail>,
     pub managed_by: Option<ResourceRef>,
+    pub unready_services: usize,
 }
 
-fn counted(counts: Counts, total: usize, ready: bool) -> Vec<(Status, String)> {
+fn counted(counts: Counts, total: usize) -> Vec<(Status, String)> {
     let flagged = counts.flagged() as usize;
     let mut parts = Vec::new();
     if flagged > 0 {
@@ -216,10 +238,30 @@ fn counted(counts: Counts, total: usize, ready: bool) -> Vec<(Status, String)> {
             parts.push((status, format!("{count} {label}")));
         }
     }
-    if parts.is_empty() && ready && total > 0 {
-        parts.push((Status::Ok, ALL_READY.to_owned()));
-    }
     parts
+}
+
+fn health(kind: ResourceKind, group: Option<&Group>) -> WorkloadHealth {
+    let total = group.map_or(0, |g| g.total);
+    let counts = group.map(|g| g.counts).unwrap_or_default();
+    let flagged = counts.flagged() as usize;
+    let count = |status: Status| match status {
+        Status::Ok => total.saturating_sub(flagged),
+        Status::Err => counts.err as usize,
+        Status::Warn => counts.warn as usize,
+        Status::Suspended => counts.sus as usize,
+        _ => 0,
+    };
+    WorkloadHealth::counted(kind, total, count)
+}
+
+fn health_parts(health: &WorkloadHealth) -> Vec<(Status, String)> {
+    let ok = (health.ok > 0 || health.bad == 0).then(|| (Status::Ok, health.ok_label.clone()));
+    let bad = health
+        .bad_label
+        .clone()
+        .map(|label| (health.bad_status, label));
+    ok.into_iter().chain(bad).collect()
 }
 
 impl NamespacePage {
@@ -253,15 +295,19 @@ impl NamespacePage {
             })
             .unwrap_or_default();
         events.sort_by_key(|e| e.age);
-        let unready = detail.map(|d| d.overview.unready_services.as_slice());
+        let here = |p: &&Problem| {
+            p.target.cluster == target.cluster && p.target.namespace.as_deref() == Some(name)
+        };
+        let unready = detail
+            .map(|d| d.overview.unready_services.as_slice())
+            .unwrap_or_default();
         let attention = problems
             .iter()
-            .chain(unready.unwrap_or_default())
-            .filter(|p| {
-                p.target.cluster == target.cluster && p.target.namespace.as_deref() == Some(name)
-            })
+            .chain(unready)
+            .filter(here)
             .cloned()
             .collect();
+        let unready_services = unready.iter().filter(here).count();
         let managed_by = namespace
             .as_ref()
             .and_then(|n| crate::flux::managed_by(&target.cluster, &n.labels));
@@ -273,18 +319,8 @@ impl NamespacePage {
             events,
             detail: detail.and_then(|d| d.namespace_detail(name)).cloned(),
             managed_by,
+            unready_services,
         }
-    }
-
-    pub fn badge(&self) -> Option<(Status, String)> {
-        let counts = Counts::of(self.attention.iter().map(|p| p.status));
-        if counts.err > 0 {
-            return Some((Status::Err, format!("{} {FAILING}", counts.err)));
-        }
-        (counts.warn > 0).then(|| {
-            let count = counts.warn as usize;
-            (Status::Warn, plural(count, WARNING_ONE, WARNING_MANY))
-        })
     }
 
     fn group(&self, page: Page) -> Option<&Group> {
@@ -310,56 +346,85 @@ impl NamespacePage {
         )
     }
 
-    pub fn facts(&self) -> Vec<HeaderFact> {
-        let pods = self.pods();
-        let pod_parts = self.pod_tally().map_or_else(
+    fn pod_tile(&self) -> Tile {
+        let (running, pending, failing) = self.pod_tally().map_or_else(
             || {
-                self.group(Page::Pods)
-                    .map(|g| counted(g.counts, g.total, false))
-                    .unwrap_or_default()
+                let group = self.group(Page::Pods);
+                let counts = group.map(|g| g.counts).unwrap_or_default();
+                let total = group.map_or(0, |g| g.total);
+                let running = total.saturating_sub(counts.flagged() as usize);
+                (running, counts.warn as usize, counts.err as usize)
             },
-            tally_parts,
+            |pods| {
+                let count = |wanted: Status| {
+                    pods.iter()
+                        .filter(|t| t.status == wanted)
+                        .map(|t| t.count)
+                        .sum::<usize>()
+                };
+                (count(Status::Ok), count(Status::Warn), count(Status::Err))
+            },
         );
-        let mut facts = Vec::new();
-        if pods > 0 {
-            facts.push(HeaderFact {
-                label: PODS_FACT,
-                total: pods,
-                parts: pod_parts,
-            });
-        }
-        for (page, label) in FACT_PAGES {
-            let Some(group) = self.group(page).filter(|g| g.total > 0) else {
-                continue;
-            };
-            facts.push(HeaderFact {
-                label,
-                total: group.total,
-                parts: counted(group.counts, group.total, false),
-            });
-        }
-        facts
+        let ok = TilePart::new(Status::Ok, running, RUNNING);
+        let flagged = vec![
+            TilePart::new(Status::Warn, pending, PENDING),
+            TilePart::new(Status::Err, failing, FAILING),
+        ];
+        Tile::new(Page::Pods, self.pods(), ok, flagged)
     }
 
-    pub fn meta(&self) -> String {
-        let mut parts = vec![plural(self.pods(), POD_ONE, POD_MANY)];
-        if let Some(namespace) = &self.namespace {
-            parts.push(format!("{CREATED} {} {AGO}", age(namespace.age)));
-        }
-        parts.join(SEPARATOR)
+    fn workload_tile(&self, kind: ResourceKind) -> Tile {
+        let group = self.group(kind.page());
+        let total = group.map_or(0, |g| g.total);
+        let health = health(kind, group);
+        let ok = TilePart {
+            status: Status::Ok,
+            count: health.ok,
+            label: health.ok_label.clone(),
+        };
+        let bad = health.bad_label.clone().map(|label| TilePart {
+            status: health.bad_status,
+            count: health.bad,
+            label,
+        });
+        Tile::new(health.page, total, ok, bad.into_iter().collect())
+    }
+
+    fn service_tile(&self) -> Tile {
+        let total = self.group(Page::Services).map_or(0, |g| g.total);
+        let unready = self.unready_services.min(total);
+        let ok = TilePart::new(Status::Ok, total - unready, READY);
+        let flagged = vec![TilePart::new(Status::Warn, unready, UNREADY_ENDPOINTS)];
+        Tile::new(Page::Services, total, ok, flagged)
+    }
+
+    pub fn tiles(&self) -> Vec<Tile> {
+        vec![
+            self.pod_tile(),
+            self.workload_tile(ResourceKind::Deployment),
+            self.workload_tile(ResourceKind::StatefulSet),
+            self.service_tile(),
+        ]
+    }
+
+    pub fn meta(&self) -> Option<String> {
+        self.namespace
+            .as_ref()
+            .map(|namespace| format!("{CREATED} {} {AGO}", age(namespace.age)))
     }
 
     pub fn summary(&self, group: &Group) -> (Status, String) {
         let pods = self
             .pod_tally()
             .filter(|_| group.title == Page::Pods.label());
-        let parts = pods.map_or_else(
-            || {
-                let ready = READY_PAGES.iter().any(|page| page.label() == group.title);
-                counted(group.counts, group.total, ready)
-            },
-            tally_parts,
-        );
+        let workload = WORKLOADS
+            .into_iter()
+            .find(|kind| kind.page().label() == group.title);
+        let parts = match (pods, workload) {
+            (Some(pods), _) => tally_parts(pods),
+            (None, Some(kind)) => health_parts(&health(kind, Some(group))),
+            (None, None) => counted(group.counts, group.total),
+        };
         let text: Vec<String> = parts.iter().map(|(_, text)| text.clone()).collect();
         (group.counts.status(), text.join(SEPARATOR))
     }
@@ -561,16 +626,8 @@ mod tests {
     }
 
     #[test]
-    fn only_this_namespaces_problems_need_attention_and_errors_set_the_badge() {
-        let page = page();
-        assert_eq!(page.attention.len(), 2);
-        assert_eq!(page.badge(), Some((Status::Err, "1 failing".into())));
-        let quiet = NamespacePage {
-            attention: vec![problem(NS, Status::Warn), problem(NS, Status::Warn)],
-            ..NamespacePage::default()
-        };
-        assert_eq!(quiet.badge(), Some((Status::Warn, "2 warnings".into())));
-        assert_eq!(NamespacePage::default().badge(), None);
+    fn only_this_namespaces_problems_need_attention() {
+        assert_eq!(page().attention.len(), 2);
     }
 
     #[test]
@@ -583,36 +640,91 @@ mod tests {
         detail.overview.unready_services = vec![service.clone(), elsewhere];
         let page = NamespacePage::build(&target(), Some(&detail), &[]);
         assert_eq!(page.attention, [service]);
+        assert_eq!(page.unready_services, 1);
+        let services = page.tiles().pop().map(|tile| labels(&tile));
+        assert_eq!(
+            services,
+            Some(vec![
+                (Status::Ok, "0 ready".to_owned()),
+                (Status::Warn, "1 endpoints not ready".to_owned())
+            ])
+        );
+    }
+
+    type TileRow = (Page, usize, Vec<(Status, String)>);
+
+    fn rows(page: &NamespacePage) -> Vec<TileRow> {
+        page.tiles()
+            .iter()
+            .map(|tile| (tile.page, tile.total, labels(tile)))
+            .collect()
+    }
+
+    fn labels(tile: &Tile) -> Vec<(Status, String)> {
+        tile.parts
+            .iter()
+            .map(|part| (part.status, part.label.clone()))
+            .collect()
     }
 
     #[test]
-    fn header_facts_read_pods_by_reason_then_deployments_and_services() {
+    fn tiles_count_pods_deployments_stateful_sets_and_services_in_their_own_terms() {
         let page = page();
-        let facts: Vec<(&str, usize, Vec<String>)> = page
-            .facts()
-            .into_iter()
-            .map(|f| (f.label, f.total, f.parts.into_iter().map(|p| p.1).collect()))
-            .collect();
+        let tiles = rows(&page);
         assert_eq!(
-            facts,
+            tiles,
             [
                 (
-                    "pods",
+                    Page::Pods,
                     3,
-                    vec!["2 Running".to_owned(), "1 CrashLoopBackOff".to_owned()]
+                    vec![
+                        (Status::Ok, "2 running".to_owned()),
+                        (Status::Err, "1 failing".to_owned())
+                    ]
                 ),
                 (
-                    "deployments",
+                    Page::Deployments,
                     2,
-                    vec!["1 ready".to_owned(), "1 failing".to_owned()]
+                    vec![
+                        (Status::Ok, "1 available".to_owned()),
+                        (Status::Err, "1 unavailable".to_owned())
+                    ]
                 ),
-                ("services", 1, Vec::new()),
+                (
+                    Page::StatefulSets,
+                    1,
+                    vec![(Status::Ok, "1 ready".to_owned())]
+                ),
+                (Page::Services, 1, vec![(Status::Ok, "1 ready".to_owned())]),
             ]
         );
-        assert_eq!(page.meta(), "3 pods · created 214d ago");
+        assert_eq!(page.meta().as_deref(), Some("created 214d ago"));
         assert_eq!(
             page.managed_by.map(|owner| (owner.kind, owner.name)),
             Some(("Kustomization".to_owned(), "apps-payments".to_owned()))
+        );
+    }
+
+    #[test]
+    fn an_empty_namespace_still_shows_every_tile_at_zero() {
+        let page = NamespacePage::default();
+        let tiles = rows(&page);
+        assert_eq!(
+            tiles,
+            [
+                (Page::Pods, 0, vec![(Status::Ok, "0 running".to_owned())]),
+                (
+                    Page::Deployments,
+                    0,
+                    vec![(Status::Ok, "0 available".to_owned())]
+                ),
+                (
+                    Page::StatefulSets,
+                    0,
+                    vec![(Status::Ok, "0 ready".to_owned())]
+                ),
+                (Page::Services, 0, vec![(Status::Ok, "0 ready".to_owned())]),
+            ]
         );
     }
 
@@ -629,8 +741,8 @@ mod tests {
         assert_eq!(
             summaries,
             [
-                "1 ready · 1 failing",
-                "all ready",
+                "1 available · 1 unavailable",
+                "1 ready",
                 "2 Running · 1 CrashLoopBackOff",
                 "",
                 ""

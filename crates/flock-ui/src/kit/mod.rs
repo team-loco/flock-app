@@ -28,6 +28,7 @@ mod status;
 mod table;
 mod terminal;
 mod text;
+mod tile;
 mod tooltip;
 
 pub use button::{Button, ButtonSize, ButtonVariant, Checkbox, IconButton, Segmented, Toggle};
@@ -78,6 +79,7 @@ pub use table::{
 };
 pub use terminal::{SendBackTab, SendTab, TERMINAL_CONTEXT, Terminal, TerminalEvent};
 pub use text::{Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel};
+pub use tile::{Activate, HealthTile, HealthTiles, TileNote, problem_link};
 pub use tooltip::{TOOLTIP_SELECTOR, Tooltip};
 
 pub(crate) fn init(cx: &mut gpui::App) {

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::filter::{FilterScope, FilterSpec, TextFilter};
-use crate::{ClusterId, ClusterSummary, ResourceRef, Status};
+use crate::{ClusterId, ResourceRef, Status};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FluxKind {
@@ -274,28 +274,9 @@ pub struct GitOps {
     pub installs: Vec<FluxInstall>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct FluxReady {
-    pub ready: u32,
-    pub total: u32,
-}
-
-pub fn flux_ready(clusters: &[ClusterSummary]) -> FluxReady {
-    clusters
-        .iter()
-        .filter_map(|cluster| cluster.metrics.as_ref())
-        .fold(FluxReady::default(), |sum, metrics| FluxReady {
-            ready: sum.ready + metrics.flux_ready(),
-            total: sum.total + metrics.flux.total.unwrap_or_default(),
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Counts;
-    use crate::flock::tests::cluster;
-    use crate::home::{ClusterMetrics, Revision};
 
     fn cell(status: Status, behind: bool) -> SyncCell {
         SyncCell {
@@ -496,28 +477,5 @@ mod tests {
         install.upgrade = None;
         assert_eq!(install.note(), "healthy");
         assert_eq!(install.status(), Status::Ok);
-    }
-
-    #[test]
-    fn flux_ready_sums_connected_clusters() {
-        let mut a = cluster("a", Status::Ok, Counts::default());
-        a.metrics = Some(ClusterMetrics {
-            pods: Counts::total(1),
-            cpu_percent: None,
-            memory_percent: None,
-            flux: Counts::total(21).with_err(1).with_sus(1),
-            revision: Revision {
-                sha: String::new(),
-                held: false,
-            },
-        });
-        let offline = cluster("b", Status::Offline, Counts::default());
-        assert_eq!(
-            flux_ready(&[a, offline]),
-            FluxReady {
-                ready: 19,
-                total: 21
-            }
-        );
     }
 }

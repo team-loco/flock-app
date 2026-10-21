@@ -1,11 +1,12 @@
 use std::collections::BTreeSet;
+use std::rc::Rc;
 
 use flock_core::events::Event;
 use flock_core::home::Problem;
-use flock_core::namespace::{HeaderFact, Listing, NamespacePage, Policy, Quota, Requested};
+use flock_core::namespace::{Listing, NamespacePage, Policy, Quota, Requested, Tile};
 use flock_core::related::{Group, Item};
 use flock_core::resource::short_kind;
-use flock_core::resources::EVENT_LIST;
+use flock_core::resources::{EVENT_LIST, namespace_list};
 use flock_core::settings::NamespaceSelection;
 use flock_core::time::age;
 use flock_core::{Command, Page, Preferences, ResourceRef, Snapshot, Status};
@@ -17,21 +18,23 @@ use gpui::{
 
 use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::kit::{
-    Button, EmptyState, InputEvent, InspectorPane, Link, PageHeader, SectionLabel, Skeleton,
-    StatusGlyph, TextField, TextFieldState, Tooltip,
+    ActionMenu, Activate, EmptyState, HealthTile, HealthTiles, InputEvent, InspectorPane, Link,
+    PageHeader, SectionLabel, Skeleton, StackedBar, StatusGlyph, TextField, TextFieldState,
+    TileNote, Tooltip,
 };
-use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
-use crate::screens::{EDIT_YAML, ScreenEvent};
+use crate::screens::edit::{EditYaml, YAML_CONTEXT, edit_command};
+use crate::screens::{ScreenEvent, edit_item};
 use crate::theme::{
     ASIDE_WIDTH, ActiveTheme, FONT_MONO, ICON, NAMESPACE_AGE_WIDTH, NAMESPACE_CONTENT_AGE,
-    NAMESPACE_CONTENT_NAME, NAMESPACE_EVENT_AGE, NAMESPACE_EVENT_LINES, NAMESPACE_FACT_GAP,
-    NAMESPACE_FILTER_WIDTH, NAMESPACE_KIND_WIDTH, NAMESPACE_NAME_WIDTH, NAMESPACE_USAGE_BAR,
-    NAMESPACE_USAGE_LABEL, Palette, RADIUS, ROW_TABLE, ROW_TABLE_MAX, RULE, SPACE_1, SPACE_2,
-    SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_LABEL, TEXT_MONO,
-    TEXT_SMALL,
+    NAMESPACE_CONTENT_NAME, NAMESPACE_EVENT_AGE, NAMESPACE_EVENT_LINES, NAMESPACE_FILTER_WIDTH,
+    NAMESPACE_KIND_WIDTH, NAMESPACE_NAME_WIDTH, NAMESPACE_USAGE_BAR, NAMESPACE_USAGE_LABEL,
+    Palette, RADIUS, ROW_TABLE, ROW_TABLE_MAX, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5,
+    SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
 };
 
 const KICKER: &str = "Namespace";
+const SHORT_KICKER: &str = "ns";
+const ACTIONS: &str = "namespace-actions";
 const NEEDS_ATTENTION: &str = "Needs attention";
 const NOTHING: &str = "Nothing needs attention in this namespace.";
 const CONTENTS: &str = "Contents";
@@ -58,6 +61,7 @@ const CLOSED: [&str; 3] = ["Pods", "ReplicaSets", "ConfigMaps"];
 pub struct NamespaceScreen {
     pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     target: ResourceRef,
+    menu: Entity<ActionMenu>,
     page: NamespacePage,
     preferences: Preferences,
     loaded: bool,
@@ -91,6 +95,14 @@ fn row_selector(prefix: &str, ix: usize) -> String {
     format!("{prefix}-row-{ix}")
 }
 
+fn tile_selector(tile: &Tile) -> String {
+    format!("namespace-tile-{}", tile.page.label()).to_lowercase()
+}
+
+fn weight(count: usize) -> f32 {
+    f32::from(u16::try_from(count).unwrap_or(u16::MAX))
+}
+
 impl NamespaceScreen {
     pub fn new(target: ResourceRef, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER));
@@ -99,9 +111,15 @@ impl NamespaceScreen {
                 cx.notify();
             }
         });
+        let screen = cx.weak_entity();
+        let edit = edit_item(target.clone(), move |command, cx| {
+            let _ = screen.update(cx, |_, cx| cx.emit(command));
+        });
+        let menu = cx.new(|cx| ActionMenu::new(ACTIONS, cx).items(vec![edit]));
         Self {
             navigation: None,
             target,
+            menu,
             page: NamespacePage::default(),
             preferences: Preferences::default(),
             loaded: false,
@@ -163,29 +181,16 @@ impl NamespaceScreen {
     }
 
     fn header(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-        let edit = Button::new("namespace-edit", EDIT_YAML)
-            .small()
-            .tooltip(EDIT_KEYS)
-            .on_click(cx.listener(|this, _, _, cx| this.edit(cx)));
-        let header = PageHeader::new(self.target.name.clone())
+        PageHeader::new(self.target.name.clone())
             .leading(self.navigation.clone())
-            .kicker(KICKER)
+            .kicker(SHORT_KICKER)
             .mono()
-            .action(edit)
-            .meta(self.meta(palette, cx));
-        let facts = self.page.facts();
-        let header = if facts.is_empty() {
-            header
-        } else {
-            header.detail(Some(fact_line(&facts, palette)))
-        };
-        match self.page.badge() {
-            Some((status, label)) => header.status(status, label),
-            None => header,
-        }
+            .action(self.menu.clone())
+            .meta(self.meta(palette, cx))
     }
 
     fn meta(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let created = self.page.meta();
         let owner = self.page.managed_by.clone().map(|owner| {
             let label = format!("{}/{}", short_kind(&owner.kind), owner.name);
             let link = Link::new("namespace-managed-by", label)
@@ -193,14 +198,73 @@ impl NamespaceScreen {
                 .on_click(cx.listener(move |_, _, _, cx| {
                     cx.emit(Command::OpenResource(owner.clone()));
                 }));
-            div().flex().child(MANAGED_BY).child(link).child(SEPARATOR)
+            let separator = created.is_some().then_some(SEPARATOR);
+            div()
+                .flex()
+                .child(MANAGED_BY)
+                .child(link)
+                .children(separator)
         });
         div()
             .flex()
             .flex_wrap()
             .text_color(palette.mute)
             .children(owner)
-            .child(self.page.meta())
+            .children(created)
+    }
+
+    fn drill(&self, page: Page, cx: &mut Context<Self>) -> Activate {
+        let this = cx.weak_entity();
+        let namespace = Some(self.target.name.clone());
+        Rc::new(move |_, cx| {
+            let namespace = namespace.clone();
+            let event = ScreenEvent::NeedsAttention { page, namespace };
+            let _ = this.update(cx, |_, cx| cx.emit(event));
+        })
+    }
+
+    fn tile(&self, tile: &Tile, palette: &Palette, cx: &mut Context<Self>) -> HealthTile {
+        let id = tile_selector(tile);
+        let segments = tile
+            .parts
+            .iter()
+            .map(|part| (part.status, weight(part.count)))
+            .collect();
+        let notes = tile
+            .parts
+            .iter()
+            .map(|part| {
+                if part.status == Status::Ok {
+                    return TileNote::new(part.label.clone(), palette.mute);
+                }
+                let note = TileNote::new(part.label.clone(), palette.status(part.status));
+                let drill = format!("{id}-{}", part.label.replace(' ', "-"));
+                note.drill(drill, self.drill(tile.page, cx))
+            })
+            .collect();
+        let page = tile.page;
+        let list = namespace_list(page).unwrap_or(EVENT_LIST);
+        let this = cx.weak_entity();
+        HealthTile::new(
+            id,
+            page.label(),
+            tile.total.to_string(),
+            StackedBar::new(segments),
+        )
+        .notes(notes)
+        .on_activate(move |_, cx| {
+            let _ = this.update(cx, |this, cx| this.open_list(page, list, cx));
+        })
+    }
+
+    fn tiles(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let tiles = self
+            .page
+            .tiles()
+            .iter()
+            .map(|tile| self.tile(tile, palette, cx))
+            .collect();
+        HealthTiles::new(tiles).into_any_element()
     }
 
     fn attention(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -585,34 +649,6 @@ fn attention_row(
         .into_any_element()
 }
 
-fn fact_line(facts: &[HeaderFact], palette: &Palette) -> impl IntoElement {
-    let facts = facts.iter().map(|fact| {
-        let mut line = div()
-            .flex()
-            .gap(SPACE_2)
-            .child(div().text_color(palette.mute).child(fact.label))
-            .child(fact.total.to_string());
-        for (status, text) in &fact.parts {
-            line = line
-                .child(div().text_color(palette.mute).child(SEPARATOR.trim()))
-                .child(
-                    div()
-                        .text_color(status_color(palette, *status))
-                        .child(text.clone()),
-                );
-        }
-        line
-    });
-    div()
-        .flex()
-        .flex_wrap()
-        .gap(NAMESPACE_FACT_GAP)
-        .font_family(FONT_MONO)
-        .text_size(TEXT_MONO)
-        .text_color(palette.fg2)
-        .children(facts)
-}
-
 fn content_row(
     group: &str,
     ix: usize,
@@ -858,6 +894,7 @@ impl Render for NamespaceScreen {
             return root.child(main.child(Skeleton::rows()));
         }
         let main = main
+            .child(self.tiles(&palette, cx))
             .child(self.attention(&palette, cx))
             .child(self.contents(&palette, cx))
             .child(div().h(SPACE_8));

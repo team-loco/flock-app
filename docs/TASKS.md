@@ -129,3 +129,4 @@ Spec column points at `design/`.
 | REL2 | Related shows HPAs, HTTPRoutes (when the Gateway API is installed) and PersistentVolumes from watches started while an object is open; PV and HPA detail pages (#256) | claude | related-watches | done |
 | MENUBAR3 | Menu bar status item shows a plain monospaced-digit count; unavailable cluster rows render grayed with no state text (#355) | claude | menubar-status-polish | done |
 | UI345 | No generated summary sentences; condition block in inspector headers; Shell disabled without a running container; toolbars keep their layout when filters, Clear and selection controls change (#344, #345, decision 48) | claude | ui-polish | done |
+| V3HDR | Design v3: namespace header with Overview health tiles that drill in, counts instead of summaries, Overview charts after the cards, status bar without connected/Flux/fetched text (decision 49) | claude | v3-header | done |
