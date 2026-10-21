@@ -93,6 +93,7 @@ pub struct PodsScreen {
     shown: usize,
     query: PodQuery,
     selected: Option<ResourceRef>,
+    panel_open: bool,
     related: Vec<Related>,
     inspected: Option<ResourceRef>,
     container: Option<String>,
@@ -135,6 +136,7 @@ impl PodsScreen {
                 .row_actions(move |pod: &Pod| menu_items(pod, &screen))
                 .row_key(|pod: &Pod| format!("{}/{}", pod.namespace, pod.name).into())
                 .multi_select()
+                .click_opens()
                 .column_gap(SPACE_6)
         });
         let search =
@@ -155,18 +157,7 @@ impl PodsScreen {
         let dock = cx.new(|_| DockState::new());
         let subscriptions = vec![
             cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
-                let ix = match *event {
-                    TableEvent::Selected(ix) => ix,
-                    TableEvent::Opened(ix) => ix,
-                    TableEvent::Marked => {
-                        cx.notify();
-                        return;
-                    }
-                };
-                let pod = table.read(cx).row(ix).map(Pod::resource);
-                if let Some(pod) = pod {
-                    this.select(Some(pod), cx);
-                }
+                this.table_event(&table, event, cx);
             }),
             cx.subscribe(&filter, |this, bar, FilterEvent::Changed, cx| {
                 let (text, chip) = {
@@ -207,6 +198,7 @@ impl PodsScreen {
             shown: 0,
             query: PodQuery::default(),
             selected: None,
+            panel_open: true,
             related: Vec::new(),
             inspected: None,
             container: None,
@@ -261,6 +253,7 @@ impl PodsScreen {
         if self.cluster.as_ref() != cluster {
             self.cluster = cluster.cloned();
             self.selected = None;
+            self.panel_open = true;
         }
         self.preferences = preferences.clone();
         self.query.namespace = preferences
@@ -283,6 +276,7 @@ impl PodsScreen {
                 self.choose_namespace(Some(namespace), cx);
             }
             self.selected = Some(pod.clone());
+            self.panel_open = true;
             self.pick_container(None);
         }
         self.refresh(cx);
@@ -298,7 +292,7 @@ impl PodsScreen {
             self.inspected = None;
             return;
         }
-        if self.selected == self.inspected {
+        if self.selected == self.inspected || !self.panel_open {
             return;
         }
         self.inspected.clone_from(&self.selected);
@@ -550,12 +544,61 @@ impl PodsScreen {
         }
         self.selected = pod;
         self.inspected.clone_from(&self.selected);
-        if let Some(pod) = self.selected.clone() {
+        if let Some(pod) = self.selected.clone().filter(|_| self.panel_open) {
             cx.emit(Command::InspectResource(pod));
         }
         self.pick_container(None);
         self.instance = LogInstance::Current;
         self.sync_selection(cx);
+    }
+
+    fn table_event(
+        &mut self,
+        table: &Entity<Table<Pod>>,
+        event: &TableEvent,
+        cx: &mut Context<Self>,
+    ) {
+        let ix = match *event {
+            TableEvent::Selected(ix) => ix,
+            TableEvent::Opened(ix) => ix,
+            TableEvent::Marked => {
+                cx.notify();
+                return;
+            }
+        };
+        let pod = table.read(cx).row(ix).map(Pod::resource);
+        if let Some(pod) = pod {
+            self.select(Some(pod), cx);
+        }
+        if matches!(event, TableEvent::Opened(_)) {
+            self.open_panel(cx);
+        }
+    }
+
+    pub fn inspecting(&self) -> bool {
+        self.panel_open && self.selected.is_some()
+    }
+
+    pub fn close_inspector(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.inspecting() {
+            return false;
+        }
+        self.panel_open = false;
+        cx.emit(Command::CloseInspector);
+        cx.notify();
+        true
+    }
+
+    fn open_panel(&mut self, cx: &mut Context<Self>) {
+        if self.panel_open {
+            return;
+        }
+        self.panel_open = true;
+        self.inspected.clone_from(&self.selected);
+        if let Some(pod) = self.selected.clone() {
+            cx.emit(Command::InspectResource(pod));
+        }
+        cx.notify();
     }
 
     fn pick_container(&mut self, name: Option<String>) {
@@ -1164,7 +1207,7 @@ impl Render for ElsewhereLink {
 
 impl Render for PodsScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let inspector = self.inspector(cx);
+        let inspector = self.panel_open.then(|| self.inspector(cx));
         let dock = self.dock_view(cx).into_any_element();
         let namespace = self.query.namespace.as_deref().map(|namespace| {
             let inside = self.pods.iter().filter(|pod| {
@@ -1194,14 +1237,11 @@ impl Render for PodsScreen {
             .flex_col()
             .child(self.filter.clone())
             .child(self.logs_bar(cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .flex()
-                    .child(table)
-                    .child(InspectorPane::new(INSPECTOR_ID, inspector).width(INSPECTOR_POD)),
-            )
+            .child(div().flex_1().min_h_0().flex().child(table).children(
+                inspector.map(|inspector| {
+                    InspectorPane::new(INSPECTOR_ID, inspector).width(INSPECTOR_POD)
+                }),
+            ))
             .child(dock)
     }
 }

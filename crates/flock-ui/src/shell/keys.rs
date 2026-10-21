@@ -11,14 +11,15 @@ use gpui::{
 
 use super::Shell;
 use crate::actions::{
-    ActivateTab, CloseInspector, CloseTab, CloseWindow, FocusContent, FocusPane, FocusSidebar,
-    GoBack, GoForward, NewTab, NextTab, PreviousTab, QuickOpen, ShowCommands, SplitRight,
-    ToggleDock,
+    ActivateTab, CloseTab, CloseWindow, FocusContent, FocusPane, FocusSidebar, GoBack, GoForward,
+    NewTab, NextTab, PreviousTab, QuickOpen, ShowCommands, SplitRight, ToggleDock,
 };
 use crate::kit::DockState;
 use crate::kit::list_keys::{Nav, TypeAhead, find, typed};
+use crate::screens::pods::PodsScreen;
 use crate::screens::workload::WorkloadScreen;
 
+const ESCAPE: &str = "escape";
 pub(super) const SIDEBAR_CONTEXT: &str = "FlockSidebar";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -80,8 +81,17 @@ impl Shell {
                 this.show_active(cx);
             }
         }))
-        .on_action(cx.listener(|this, _: &CloseInspector, _, cx| {
-            this.close_inspector(cx);
+        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+            let keystroke = &event.keystroke;
+            if keystroke.key == ESCAPE
+                && !keystroke.modifiers.modified()
+                && this.close_inspector(cx)
+            {
+                cx.stop_propagation();
+                if let Some(focus) = this.list_focus(cx) {
+                    window.focus(&focus, cx);
+                }
+            }
         }))
         .on_action(cx.listener(|this, _: &QuickOpen, window, cx| {
             this.open_palette("", window, cx);
@@ -151,6 +161,9 @@ impl Shell {
         let screens = self.focused_screens();
         if let Some((screen, _)) = &screens.workload {
             return screen.update(cx, WorkloadScreen::close_inspector);
+        }
+        if self.state.location().page == Page::Pods {
+            return screens.pods.update(cx, PodsScreen::close_inspector);
         }
         screens
             .pages

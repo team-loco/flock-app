@@ -671,6 +671,68 @@ fn escape_closes_the_inspector_and_keeps_the_page() -> anyhow::Result<()> {
 }
 
 #[test]
+fn escape_closes_the_panel_from_a_panel_section_too() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Nodes)?;
+    ui.click("nodes-row-0")?;
+    ui.click("node-capacity-CPU")?;
+    assert!(ui.bounds("close-node").is_some());
+    ui.press("escape")?;
+    assert!(ui.bounds("close-node").is_none());
+    assert_eq!(ui.state().location().page, Page::Nodes);
+    Ok(())
+}
+
+#[test]
+fn escape_closes_the_pods_panel_and_enter_or_a_click_reopens_it() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.click("pods-row-1")?;
+    let row = bounds_of(&mut ui, "pods-row-1")?;
+    assert!(ui.bounds("pod-inspector-pane").is_some());
+    ui.press("escape")?;
+    assert!(ui.bounds("pod-inspector-pane").is_none());
+    assert_eq!(bounds_of(&mut ui, "pods-row-1")?.origin.y, row.origin.y);
+    assert_eq!(ui.state().location().page, Page::Pods);
+    ui.press("enter")?;
+    assert!(ui.bounds("pod-inspector-pane").is_some());
+    ui.click("pod-container-head")?;
+    ui.press("escape")?;
+    assert!(ui.bounds("pod-inspector-pane").is_none());
+    ui.click("pods-row-2")?;
+    assert!(ui.bounds("pod-inspector-pane").is_some());
+    Ok(())
+}
+
+#[test]
+fn escape_closes_a_menu_or_the_palette_before_the_pods_panel() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.click("pods-row-0")?;
+    ui.press("cmd-k escape")?;
+    assert!(ui.bounds("pod-inspector-pane").is_some());
+    ui.right_click("pods-row-1")?;
+    assert!(ui.bounds("pods-row-menu-item-0").is_some());
+    ui.press("escape")?;
+    assert!(ui.bounds("pods-row-menu-item-0").is_none());
+    assert!(ui.bounds("pod-inspector-pane").is_some());
+    ui.press("escape")?;
+    assert!(ui.bounds("pod-inspector-pane").is_none());
+    Ok(())
+}
+
+#[test]
+fn escape_goes_to_a_running_terminal_and_closes_the_panel_once_it_ends() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::PodsShell)?;
+    ui.click("pod-open-shell")?;
+    ui.press("escape")?;
+    assert!(ui.bounds("pod-inspector-pane").is_some());
+    assert!(ui.bounds("pod-close-shell").is_some());
+    ui.click("pod-close-shell")?;
+    ui.click("pods-row-0")?;
+    ui.press("escape")?;
+    assert!(ui.bounds("pod-inspector-pane").is_none());
+    Ok(())
+}
+
+#[test]
 fn command_j_toggles_the_dock() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Workload)?;
     let dock = |ui: &Ui| ui.read(Shell::dock_open);

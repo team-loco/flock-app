@@ -35,7 +35,6 @@ pub mod actions {
             QuickOpen,
             ShowCommands,
             ToggleDock,
-            CloseInspector,
             NewTab,
             CloseTab,
             SplitRight,
