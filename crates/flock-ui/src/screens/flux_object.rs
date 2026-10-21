@@ -95,6 +95,7 @@ impl FluxObjectPage {
         let inventory = cx.new(|cx| {
             Table::new("flux-inventory", inventory_columns(), cx)
                 .headerless()
+                .click_opens()
                 .row_height(ROW_DOCUMENT)
                 .row_key(|o: &ManagedObject| format!("{}/{}", o.kind, o.path()).into())
                 .empty("Nothing matches this filter.")
@@ -118,6 +119,7 @@ impl FluxObjectPage {
         let dependents = cx.new(|cx| {
             Table::new("flux-dependents", dependent_columns(), cx)
                 .headerless()
+                .click_opens()
                 .row_height(ROW_DOCUMENT)
                 .empty("Nothing on this cluster builds from this source.")
                 .fit_content()
@@ -278,7 +280,7 @@ impl FluxObjectPage {
         event: &TableEvent,
         cx: &mut Context<Self>,
     ) {
-        let TableEvent::Selected(ix) = event else {
+        let TableEvent::Opened(ix) = event else {
             return;
         };
         let Some(cluster) = self.object().map(|object| object.key.cluster.clone()) else {
@@ -308,7 +310,7 @@ impl FluxObjectPage {
         event: &TableEvent,
         cx: &mut Context<Self>,
     ) {
-        let TableEvent::Selected(ix) = event else {
+        let TableEvent::Opened(ix) = event else {
             return;
         };
         let target = table.read(cx).row(*ix).map(|row| row.key.clone());

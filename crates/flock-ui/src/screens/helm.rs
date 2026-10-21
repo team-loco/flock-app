@@ -68,6 +68,7 @@ impl HelmReleasesScreen {
             .new(|cx| FilterBar::new("helm-filter", HelmRelease::FILTER.placeholder(), window, cx));
         let table = cx.new(|cx| {
             Table::new("helm-releases", columns(), cx)
+                .click_opens()
                 .row_key(|r: &HelmRelease| format!("{}/{}", r.key.namespace, r.key.name).into())
                 .row_status(|r: &HelmRelease| (r.status != Status::Ok).then_some(r.status))
         });

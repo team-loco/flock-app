@@ -1228,7 +1228,7 @@ fn filter(ui: &mut Ui, text: &str) -> anyhow::Result<()> {
 fn open_flux_object(ui: &mut Ui, page: Page, name: &str) -> anyhow::Result<()> {
     visit(ui, page)?;
     filter(ui, name)?;
-    ui.double_click("flux-list-row-0")
+    ui.click("flux-list-row-0")
         .with_context(|| format!("no {page:?} row matches {name}"))?;
     let opened = ui.state().location().flux_object.clone();
     anyhow::ensure!(

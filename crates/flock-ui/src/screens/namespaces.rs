@@ -52,7 +52,9 @@ impl NamespacesScreen {
 
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
-            Table::new("namespaces", columns(), cx).row_key(|n: &Namespace| n.name.clone().into())
+            Table::new("namespaces", columns(), cx)
+                .click_opens()
+                .row_key(|n: &Namespace| n.name.clone().into())
         });
         cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
             let TableEvent::Opened(ix) = *event else {

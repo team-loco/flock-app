@@ -309,7 +309,7 @@ let pods = cx.new(|cx| {
 });
 cx.subscribe(&pods, |this, table, event: &TableEvent, cx| match event {
     TableEvent::Selected(ix) => ..,        // index into the rows you passed
-    TableEvent::Opened(ix) => ..,          // double click or Enter
+    TableEvent::Opened(ix) => ..,          // Enter, double click, or a click with .click_opens()
 }).detach();
 pods.update(cx, |t, cx| t.set_rows(new_rows, cx));
 ```
@@ -339,10 +339,6 @@ cells without `fit_by` go back to their design width). Widths are stored per sco
 into a new tab). Rows that open something put `screens::new_tab_item(command, emit)` ("Open in new
 tab") first in their menu.
 
-⌘-click and middle-click on a row emit `Opened` as well (the shell turns the resulting navigation
-into a new tab). Rows that open something put `screens::new_tab_item(command, emit)` ("Open in new
-tab") first in their menu.
-
 `.multi_select()` lets ⇧-click add or remove rows from a marked set (drawn like the selection;
 a plain click clears it). `marked_rows()` reads it, `clear_marks(cx)` empties it, and
 `TableEvent::Marked` reports changes. It needs `row_key`.
@@ -354,7 +350,9 @@ row's items. `hovered_row()` reads the hovered row. Table options:
 `.column_gap(px)` (default `SPACE_6`), `.inset(px)` (leading row and header padding, default `SPACE_8`),
 `.mono_header()` (Plex Mono 10.5 header titles, e.g. short cluster lanes),
 `set_empty(text, cx)` changes the empty-table sentence when the reason changes, and
-`.click_opens()` (a single click also emits `Opened`, for rows that act as links) and
+`.click_opens()` (a single click also emits `Opened`; use it on every list whose rows have no
+inspector and lead to a separate page, so one click or Enter opens the page while the arrow keys
+only move the selection) and
 `.span_rows(|row, palette| Option<AnyElement>)`: rows for which it returns `Some` render that
 element across the full width instead of cells (group headers). `set_columns(columns, cx)` swaps
 columns at runtime (e.g. one per cluster).
