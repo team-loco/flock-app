@@ -570,6 +570,20 @@ fn right_clicking_a_row_works_after_the_palette_closes() -> anyhow::Result<()> {
 }
 
 #[test]
+fn a_closing_palette_does_not_run_the_hit_under_a_click() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-shift-p")?;
+    ui.type_text("toggle sidebar")?;
+    let hit = ui
+        .bounds("palette-hit-0")
+        .ok_or_else(|| anyhow::anyhow!("the palette shows no hit"))?;
+    ui.press("escape")?;
+    ui.click_at(hit.center(), 1)?;
+    assert!(ui.state().sidebar_open);
+    Ok(())
+}
+
+#[test]
 fn command_p_quick_opens_a_page_and_command_shift_p_runs_a_command() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     ui.press("cmd-p")?;
