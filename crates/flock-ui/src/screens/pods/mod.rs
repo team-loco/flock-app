@@ -30,8 +30,8 @@ use streams::{LogSession, ShellSession, TERMINAL_ID};
 use crate::kit::{
     Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, Entrance, ErrorBlocks,
     FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link,
-    LogView, MenuItem, PanelSection, Select, SelectEvent, ShowAll, StatusText, Table, TableEvent,
-    Terminal, TextFieldState, chip_label, confirm, swap_in,
+    LogView, MenuItem, PanelHeader, PanelSection, Select, SelectEvent, ShowAll, StatusText, Table,
+    TableEvent, Terminal, TextFieldState, chip_label, confirm, swap_in,
 };
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
 use crate::screens::{
@@ -39,8 +39,8 @@ use crate::screens::{
     set_namespace_options,
 };
 use crate::theme::{
-    ActiveTheme, FONT_MONO, INSPECTOR_POD, Palette, RULE, SECTION_HEADER, SPACE_2, SPACE_3,
-    SPACE_4, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, FONT_MONO, INSPECTOR_POD, Palette, RULE, SPACE_2, SPACE_3, SPACE_4, SPACE_5,
+    SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
 };
 
 const INSPECTOR_ID: &str = "pod-inspector";
@@ -70,7 +70,6 @@ const NO_RESOURCES: &str = "none";
 const DETAILS: &str = "Details";
 const CONTAINERS: &str = "Containers";
 const VOLUMES: &str = "Volumes";
-const POD_HEADER: &str = "pod-header";
 const LOGS_BEFORE_RESTART: &str = "Logs before restart →";
 const LOGS_FOR: &str = "Logs for";
 const LOGS_FOR_SELECTED: &str = "Logs for selected pods";
@@ -95,6 +94,7 @@ pub struct PodsScreen {
     query: PodQuery,
     selected: Option<ResourceRef>,
     related: Vec<Related>,
+    inspected: Option<ResourceRef>,
     container: Option<String>,
     instance: LogInstance,
     elsewhere: Entity<ElsewhereLink>,
@@ -208,6 +208,7 @@ impl PodsScreen {
             query: PodQuery::default(),
             selected: None,
             related: Vec::new(),
+            inspected: None,
             container: None,
             instance: LogInstance::Current,
             elsewhere,
@@ -285,6 +286,27 @@ impl PodsScreen {
             self.pick_container(None);
         }
         self.refresh(cx);
+    }
+
+    pub fn sync_inspection(
+        &mut self,
+        on_page: bool,
+        opened: Option<&ResourceRef>,
+        cx: &mut Context<Self>,
+    ) {
+        if !on_page {
+            self.inspected = None;
+            return;
+        }
+        if self.selected == self.inspected {
+            return;
+        }
+        self.inspected.clone_from(&self.selected);
+        if let Some(picked) = self.selected.clone()
+            && opened != Some(&picked)
+        {
+            cx.emit(Command::InspectResource(picked));
+        }
     }
 
     fn choose_namespace(&mut self, choice: Option<String>, cx: &mut Context<Self>) {
@@ -527,6 +549,7 @@ impl PodsScreen {
             return;
         }
         self.selected = pod;
+        self.inspected.clone_from(&self.selected);
         if let Some(pod) = self.selected.clone() {
             cx.emit(Command::InspectResource(pod));
         }
@@ -585,7 +608,7 @@ impl PodsScreen {
             PanelSection::new(INSPECTOR_ID, RELATED).child(inspector_section(related, &pick, cx));
         let (header, body) = match self.selected_pod() {
             Some(pod) => (
-                Some(Self::pod_header(pod, &palette, cx)),
+                Some(Self::pod_header(pod, cx)),
                 Self::pod_details(pod, &palette, cx)
                     .child(related)
                     .into_any_element(),
@@ -608,7 +631,9 @@ impl PodsScreen {
             .children(header)
             .child(
                 div()
-                    .id(INSPECTOR_ID)
+                    .id(gpui::ElementId::Name(
+                        format!("{INSPECTOR_ID}-{selection}").into(),
+                    ))
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
@@ -621,7 +646,7 @@ impl PodsScreen {
             .into_any_element()
     }
 
-    fn pod_header(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn pod_header(pod: &Pod, cx: &mut Context<Self>) -> AnyElement {
         let running = pod
             .containers
             .iter()
@@ -632,29 +657,10 @@ impl PodsScreen {
             .disabled(!running)
             .when(!running, |shell| shell.tooltip(NO_RUNNING_CONTAINER))
             .on_click(cx.listener(|this, _, window, cx| this.open_terminal(window, cx)));
-        div()
-            .debug_selector(|| POD_HEADER.into())
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(SPACE_4)
-            .min_h(SECTION_HEADER)
-            .pl(SPACE_6)
-            .pr(SPACE_4)
-            .py(SPACE_2)
-            .border_b(RULE)
-            .border_color(palette.line)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .font_family(FONT_MONO)
-                    .text_size(TEXT_BODY)
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(SelectableText::new(pod.name.clone())),
-            )
-            .child(shell)
+        PanelHeader::new(INSPECTOR_ID, pod.name.clone())
+            .mono()
+            .status(pod.status, pod.reason.clone())
+            .action(shell)
             .into_any_element()
     }
 

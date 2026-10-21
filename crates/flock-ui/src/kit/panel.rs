@@ -11,12 +11,14 @@ use gpui::{
 
 use super::diagnosis::EVENTS;
 use super::selectable::{SelectableText, SelectableWords};
+use super::status::StatusText;
 use super::text::SectionLabel;
+use super::tooltip::Tooltip;
 use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::theme::{
-    ActiveTheme, ERROR_BAR, EVENT_AGE, FONT_MONO, GLYPH_SLOT, LINE_PROSE, Palette, RADIUS, RULE,
-    SECTION_HEADER, SECTION_INDENT, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6,
-    TEXT_BODY, TEXT_LABEL, TEXT_SMALL,
+    ActiveTheme, ERROR_BAR, EVENT_AGE, FONT_MONO, GLYPH_SLOT, LINE_PROSE, PANEL_HEADER, Palette,
+    RADIUS, RULE, SECTION_HEADER, SECTION_INDENT, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5,
+    SPACE_6, TEXT_BODY, TEXT_LABEL, TEXT_SMALL, TEXT_UI,
 };
 
 pub const EVENTS_EMPTY: &str = "No events in the last 1h";
@@ -194,6 +196,92 @@ impl RenderOnce for PanelSection {
             .border_color(palette.line)
             .child(header)
             .children(body)
+    }
+}
+
+#[derive(IntoElement)]
+pub struct PanelHeader {
+    id: SharedString,
+    title: SharedString,
+    mono: bool,
+    status: Option<(Status, SharedString)>,
+    actions: Vec<AnyElement>,
+}
+
+impl PanelHeader {
+    pub fn new(panel: &str, title: impl Into<SharedString>) -> Self {
+        Self {
+            id: format!("{panel}-header").into(),
+            title: title.into(),
+            mono: false,
+            status: None,
+            actions: Vec::new(),
+        }
+    }
+
+    pub fn mono(mut self) -> Self {
+        self.mono = true;
+        self
+    }
+
+    pub fn status(mut self, status: Status, label: impl Into<SharedString>) -> Self {
+        self.status = Some((status, label.into()));
+        self
+    }
+
+    pub fn action(mut self, action: impl IntoElement) -> Self {
+        self.actions.push(action.into_any_element());
+        self
+    }
+}
+
+impl RenderOnce for PanelHeader {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let palette = cx.palette();
+        let title_id = format!("{}-title", self.id);
+        let tooltip = self.title.clone();
+        let title = div()
+            .id(ElementId::Name(title_id.clone().into()))
+            .debug_selector(move || title_id)
+            .flex_initial()
+            .min_w_0()
+            .truncate()
+            .text_size(TEXT_UI)
+            .font_weight(FontWeight::SEMIBOLD)
+            .when(self.mono, |title| title.font_family(FONT_MONO))
+            .tooltip(Tooltip::text(tooltip))
+            .child(SelectableText::new(self.title));
+        let status_id = format!("{}-status", self.id);
+        let status = self.status.map(|(status, label)| {
+            div()
+                .debug_selector(move || status_id)
+                .flex_none()
+                .text_size(TEXT_BODY)
+                .child(StatusText::new(status, label))
+        });
+        let actions = (!self.actions.is_empty()).then(|| {
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(SPACE_4)
+                .children(self.actions)
+        });
+        let id = self.id.to_string();
+        div()
+            .debug_selector(move || id)
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(SPACE_5)
+            .h(PANEL_HEADER)
+            .px(SPACE_6)
+            .border_b(RULE)
+            .border_color(palette.line)
+            .child(title)
+            .children(status)
+            .child(div().flex_1())
+            .children(actions)
     }
 }
 

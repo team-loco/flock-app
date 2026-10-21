@@ -679,8 +679,10 @@ impl Shell {
         });
         let cluster = location.cluster.as_ref();
         let pod = location.inspecting.as_ref().or(resource);
+        let on_pods = location.page == Page::Pods;
         screens.pods.update(cx, |pods, cx| {
             pods.set_context(cluster, pod, &preferences, cx);
+            pods.sync_inspection(on_pods, resource, cx);
         });
         if let Some(bar) = self.filter_bar_at(ix, location, cx) {
             let namespaces = snapshot

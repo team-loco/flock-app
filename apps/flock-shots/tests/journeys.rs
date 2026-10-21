@@ -2243,3 +2243,67 @@ fn live_related_sections_link_autoscalers_volumes_and_routes() -> anyhow::Result
     ui.save_png(&dir.join("flock-loco-http-route-dark.png"))?;
     check_invariants(&mut ui, &before, "following Related links")
 }
+
+const CRASHING_POD: (&str, &str, &str) = ("fleet-a", "payments", "checkout-api");
+const POD_SECTIONS: [&str; 5] = [
+    "error-blocks",
+    "pod-inspector-details",
+    "pod-inspector-labels",
+    "pod-inspector-containers",
+    "pod-inspector-related",
+];
+
+fn crashing_pod(state: &AppState) -> Option<ResourceRef> {
+    let (cluster, namespace, prefix) = CRASHING_POD;
+    state
+        .snapshot
+        .pods
+        .iter()
+        .find(|pod| {
+            pod.cluster.as_str() == cluster
+                && pod.namespace == namespace
+                && pod.name.starts_with(prefix)
+        })
+        .map(flock_core::pods::Pod::resource)
+}
+
+fn related_loaded(state: &AppState, target: &ResourceRef) -> bool {
+    state
+        .snapshot
+        .details
+        .get(&target.cluster)
+        .and_then(|detail| detail.related(target))
+        .is_some()
+}
+
+#[test]
+fn live_a_crashing_pod_picked_by_the_list_shows_every_section_and_its_related_objects()
+-> anyhow::Result<()> {
+    let Some(make) = kind()? else {
+        return Ok(());
+    };
+    let mut ui = open(Screen::Flock, &make)?;
+    switch_to(&mut ui, CRASHING_POD.0)?;
+    visit(&mut ui, Page::Pods)?;
+    all_namespaces(&mut ui, "pod-namespace")?;
+    filter(&mut ui, CRASHING_POD.2)?;
+    let target = crashing_pod(&ui.state()).context("fleet-a has no checkout-api pod")?;
+    ui.wait_until(PAGE_TIMEOUT, |state| related_loaded(state, &target))
+        .context("Related never loaded for the pod the list picked")?;
+    let header = ui.bounds("pod-inspector-header").context("no pod header")?;
+    for section in POD_SECTIONS {
+        let shown = ui
+            .bounds(section)
+            .with_context(|| format!("the inspector has no {section}"))?;
+        anyhow::ensure!(
+            shown.top() >= header.bottom(),
+            "{section} starts above the header"
+        );
+    }
+    anyhow::ensure!(
+        ui.bounds("related-loading").is_none(),
+        "Related still shows its loading row"
+    );
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(SHOTS_DIR);
+    ui.save_png(&dir.join("fleet-a-crashing-pod-dark.png"))
+}
