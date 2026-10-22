@@ -34,13 +34,13 @@ use shell::{NodeShell, SHELL_LABEL, TERMINAL_ID, ask_shell};
 const VERSION_SEPARATOR: char = '-';
 const ALL_POOLS: &str = "All pools";
 const NAME_WEIGHT: f32 = 1.6;
-const NAME_MIN: Pixels = px(150.);
+const NAME_MIN: Pixels = px(100.);
 const POOL_WEIGHT: f32 = 1.;
-const POOL_MIN: Pixels = px(90.);
-const STATUS_WIDTH: Pixels = px(176.);
+const POOL_MIN: Pixels = px(70.);
+const STATUS_WIDTH: Pixels = px(150.);
 const PODS_WIDTH: Pixels = px(56.);
 const REQUEST_WEIGHT: f32 = 0.8;
-const REQUEST_MIN: Pixels = px(70.);
+const REQUEST_MIN: Pixels = px(112.);
 const REQUEST_FIGURE: Pixels = px(32.);
 const VERSION_WIDTH: Pixels = px(64.);
 const AGE_WIDTH: Pixels = px(40.);
@@ -864,7 +864,7 @@ fn columns() -> Vec<Column<NodeRow>> {
         .end()
         .fixed(PODS_WIDTH)
         .sort_by_key(|r: &NodeRow| r.node.pods),
-        Column::new("CPU req", |r: &NodeRow, p| {
+        Column::new("CPU requested", |r: &NodeRow, p| {
             request_cell(r.node.cpu_commitment.requests, p)
         })
         .mono()
@@ -875,7 +875,7 @@ fn columns() -> Vec<Column<NodeRow>> {
                 .requests
                 .total_cmp(&b.node.cpu_commitment.requests)
         }),
-        Column::new("Mem req", |r: &NodeRow, p| {
+        Column::new("Memory requested", |r: &NodeRow, p| {
             request_cell(r.node.memory_commitment.requests, p)
         })
         .mono()
