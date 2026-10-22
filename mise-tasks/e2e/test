@@ -1,25 +1,14 @@
 #!/usr/bin/env bash
 #MISE description="Prove Flock works against the kind scenario clusters: up, verify, run every FLOCK_E2E test"
-#USAGE flag "--skip-up" help="Do not create or reapply the clusters; require them to exist"
+#USAGE flag "--skip-up" help="Do not create the clusters; require them to exist and reset their scenarios"
 #USAGE flag "--no-teardown" help="Keep the clusters after the run (the default outside CI)"
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLUSTERS=(fleet-a fleet-b flock-loco)
-FLUX_KINDS=kustomizations.kustomize.toolkit.fluxcd.io,helmreleases.helm.toolkit.fluxcd.io
-RECONCILING_NAMESPACE=ledger
-RECONCILING_RELEASE=helmrelease/ledger-migrations
+BUILD_LOG_TAIL=80
 skip_up="${usage_skip_up:-false}"
 no_teardown="${usage_no_teardown:-false}"
-
-restart_expired_reconciling() {
-  local ready
-  ready="$("${kubectl[@]}" -n "${RECONCILING_NAMESPACE}" get "${RECONCILING_RELEASE}" --ignore-not-found \
-    -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')"
-  if [[ -n "${ready}" && "${ready}" != Unknown ]]; then
-    "${kubectl[@]}" -n "${RECONCILING_NAMESPACE}" delete "${RECONCILING_RELEASE}" --wait
-  fi
-}
 
 teardown() {
   if [[ "${no_teardown}" != true && -n "${CI:-}" ]]; then
@@ -28,6 +17,20 @@ teardown() {
 }
 work_dir="$(mktemp -d)"
 trap 'teardown; rm -rf "${work_dir}"' EXIT
+
+cd "${ROOT}"
+test_scope=(--workspace)
+loco_feature=flock-shots/loco
+if [[ "$(uname -s)" != Darwin ]]; then
+  test_scope+=(--exclude flock --exclude flock-shots --exclude flock-ui --exclude flock-update)
+  loco_feature=flock-kube/loco,flock-demo/loco
+fi
+build_log="${work_dir}/build.log"
+{
+  mise exec -- cargo nextest run "${test_scope[@]}" --no-run \
+    && mise exec -- cargo nextest run "${test_scope[@]}" --no-run --features "${loco_feature}"
+} >"${build_log}" 2>&1 &
+build_pid="$!"
 
 kubeconfigs=()
 for cluster in "${CLUSTERS[@]}"; do
@@ -44,30 +47,20 @@ for cluster in "${CLUSTERS[@]}"; do
   file="${work_dir}/${cluster}.kubeconfig"
   mise exec -- kind get kubeconfig --name "${cluster}" >"${file}"
 done
-export FLOCK_E2E=1
 
-for cluster in "${CLUSTERS[@]}"; do
-  context="kind-${cluster}"
-  kubectl=(mise exec -- kubectl --context "${context}")
-  restart_expired_reconciling
-  "${kubectl[@]}" apply -f "${ROOT}/e2e/scenarios/common/namespaces.yaml"
-  "${kubectl[@]}" apply -k "${ROOT}/e2e/scenarios/${cluster}"
-  "${kubectl[@]}" uncordon "${cluster}-control-plane"
-  if [[ -x "${ROOT}/e2e/${cluster}/install" ]]; then
-    "${ROOT}/e2e/${cluster}/install"
-  fi
-  "${kubectl[@]}" annotate "${FLUX_KINDS}" --all --all-namespaces --overwrite \
-    "reconcile.fluxcd.io/requestedAt=$(date +%s)"
-done
-
-"${ROOT}/e2e/verify"
-
-cd "${ROOT}"
-test_scope=(--workspace)
-loco_feature=flock-shots/loco
-if [[ "$(uname -s)" != Darwin ]]; then
-  test_scope+=(--exclude flock --exclude flock-shots --exclude flock-ui --exclude flock-update)
-  loco_feature=flock-kube/loco,flock-demo/loco
+if [[ "${skip_up}" == true ]]; then
+  for cluster in "${CLUSTERS[@]}"; do
+    "${ROOT}/e2e/reset" "${cluster}"
+  done
+  "${ROOT}/e2e/verify"
 fi
+
+if ! wait "${build_pid}"; then
+  printf 'test build failed, last %s lines:\n' "${BUILD_LOG_TAIL}" >&2
+  tail -n "${BUILD_LOG_TAIL}" "${build_log}" >&2
+  exit 1
+fi
+
+export FLOCK_E2E=1
 mise exec -- cargo nextest run "${test_scope[@]}" --no-tests=pass
 mise exec -- cargo nextest run "${test_scope[@]}" --no-tests=pass --features "${loco_feature}"

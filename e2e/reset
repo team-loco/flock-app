@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CLUSTER="${1:?usage: e2e/reset <cluster>}"
+CONTEXT="kind-${CLUSTER}"
+FLUX_KINDS=kustomizations.kustomize.toolkit.fluxcd.io,helmreleases.helm.toolkit.fluxcd.io
+RECONCILING_NAMESPACE=ledger
+RECONCILING_RELEASE=helmrelease/ledger-migrations
+
+kubectl=(mise exec -- kubectl --context "${CONTEXT}")
+
+ready="$("${kubectl[@]}" -n "${RECONCILING_NAMESPACE}" get "${RECONCILING_RELEASE}" --ignore-not-found \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')"
+if [[ -n "${ready}" && "${ready}" != Unknown ]]; then
+  "${kubectl[@]}" -n "${RECONCILING_NAMESPACE}" delete "${RECONCILING_RELEASE}" --wait
+fi
+"${kubectl[@]}" apply -f "${ROOT}/e2e/scenarios/common/namespaces.yaml"
+if live_pod="$("${kubectl[@]}" -n apps get pod unschedulable -o json 2>/dev/null)" \
+  && python3 "${ROOT}/e2e/migrate.py" <<<"${live_pod}"; then
+  "${kubectl[@]}" -n apps delete pod unschedulable --wait
+fi
+"${kubectl[@]}" apply -k "${ROOT}/e2e/scenarios/${CLUSTER}"
+"${kubectl[@]}" uncordon "${CLUSTER}-control-plane"
+if [[ -x "${ROOT}/e2e/${CLUSTER}/install" ]]; then
+  "${ROOT}/e2e/${CLUSTER}/install"
+fi
+"${kubectl[@]}" annotate "${FLUX_KINDS}" --all --all-namespaces --overwrite \
+  "reconcile.fluxcd.io/requestedAt=$(date +%s)"

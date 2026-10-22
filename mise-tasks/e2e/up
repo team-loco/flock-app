@@ -5,13 +5,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLUSTERS=(fleet-a fleet-b flock-loco)
 WAIT_TIMEOUT=300s
+LOG_TAIL=80
 
-mise exec -- docker info >/dev/null
-existing_clusters="$(mise exec -- kind get clusters)"
-for cluster in "${CLUSTERS[@]}"; do
-  context="kind-${cluster}"
+setup_cluster() {
+  local cluster="$1"
+  local context="kind-${cluster}"
+  local config="${ROOT}/e2e/${cluster}/kind.yaml"
+  export KUBECONFIG="${log_dir}/${cluster}.kubeconfig"
   if ! [[ $'\n'"${existing_clusters}"$'\n' == *$'\n'"${cluster}"$'\n'* ]]; then
-    config="${ROOT}/e2e/${cluster}/kind.yaml"
     if [[ -f "${config}" ]]; then
       mise exec -- kind create cluster --name "${cluster}" --config "${config}" --wait "${WAIT_TIMEOUT}"
     else
@@ -23,15 +24,34 @@ for cluster in "${CLUSTERS[@]}"; do
   mise exec -- kubectl --context "${context}" apply -k "${ROOT}/e2e/metrics-server"
   mise exec -- kubectl --context "${context}" -n kube-system rollout status deployment/metrics-server --timeout="${WAIT_TIMEOUT}"
   mise exec -- flux install --context "${context}" --timeout "${WAIT_TIMEOUT}"
-  mise exec -- kubectl --context "${context}" apply -f "${ROOT}/e2e/scenarios/common/namespaces.yaml"
-  if live_pod="$(mise exec -- kubectl --context "${context}" -n apps get pod unschedulable -o json 2>/dev/null)" \
-    && python3 "${ROOT}/e2e/migrate.py" <<<"${live_pod}"; then
-    mise exec -- kubectl --context "${context}" -n apps delete pod unschedulable --wait
+  "${ROOT}/e2e/reset" "${cluster}"
+}
+
+mise exec -- docker info >/dev/null
+existing_clusters="$(mise exec -- kind get clusters)"
+log_dir="$(mktemp -d)"
+trap 'rm -rf "${log_dir}"' EXIT
+
+pids=()
+for cluster in "${CLUSTERS[@]}"; do
+  setup_cluster "${cluster}" >"${log_dir}/${cluster}.log" 2>&1 &
+  pids+=("$!")
+done
+
+failed=false
+for i in "${!CLUSTERS[@]}"; do
+  if ! wait "${pids[i]}"; then
+    failed=true
+    printf '%s setup failed, last %s lines:\n' "${CLUSTERS[i]}" "${LOG_TAIL}" >&2
+    tail -n "${LOG_TAIL}" "${log_dir}/${CLUSTERS[i]}.log" >&2
   fi
-  mise exec -- kubectl --context "${context}" apply -k "${ROOT}/e2e/scenarios/${cluster}"
-  if [[ -x "${ROOT}/e2e/${cluster}/install" ]]; then
-    "${ROOT}/e2e/${cluster}/install"
-  fi
+done
+if [[ "${failed}" == true ]]; then
+  exit 1
+fi
+
+for cluster in "${CLUSTERS[@]}"; do
+  mise exec -- kind export kubeconfig --name "${cluster}"
 done
 
 "${ROOT}/e2e/verify"
