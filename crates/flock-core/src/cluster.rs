@@ -366,10 +366,7 @@ mod tests {
     #[test]
     fn small_namespace_usage_reads_in_cores() {
         let small = loaded("loco", 2, (0.004, 0.002), 0);
-        assert_eq!(
-            small.cpu_against_requests().labelled(),
-            "<0.01 / <0.01 cores"
-        );
+        assert_eq!(small.cpu_against_requests().labelled(), "0.00 / 0.00 cores");
         let busy = loaded("web", 2, (0.028, 0.35), 0);
         assert_eq!(busy.cpu_against_requests().labelled(), "0.03 / 0.35 cores");
         assert_eq!(small.cpu_share().map(|s| (s * 100.).round()), Some(200.));

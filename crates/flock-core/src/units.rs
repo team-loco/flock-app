@@ -1,8 +1,6 @@
 const MILLIS_PER_CORE: f64 = 1000.;
 const MICROS_PER_CORE: f64 = 1_000_000.;
 const NANOS_PER_CORE: f64 = 1_000_000_000.;
-const SMALLEST_FIGURE: f32 = 0.01;
-const BELOW_SMALLEST: &str = "<0.01";
 const BYTES_PER_MIB: u64 = 1024 * 1024;
 const BETWEEN: &str = " / ";
 const WHOLE_CORE: f64 = 1.;
@@ -46,11 +44,7 @@ impl Amount {
 }
 
 pub fn figure(value: f32) -> String {
-    let value = value.max(0.);
-    if value > 0. && value < SMALLEST_FIGURE {
-        return BELOW_SMALLEST.to_owned();
-    }
-    format!("{value:.2}")
+    format!("{:.2}", value.max(0.))
 }
 
 #[allow(clippy::cast_possible_truncation)]
@@ -137,15 +131,15 @@ mod tests {
     }
 
     #[test]
-    fn figures_below_a_hundredth_read_as_less_than() {
-        assert_eq!(figure(0.004), "<0.01");
-        assert_eq!(figure(0.0099), "<0.01");
+    fn figures_below_a_hundredth_round_to_zero() {
+        assert_eq!(figure(0.004), "0.00");
+        assert_eq!(figure(0.0099), "0.01");
         assert_eq!(figure(0.01), "0.01");
     }
 
     #[test]
     fn millicores_read_in_cores() {
-        assert_eq!(millicores(3), "<0.01");
+        assert_eq!(millicores(3), "0.00");
         assert_eq!(millicores(28), "0.03");
         assert_eq!(millicores(350), "0.35");
         assert_eq!(millicores(1500), "1.50");
@@ -160,7 +154,7 @@ mod tests {
 
     #[test]
     fn used_against_requested_shares_one_unit() {
-        assert_eq!(against(Some(0.003), 0.001), "<0.01 / <0.01");
+        assert_eq!(against(Some(0.003), 0.001), "0.00 / 0.00");
         assert_eq!(against(Some(0.2), 1.), "0.20 / 1.00");
         assert_eq!(against(Some(0.028), 0.35), "0.03 / 0.35");
         assert_eq!(against(None, 0.2), "— / 0.20");
