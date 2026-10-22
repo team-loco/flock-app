@@ -46,8 +46,7 @@ impl FluxListScreen {
                 .row_key(|o: &FluxObject| format!("{}/{}", o.key.namespace, o.key.name).into())
                 .type_ahead(|o: &FluxObject| o.key.name.clone().into())
         });
-        let filter = cx
-            .new(|cx| FilterBar::new("flux-filter", FluxObject::FILTER.placeholder(), window, cx));
+        let filter = cx.new(|cx| FilterBar::new("flux-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })

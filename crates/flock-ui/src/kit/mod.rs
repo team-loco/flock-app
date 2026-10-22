@@ -40,7 +40,7 @@ pub use diagnosis::{CONDITIONS, ConditionTable, EVENTS, reason_cell, reason_tool
 pub use diff::{DiffFile, DiffLine, DiffView, LineKind, parse_unified};
 pub use dock::{Dock, DockState, DockTab};
 pub use editor::{CodeEditor, CodeEditorState, highlight_yaml, mark_error, yaml_editor};
-pub use filter::{FilterBar, FilterEvent, chip_label, match_note};
+pub use filter::{FILTER_PLACEHOLDER, FilterBar, FilterEvent, chip_label, match_note};
 pub use header::{MetaLine, PageHeader, PageTitle};
 pub use input::{
     InputEvent, TextArea, TextAreaState, TextField, TextFieldDown, TextFieldEnd, TextFieldEnter,
@@ -49,10 +49,7 @@ pub use input::{
 };
 pub use inspector::{Inspector, InspectorPane, clamp_inspector_width};
 pub use load::{ConnectionProgress, EmptyState, ErrorState, ShowAll, Skeleton};
-pub use log::{
-    LOG_CAPACITY, LOG_FILTER_PLACEHOLDER, Level, LineSource, LogLine, LogView, find_matches,
-    strip_ansi,
-};
+pub use log::{LOG_CAPACITY, Level, LineSource, LogLine, LogView, find_matches, strip_ansi};
 pub use matrix::{Matrix, MatrixCell};
 pub use menu::{ActionMenu, MenuItem};
 pub use message::RawMessage;

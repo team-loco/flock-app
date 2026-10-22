@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use crate::filter::{FilterScope, FilterSpec, TextFilter};
+use crate::filter::{FilterSpec, TextFilter};
 use crate::{ClusterId, ResourceRef, Status};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -216,10 +216,6 @@ impl Source {
 
     pub fn matches(&self, query: &TextFilter) -> bool {
         Self::FILTER.matches(self, query, Some(&self.namespace), &[])
-    }
-
-    pub fn page_scope() -> FilterScope {
-        Self::FILTER.scope().union(SyncRow::FILTER.scope())
     }
 
     pub fn status(&self) -> Status {

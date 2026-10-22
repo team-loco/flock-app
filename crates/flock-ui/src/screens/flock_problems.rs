@@ -75,8 +75,7 @@ impl FleetProblemsScreen {
             cx.notify();
         })
         .detach();
-        let placeholder = Problem::FILTER.placeholder();
-        let filter = cx.new(|cx| FilterBar::new("fleet-problem-filter", placeholder, window, cx));
+        let filter = cx.new(|cx| FilterBar::new("fleet-problem-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })
@@ -367,6 +366,7 @@ fn columns() -> Vec<Column<Row>> {
         .flex(OBJECT_WEIGHT, OBJECT_MIN),
         Column::colored_text("Message", row_message, |_, p| p.fg2)
             .highlight()
+            .mono()
             .tooltip(row_message)
             .flex(MESSAGE_WEIGHT, MESSAGE_MIN),
         Column::new("Age", |row: &Row, palette| match row {

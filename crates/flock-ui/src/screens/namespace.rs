@@ -20,9 +20,9 @@ use gpui::{
 
 use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::kit::{
-    ActionMenu, Activate, AmountText, EmptyState, EventRow, HealthTile, HealthTiles, InputEvent,
-    InspectorPane, Link, PageHeader, PanelSection, SectionLabel, Skeleton, StackedBar, StatusGlyph,
-    TextField, TextFieldState, TileNote, events_count, events_empty,
+    ActionMenu, Activate, AmountText, EmptyState, EventRow, FILTER_PLACEHOLDER, HealthTile,
+    HealthTiles, InputEvent, InspectorPane, Link, PageHeader, PanelSection, SectionLabel, Skeleton,
+    StackedBar, StatusGlyph, TextField, TextFieldState, TileNote, events_count, events_empty,
 };
 use crate::screens::edit::{EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{ScreenEvent, edit_item};
@@ -39,7 +39,6 @@ const ACTIONS: &str = "namespace-actions";
 const CONTENTS: &str = "Contents";
 const NEEDS_ATTENTION: &str = "Needs attention";
 const ISSUE_ROW: &str = "namespace-issue";
-const FILTER: &str = "Filter by name";
 const NO_MATCH: &str = "Nothing in this namespace matches the filter.";
 const EMPTY: &str = "Empty: ";
 const USAGE: &str = "Usage";
@@ -99,7 +98,7 @@ fn weight(count: usize) -> f32 {
 
 impl NamespaceScreen {
     pub fn new(target: ResourceRef, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER));
+        let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
         let subscription = cx.subscribe(&filter, |_, _, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
                 cx.notify();

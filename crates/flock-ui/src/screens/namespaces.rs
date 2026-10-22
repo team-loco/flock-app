@@ -66,14 +66,7 @@ impl NamespacesScreen {
             }
         })
         .detach();
-        let filter = cx.new(|cx| {
-            FilterBar::new(
-                "namespace-filter",
-                Namespace::FILTER.placeholder(),
-                window,
-                cx,
-            )
-        });
+        let filter = cx.new(|cx| FilterBar::new("namespace-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })

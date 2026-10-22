@@ -5,7 +5,7 @@ use gpui::{
 };
 
 use crate::kit::{
-    Button, InputEvent, LOG_FILTER_PLACEHOLDER, LogView, MetaLine, PageHeader, TextField,
+    Button, FILTER_PLACEHOLDER, InputEvent, LogView, MetaLine, PageHeader, TextField,
     TextFieldState,
 };
 use crate::screens::workload::kit_line;
@@ -36,8 +36,7 @@ impl LogsScreen {
         cx: &mut Context<Self>,
     ) -> Self {
         let logs = cx.new(|_| LogView::new("tab-logs"));
-        let filter =
-            cx.new(|cx| TextFieldState::new(window, cx).placeholder(LOG_FILTER_PLACEHOLDER));
+        let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
         let filter_events = cx.subscribe(&filter, |this, filter, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
                 let query = filter.read(cx).value();

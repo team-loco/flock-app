@@ -116,10 +116,8 @@ impl EventsScreen {
             this.choose_namespace(scope, cx);
         })
         .detach();
-        let filter = cx.new(|cx| {
-            FilterBar::new("event-filter", Event::FILTER.placeholder(), window, cx)
-                .scope(namespaces.clone())
-        });
+        let filter =
+            cx.new(|cx| FilterBar::new("event-filter", window, cx).scope(namespaces.clone()));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })
@@ -367,6 +365,7 @@ fn columns() -> Vec<Column<Event>> {
             |_, p| p.fg2,
         )
         .highlight()
+        .mono()
         .tooltip(|event: &Event| event.message.clone().into())
         .flex(EVENT_MESSAGE_WEIGHT, EVENT_MESSAGE_MIN),
         Column::colored_text("Age", |e: &Event| age(e.age).into(), |_, p| p.mute)

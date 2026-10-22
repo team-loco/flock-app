@@ -571,6 +571,7 @@ fn problem_columns() -> Vec<Column<ProblemRow>> {
         .mono()
         .flex(PROBLEM_OBJECT_WEIGHT, PROBLEM_OBJECT_MIN),
         Column::colored_text("Message", problem_message, |_, p| p.fg2)
+            .mono()
             .tooltip(problem_message)
             .flex(PROBLEM_MESSAGE_WEIGHT, PROBLEM_MESSAGE_MIN),
         Column::new("Age", |row: &ProblemRow, palette| match row {

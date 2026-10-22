@@ -20,10 +20,10 @@ use gpui::{
 use crate::kit::status_symbols;
 use crate::kit::{
     ActionMenu, Button, CodeView, Column, ConfirmDialog, DockState, EmptyState, Entrance,
-    ErrorBlocks, ErrorState, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView,
-    MenuItem, PageHeader, PanelSection, Rule, SectionHeader, SectionLabel, Segmented,
-    SelectableWords, Skeleton, Table, TableEvent, Terminal, TextFieldState, Toast, Width, confirm,
-    issue_stack, min_row_width, slide_in, toast,
+    ErrorBlocks, ErrorState, FILTER_PLACEHOLDER, InspectorPane, KeyValue, Link, LogView, MenuItem,
+    PageHeader, PanelSection, Rule, SectionHeader, SectionLabel, Segmented, SelectableWords,
+    Skeleton, Table, TableEvent, Terminal, TextFieldState, Toast, Width, confirm, issue_stack,
+    min_row_width, slide_in, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::related::{OnPick, Pick, page_sections};
@@ -165,8 +165,7 @@ impl WorkloadScreen {
         });
         let dock = cx.new(|_| DockState::new());
         let logs = cx.new(|_| LogView::new("workload-logs"));
-        let filter =
-            cx.new(|cx| TextFieldState::new(window, cx).placeholder(LOG_FILTER_PLACEHOLDER));
+        let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
         let terminal = cx.new(|cx| Terminal::new("workload-terminal", cx));
         let mut subscriptions = vec![cx.subscribe(&pods, |this, table, event: &TableEvent, cx| {
             let TableEvent::Selected(ix) = event else {

@@ -7,7 +7,7 @@ use gpui::{
 
 use crate::kit::{
     ActionMenu, Button, Checkbox, CodeView, Column, ConfirmDialog, DiffFile, DiffLine, DiffView,
-    Dock, DockState, DockTab, IconButton, InputEvent, Kbd, KeyValue, LOG_FILTER_PLACEHOLDER, Level,
+    Dock, DockState, DockTab, FILTER_PLACEHOLDER, IconButton, InputEvent, Kbd, KeyValue, Level,
     LineChart, LineKind, Link, LogLine, LogView, MenuItem, Meter, MiniMeter, PageHeader, Rule,
     SectionHeader, Segmented, Select, Series, Split, StackedBar, StatusGlyph, StatusText, Table,
     TextField, TextFieldState, Toast, Toggle, confirm, overlay_layer, parse_unified, toast,
@@ -264,8 +264,7 @@ impl Gallery {
                 .fit_content()
         });
         let path = cx.new(|cx| TextFieldState::new(window, cx).default_value("apps/payments"));
-        let filter =
-            cx.new(|cx| TextFieldState::new(window, cx).placeholder(LOG_FILTER_PLACEHOLDER));
+        let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
         let logs = cx.new(|cx| {
             let mut view = LogView::new("logs");
             let lines = LOGS.map(|(ts, level, msg)| LogLine::new(Some(ts), Some(level), msg));

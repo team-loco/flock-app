@@ -297,10 +297,6 @@ mod tests {
         assert!(ns.matches(&TextFilter::parse("ns:pay")));
         assert!(!ns.matches(&TextFilter::parse("ns:orders")));
         assert!(ns.matches(&TextFilter::parse("ns:pay active")));
-        assert_eq!(
-            Namespace::FILTER.placeholder(),
-            "Filter by name, phase or label"
-        );
     }
 
     fn namespace(name: &str, problems: Counts) -> Namespace {

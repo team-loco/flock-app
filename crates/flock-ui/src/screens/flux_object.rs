@@ -1047,6 +1047,7 @@ fn history_columns() -> Vec<Column<HistoryEntry>> {
             |h: &HistoryEntry| h.message.clone().into(),
             |_, p| p.fg2,
         )
+        .mono()
         .tooltip(|h: &HistoryEntry| h.message.clone().into())
         .flex(1., Pixels::ZERO),
         Column::colored_text(

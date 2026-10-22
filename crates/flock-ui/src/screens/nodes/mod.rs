@@ -145,10 +145,7 @@ impl NodesScreen {
             this.refresh(cx);
         })
         .detach();
-        let filter = cx.new(|cx| {
-            FilterBar::new("node-filter", Node::FILTER.placeholder(), window, cx)
-                .scope(pools.clone())
-        });
+        let filter = cx.new(|cx| FilterBar::new("node-filter", window, cx).scope(pools.clone()));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })
