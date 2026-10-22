@@ -493,6 +493,8 @@ const INSPECTOR_SCROLL_TO_END: f32 = -4000.;
 const FIRST_POD: &str = "checkout-api-7f9c6d-x2lqp";
 const AVAILABLE_DEFAULT: f32 = 72.;
 
+const REQUEST_COLUMN_MIN: f32 = 112.;
+
 fn selector(text: String) -> &'static str {
     text.leak()
 }
@@ -1520,6 +1522,20 @@ fn node_inspector_keeps_the_disk_row_when_the_kubelet_summary_is_unavailable() -
     let unavailable = ui.bounds("node-usage-Disk").map(|b| b.size);
     assert!(measured.is_some());
     assert_eq!(measured, unavailable);
+    Ok(())
+}
+
+#[test]
+fn the_nodes_table_fits_beside_the_inspector_with_whole_request_headers() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Nodes)?;
+    ui.click("nodes-row-0")?;
+    let pane = bounds_of(&mut ui, "node-inspector-pane")?;
+    let row = bounds_of(&mut ui, "nodes-row-0")?;
+    assert!(row.right() <= pane.left(), "{row:?} {pane:?}");
+    let cpu = bounds_of(&mut ui, "nodes-resize-4")?;
+    let memory = bounds_of(&mut ui, "nodes-resize-5")?;
+    let request_column = memory.origin.x - cpu.origin.x;
+    assert!(request_column >= gpui::px(REQUEST_COLUMN_MIN), "{request_column:?}");
     Ok(())
 }
 

@@ -187,7 +187,7 @@ pub fn state_label(ready: bool, schedulable: bool) -> String {
 
 pub fn request_line(allocatable: f32, commitment: Commitment) -> String {
     format!(
-        "req {} ({}) · lim {} ({})",
+        "requested {} ({}) · limits {} ({})",
         figure(commitment.requests * allocatable),
         percent(commitment.requests),
         figure(commitment.limits * allocatable),
@@ -488,7 +488,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             request_line(15.89, commitment),
-            "req 14.14 (89%) · lim 21.93 (138%)"
+            "requested 14.14 (89%) · limits 21.93 (138%)"
         );
     }
 
