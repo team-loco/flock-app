@@ -108,6 +108,10 @@ fn rows(group: &Group, pick: &OnPick, palette: &Palette) -> Vec<AnyElement> {
     rows
 }
 
+pub fn related_count(related: &Related) -> usize {
+    related.groups.iter().map(|group| group.total).sum()
+}
+
 pub fn inspector_section(related: Option<&Related>, pick: &OnPick, cx: &App) -> AnyElement {
     let palette = cx.palette();
     let Some(related) = related else {

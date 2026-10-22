@@ -4256,18 +4256,53 @@ fn the_pod_picked_when_the_list_opens_loads_its_related_objects() -> anyhow::Res
 }
 
 #[test]
-fn a_loading_related_section_reserves_one_row() -> anyhow::Result<()> {
+fn a_loading_related_section_in_the_pod_inspector_shows_only_its_header() -> anyhow::Result<()> {
     let (mut ui, _updates) = Ui::scripted(Screen::Pods)?;
     ui.press("cmd-j")?;
     ui.scroll(
         "pod-inspector-pane",
         gpui::point(gpui::px(0.), gpui::px(INSPECTOR_SCROLL_TO_END)),
     )?;
-    assert!(ui.bounds("loading-skeleton").is_none());
-    let loading = ui
-        .bounds("related-loading")
-        .context("Related shows no loading row")?;
-    assert_eq!(loading.size.height, flock_ui::theme::ROW_DOCUMENT);
+    assert!(ui.bounds("related-loading").is_none());
+    assert!(ui.bounds("pod-inspector-related").is_some());
+    assert!(ui.bounds("pod-inspector-related-body").is_none());
+    Ok(())
+}
+
+struct WithoutRelated;
+
+impl flock_core::Backend for WithoutRelated {
+    fn start(
+        self: Box<Self>,
+        updates: flock_core::Sender<flock_core::Update>,
+        commands: flock_core::Receiver<Command>,
+    ) {
+        let (inner, filtered) = async_channel::unbounded();
+        std::thread::spawn(move || {
+            while let Ok(command) = commands.recv_blocking() {
+                let loads_related = matches!(
+                    command,
+                    Command::OpenResource(_) | Command::InspectResource(_)
+                );
+                if !loads_related && inner.send_blocking(command).is_err() {
+                    break;
+                }
+            }
+        });
+        Box::new(flock_demo::DemoBackend).start(updates, filtered);
+    }
+}
+
+#[test]
+fn the_workload_events_section_does_not_move_when_related_finishes_loading() -> anyhow::Result<()> {
+    let factory: flock_shots::BackendFactory = std::rc::Rc::new(|| Ok(Box::new(WithoutRelated)));
+    let mut loading = Ui::live(Screen::Workload, flock::Preset::default(), factory)?;
+    let before = bounds_of(&mut loading, "workload-inspector-events")?.top();
+    assert!(loading.bounds("workload-inspector-related-body").is_none());
+    let mut loaded = Ui::open(Screen::Workload)?;
+    let after = bounds_of(&mut loaded, "workload-inspector-events")?.top();
+    assert!(loaded.bounds("workload-inspector-related-body").is_none());
+    assert_eq!(before, after);
     Ok(())
 }
 
@@ -5045,14 +5080,10 @@ fn a_nav_row_with_three_badges_keeps_its_full_label() -> anyhow::Result<()> {
     Ok(())
 }
 
-const WORKLOAD_SECTIONS: [(&str, &str); 3] = [
+const WORKLOAD_SECTIONS: [(&str, &str); 2] = [
     (
         "workload-inspector-conditions",
         "workload-inspector-conditions-body",
-    ),
-    (
-        "workload-inspector-related",
-        "workload-inspector-related-body",
     ),
     (
         "workload-inspector-events",
@@ -5080,6 +5111,7 @@ fn the_workload_inspector_orders_conditions_spec_related_and_events() -> anyhow:
     for (section, body) in WORKLOAD_SECTIONS {
         assert!(ui.bounds(body).is_some(), "{section} starts closed");
     }
+    assert!(ui.bounds("workload-inspector-related-body").is_none());
     Ok(())
 }
 
@@ -5109,6 +5141,11 @@ fn the_workload_inspector_lists_events_and_links_related_objects() -> anyhow::Re
     use gpui::{point, px};
     let mut ui = Ui::open(Screen::Workload)?;
     assert!(ui.bounds("object-events").is_some());
+    let toggle = bounds_of(&mut ui, "workload-inspector-related-toggle")?;
+    let inspector = bounds_of(&mut ui, "workload-inspector-pane")?;
+    let to_center = point(px(0.), inspector.center().y - toggle.center().y);
+    ui.scroll("workload-inspector-pane", to_center)?;
+    ui.click("workload-inspector-related-toggle")?;
     let link = bounds_of(&mut ui, "related-Services-checkout-api")?;
     let pane = bounds_of(&mut ui, "workload-inspector-pane")?;
     let delta = point(px(0.), pane.center().y - link.center().y);
@@ -5121,5 +5158,66 @@ fn the_workload_inspector_lists_events_and_links_related_objects() -> anyhow::Re
         opened,
         Some(("Service".to_owned(), "checkout-api".to_owned()))
     );
+    Ok(())
+}
+
+fn scroll_to_end(ui: &mut Ui, pane: &'static str) -> anyhow::Result<()> {
+    ui.scroll(pane, gpui::point(gpui::px(0.), gpui::px(-4000.)))
+}
+
+fn assert_yaml_row_opens_the_editor(
+    mut ui: Ui,
+    pane: &'static str,
+    row: &'static str,
+) -> anyhow::Result<()> {
+    scroll_to_end(&mut ui, pane)?;
+    ui.click(row)?;
+    assert_eq!(ui.state().location().page, Page::EditYaml);
+    Ok(())
+}
+
+#[test]
+fn the_namespace_inspector_ends_with_a_yaml_row_that_opens_the_editor() -> anyhow::Result<()> {
+    let ui = Ui::open(Screen::Namespace)?;
+    assert_yaml_row_opens_the_editor(ui, "namespace-inspector-pane", "namespace-inspector-yaml")
+}
+
+#[test]
+fn the_node_inspector_ends_with_a_yaml_row_that_opens_the_editor() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Nodes)?;
+    ui.press("cmd-e down")?;
+    assert_yaml_row_opens_the_editor(ui, "node-inspector-pane", "node-inspector-yaml")
+}
+
+#[test]
+fn the_pod_inspector_ends_with_a_yaml_row_that_opens_the_editor() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.press("cmd-j")?;
+    assert_yaml_row_opens_the_editor(ui, "pod-inspector-pane", "pod-inspector-yaml")
+}
+
+#[test]
+fn the_problem_inspector_ends_with_a_yaml_row_that_opens_the_editor() -> anyhow::Result<()> {
+    let ui = Ui::open(Screen::FleetProblems)?;
+    assert_yaml_row_opens_the_editor(ui, "fleet-problem-pane", "fleet-problem-yaml")
+}
+
+#[test]
+fn the_workload_inspector_yaml_row_shows_the_yaml_like_command_y() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    assert!(ui.bounds("workload-edit-yaml").is_none());
+    scroll_workload_inspector_down(&mut ui)?;
+    ui.click("workload-inspector-yaml")?;
+    assert!(ui.bounds("workload-edit-yaml").is_some());
+    Ok(())
+}
+
+#[test]
+fn the_flux_inspector_yaml_row_shows_the_yaml_like_command_y() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Kustomization)?;
+    assert!(ui.bounds("flux-edit-yaml").is_none());
+    scroll_to_end(&mut ui, "flux-inspector-pane")?;
+    ui.click("flux-inspector-yaml")?;
+    assert!(ui.bounds("flux-edit-yaml").is_some());
     Ok(())
 }

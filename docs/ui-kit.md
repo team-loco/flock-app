@@ -599,8 +599,10 @@ PanelSection::new("pod-inspector", "Containers")   // id pod-inspector-container
     .trailing(Link::new("all", "All →"))           // right of the header, does not toggle
     .closed()                                      // default when nothing is saved
     .child(body)
-PanelSection::events(panel, events)                // "N · last 1h", EventList body
+PanelSection::events(panel, events)                // "N", EventList body
 PanelSection::labels(panel, labels)                // count + LabelChips
+PanelSection::new(..).closed().pending()           // header only while data loads; moves nothing
+Inspector::yaml(on_click)                          // bottom YAML row (YamlRow), same command as the YAML key
 PanelHeader::new("pod-inspector", name)          // one row, theme::PANEL_HEADER high
     .mono()
     .status(pod.status, pod.reason.clone())        // glyph + word beside the name, never wraps

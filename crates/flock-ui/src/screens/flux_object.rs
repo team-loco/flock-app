@@ -1,4 +1,4 @@
-use crate::kit::SelectableText;
+use crate::kit::{SelectableText, YamlRow};
 use flock_core::flux::{
     FluxDetail, HelmDetail, HelmRevision, HistoryEntry, InventoryFilter, ManagedObject, Phase,
     SpecRow, peer_summary,
@@ -659,6 +659,9 @@ impl FluxObjectPage {
             .children(dependencies)
             .children(values)
             .child(PanelSection::new(ASIDE_ID, SPEC).child(spec_list(&object.spec, SPEC_LABEL)))
+            .child(YamlRow::new(ASIDE_ID, move |_, cx| {
+                this.update(cx, FluxObjectPage::toggle_yaml).ok();
+            }))
             .into_any_element()
     }
 }

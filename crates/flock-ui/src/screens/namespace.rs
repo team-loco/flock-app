@@ -21,7 +21,7 @@ use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::kit::{
     ActionMenu, Activate, AmountText, EmptyState, ErrorBlocks, EventRow, FILTER_PLACEHOLDER,
     HealthTile, HealthTiles, InputEvent, InspectorPane, Link, PageHeader, PanelSection,
-    SectionLabel, Skeleton, StackedBar, TextField, TextFieldState, TileNote, events_count,
+    SectionLabel, Skeleton, StackedBar, TextField, TextFieldState, TileNote, YamlRow, events_count,
     events_empty,
 };
 use crate::screens::edit::{EditYaml, YAML_CONTEXT, edit_command};
@@ -468,8 +468,12 @@ impl NamespaceScreen {
             .map(|issue| issue.issue.clone())
             .collect();
         let screen = cx.weak_entity();
+        let yaml_screen = screen.clone();
         let blocks = ErrorBlocks::new(issues).on_open(move |ix, _, cx| {
             screen.update(cx, |this, cx| this.open_issue(ix, cx)).ok();
+        });
+        let yaml = YamlRow::new(INSPECTOR_ID, move |_, cx| {
+            yaml_screen.update(cx, NamespaceScreen::edit).ok();
         });
         div()
             .id("namespace-aside")
@@ -484,6 +488,7 @@ impl NamespaceScreen {
             .children(labels)
             .children(policies)
             .child(self.events(cx))
+            .child(yaml)
             .into_any_element()
     }
 

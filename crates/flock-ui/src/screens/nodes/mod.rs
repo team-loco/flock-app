@@ -24,6 +24,7 @@ use crate::kit::{
     Presence, Select, SelectEvent, Table, TableEvent, Terminal, chip_label, confirm, slide_in,
     slide_out,
 };
+use crate::screens::edit::edit_command;
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR_NODE, Palette, SEARCH_WIDTH, SPACE_3, SPACE_4, SPACE_5,
@@ -440,6 +441,8 @@ impl NodesScreen {
             .as_ref()
             .map(|cluster| node_ref(cluster, &node.name));
         let screen = cx.weak_entity();
+        let yaml_screen = screen.clone();
+        let yaml_target = target.clone();
         let shell = Button::new(SHELL_ID, SHELL_LABEL)
             .primary()
             .small()
@@ -448,7 +451,7 @@ impl NodesScreen {
                     ask_shell(target, screen.clone(), window, cx);
                 }
             });
-        Inspector::new(INSPECTOR_ID, node.name.clone())
+        let inspector = Inspector::new(INSPECTOR_ID, node.name.clone())
             .mono()
             .width(INSPECTOR_NODE)
             .status(node.status, node.state.clone())
@@ -461,8 +464,16 @@ impl NodesScreen {
             .panel(PanelSection::labels(INSPECTOR_ID, node.labels.clone()).closed())
             .panel(conditions)
             .panel(pods)
-            .panel(PanelSection::events(INSPECTOR_ID, events))
-            .into_any_element()
+            .panel(PanelSection::events(INSPECTOR_ID, events));
+        match yaml_target {
+            Some(target) => inspector
+                .yaml(move |_, cx| {
+                    let command = ScreenEvent::Command(edit_command(target.clone()));
+                    let _ = yaml_screen.update(cx, |_, cx| cx.emit(command));
+                })
+                .into_any_element(),
+            None => inspector.into_any_element(),
+        }
     }
 
     fn top_pods(&self, node: &Node, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {

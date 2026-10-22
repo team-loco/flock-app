@@ -15,15 +15,15 @@ use super::selectable::{SelectableText, SelectableWords};
 use super::status::StatusText;
 use super::text::SectionLabel;
 use super::tooltip::Tooltip;
-use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
+use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT, EXTERNAL_LINK};
 use crate::theme::{
-    ActiveTheme, ERROR_BAR, EVENT_AGE, FONT_MONO, GLYPH_SLOT, PANEL_HEADER, Palette, RADIUS, RULE,
-    SECTION_HEADER, SECTION_INDENT, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6,
-    TEXT_BODY, TEXT_LABEL, TEXT_SMALL, TEXT_UI,
+    ActiveTheme, ERROR_BAR, EVENT_AGE, FONT_MONO, GLYPH_SLOT, ICON_LINK, PANEL_HEADER, Palette,
+    RADIUS, RULE, SECTION_HEADER, SECTION_INDENT, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5,
+    SPACE_6, TEXT_BODY, TEXT_LABEL, TEXT_SMALL, TEXT_UI,
 };
 
-pub const EVENTS_EMPTY: &str = "No events in the last 1h";
-const EVENTS_WINDOW: &str = "last 1h";
+pub const EVENTS_EMPTY: &str = "0";
+const YAML: &str = "YAML";
 const NO_LABELS: &str = "None";
 const LABELS: &str = "Labels";
 const COUNT_PREFIX: &str = "×";
@@ -34,9 +34,9 @@ type IndexHandler = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
 pub fn events_count(shown: usize, total: usize) -> String {
     if shown < total {
-        format!("{shown} of {total} · {EVENTS_WINDOW}")
+        format!("{shown} of {total}")
     } else {
-        format!("{total} · {EVENTS_WINDOW}")
+        total.to_string()
     }
 }
 
@@ -71,6 +71,7 @@ pub struct PanelSection {
     count_color: Option<Hsla>,
     trailing: Option<AnyElement>,
     open_by_default: bool,
+    pending: bool,
     body: Vec<AnyElement>,
 }
 
@@ -84,6 +85,7 @@ impl PanelSection {
             count_color: None,
             trailing: None,
             open_by_default: true,
+            pending: false,
             body: Vec::new(),
         }
     }
@@ -100,6 +102,11 @@ impl PanelSection {
 
     pub fn trailing(mut self, trailing: impl IntoElement) -> Self {
         self.trailing = Some(trailing.into_any_element());
+        self
+    }
+
+    pub fn pending(mut self) -> Self {
+        self.pending = true;
         self
     }
 
@@ -133,7 +140,7 @@ impl RenderOnce for PanelSection {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = cx.palette();
         let id = self.id.to_string();
-        let open = section_open(&id, self.open_by_default, cx);
+        let open = !self.pending && section_open(&id, self.open_by_default, cx);
         let chevron = if open { CHEVRON_DOWN } else { CHEVRON_RIGHT };
         let count = self.count.map(|count| {
             div()
@@ -197,6 +204,53 @@ impl RenderOnce for PanelSection {
             .border_color(palette.line)
             .child(header)
             .children(body)
+    }
+}
+
+#[derive(IntoElement)]
+pub struct YamlRow {
+    id: SharedString,
+    on_click: Handler,
+}
+
+impl YamlRow {
+    pub fn new(panel: &str, on_click: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        Self {
+            id: format!("{panel}-yaml").into(),
+            on_click: Rc::new(on_click),
+        }
+    }
+}
+
+impl RenderOnce for YamlRow {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let palette = cx.palette();
+        let hover = palette.hover;
+        let selector = self.id.to_string();
+        let handler = self.on_click;
+        div()
+            .id(ElementId::Name(self.id))
+            .debug_selector(move || selector)
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(SPACE_4)
+            .h(SECTION_HEADER)
+            .pl(SPACE_6 + GLYPH_SLOT + SPACE_4)
+            .pr(SPACE_6)
+            .border_b(RULE)
+            .border_color(palette.line)
+            .cursor_pointer()
+            .hover(move |style| style.bg(hover))
+            .on_click(move |_, window, cx| handler(window, cx))
+            .child(div().flex_1().child(SectionLabel::new(YAML)))
+            .child(
+                svg()
+                    .path(EXTERNAL_LINK)
+                    .flex_none()
+                    .size(ICON_LINK)
+                    .text_color(palette.mute),
+            )
     }
 }
 
@@ -623,8 +677,9 @@ mod tests {
             section_id("namespace-inspector", "Network policies"),
             "namespace-inspector-network-policies"
         );
-        assert_eq!(events_count(4, 4), "4 · last 1h");
-        assert_eq!(events_count(4, 11), "4 of 11 · last 1h");
+        assert_eq!(events_count(4, 4), "4");
+        assert_eq!(events_count(4, 11), "4 of 11");
+        assert_eq!(events_count(0, 0), EVENTS_EMPTY);
     }
 
     #[gpui::test]
