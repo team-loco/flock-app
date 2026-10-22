@@ -1535,7 +1535,10 @@ fn the_nodes_table_fits_beside_the_inspector_with_whole_request_headers() -> any
     let cpu = bounds_of(&mut ui, "nodes-resize-4")?;
     let memory = bounds_of(&mut ui, "nodes-resize-5")?;
     let request_column = memory.origin.x - cpu.origin.x;
-    assert!(request_column >= gpui::px(REQUEST_COLUMN_MIN), "{request_column:?}");
+    assert!(
+        request_column >= gpui::px(REQUEST_COLUMN_MIN),
+        "{request_column:?}"
+    );
     Ok(())
 }
 
