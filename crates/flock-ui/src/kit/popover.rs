@@ -135,11 +135,11 @@ pub fn at(position: Point<Pixels>, popover: AnyElement) -> impl IntoElement {
     .priority(1)
 }
 
-pub fn above_right(popover: AnyElement) -> impl IntoElement {
-    div().absolute().right(SPACE_3).top(-SPACE_2).child(
+pub fn above_left(popover: AnyElement) -> impl IntoElement {
+    div().absolute().left(SPACE_3).top(-SPACE_2).child(
         deferred(
             anchored()
-                .anchor(Anchor::BottomRight)
+                .anchor(Anchor::BottomLeft)
                 .snap_to_window_with_margin(SPACE_4)
                 .child(popover),
         )

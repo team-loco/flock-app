@@ -803,10 +803,7 @@ mod tests {
         assert_eq!(location.logs, Some(target));
         assert_eq!(location.workload(), None);
         let title = crate::tabs::title(&location, &state.snapshot);
-        assert_eq!(
-            (title.kind.as_str(), title.label.as_str()),
-            (crate::tabs::LOGS_KIND, "cart")
-        );
+        assert_eq!(title.label, "Logs");
         state.retarget(Some(&ClusterId::new("b")));
         assert_eq!(state.location().page, Page::ClusterOverview);
         assert_eq!(state.location().logs, None);
@@ -889,8 +886,6 @@ mod tests {
                 .history_label(&state.snapshot)
                 .starts_with("Edit · ")
         );
-        let title = crate::tabs::title(&location, &state.snapshot);
-        assert_eq!(title.kind, crate::tabs::EDIT_KIND);
         assert!(!state.ready_for(&Command::EditYaml(deployment("gone"))));
     }
 
@@ -926,10 +921,7 @@ mod tests {
         assert_eq!(location.crd, Some(key.clone()));
         assert_eq!(location.commands(), vec![open]);
         let title = crate::tabs::title(&location, &state.snapshot);
-        assert_eq!(
-            (title.kind.as_str(), title.label.as_str()),
-            (crate::tabs::CRD_KIND, "Certificate")
-        );
+        assert_eq!(title.label, "Certificate");
         let object = key.object(ClusterId::new("a"), Some("web".into()), "tls".into());
         state.apply(&Command::OpenResource(object.clone()));
         assert_eq!(state.location().page, Page::CustomResources);
@@ -938,7 +930,7 @@ mod tests {
         assert_eq!(state.workload(), None);
         assert_eq!(state.location().detail(), None);
         let title = crate::tabs::title(state.location(), &state.snapshot);
-        assert_eq!(title.kind, "Certificate");
+        assert_eq!(title.label, "tls");
         state.retarget(Some(&ClusterId::new("b")));
         assert_eq!(
             state.location(),
@@ -967,10 +959,7 @@ mod tests {
                 .starts_with("payments/checkout-api")
         );
         let title = crate::tabs::title(&location, &state.snapshot);
-        assert_eq!(
-            (title.kind.as_str(), title.label.as_str()),
-            (crate::tabs::HELM_KIND, "checkout-api")
-        );
+        assert_eq!(title.label, "checkout-api");
         state.retarget(Some(&ClusterId::new("b")));
         assert_eq!(
             state.location(),

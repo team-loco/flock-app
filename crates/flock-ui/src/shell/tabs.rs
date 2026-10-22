@@ -10,8 +10,8 @@ use super::tab_motion::{self, Ghost};
 use crate::assets::SPLIT;
 use crate::kit::{MenuItem, Tooltip, status_symbols};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, FONT_STATUS, ICON_SPLIT, Palette, RULE, SPACE_3, SPACE_4, SPACE_6,
-    SPLIT_BUTTON, TAB_CLOSE, TAB_ENTER, TEXT_BODY, TEXT_GLYPH, TEXT_LABEL, TEXT_UI, TITLE_ROW,
+    ActiveTheme, FONT_STATUS, ICON_SPLIT, Palette, RULE, SPACE_3, SPACE_4, SPACE_6, SPLIT_BUTTON,
+    TAB_CLOSE, TAB_ENTER, TEXT_BODY, TEXT_GLYPH, TEXT_UI, TITLE_ROW,
 };
 
 const CLOSE_GLYPH: &str = "×";
@@ -432,23 +432,16 @@ fn tab_content(title: &TabTitle, active: bool, palette: &Palette) -> impl IntoEl
         .whitespace_nowrap()
         .text_size(TEXT_BODY)
         .children(glyph)
-        .children((!title.kind.is_empty()).then(|| {
-            div()
-                .font_family(FONT_MONO)
-                .text_size(TEXT_LABEL)
-                .text_color(palette.mute)
-                .child(SharedString::from(title.kind.clone()))
-        }))
         .child(
             div()
                 .text_color(label_color)
                 .child(SharedString::from(title.label.clone())),
         )
-        .children(title.cluster.clone().map(|cluster| {
+        .child(
             div()
                 .text_color(palette.mute)
-                .child(SharedString::from(cluster))
-        }))
+                .child(SharedString::from(title.context.clone())),
+        )
 }
 
 fn close_button(shown: Shown, id: TabId, palette: &Palette, cx: &mut Context<Shell>) -> AnyElement {

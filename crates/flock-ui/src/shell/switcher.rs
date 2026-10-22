@@ -15,13 +15,13 @@ use super::Shell;
 use crate::assets::{CHEVRON_UP, GEAR};
 use crate::kit::list_keys::{Nav, TypeAhead, find, typed};
 use crate::kit::{
-    ConfirmDialog, Dismissal, MenuItem, Tooltip, above_right, appear, confirm, surface,
+    ConfirmDialog, Dismissal, MenuItem, Tooltip, above_left, appear, confirm, surface,
 };
 use crate::screens::settings::DISCONNECT;
 use crate::theme::{
     ActiveTheme, FONT_MONO, FONT_SANS, FONT_STATUS, GLYPH_SLOT, ICON, Palette, RADIUS, ROW_CLUSTER,
-    ROW_NAV, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SWITCHER_GEAR, SWITCHER_LIST,
-    SWITCHER_MENU, SWITCHER_WIDTH, TEXT_BODY, TEXT_GLYPH, TEXT_LABEL, TEXT_UI,
+    ROW_NAV, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SWITCHER_GEAR,
+    SWITCHER_LIST, SWITCHER_MENU, SWITCHER_WIDTH, TEXT_BODY, TEXT_GLYPH, TEXT_LABEL, TEXT_UI,
 };
 
 pub const SWITCH_KEY: &str = "⌘⇧C";
@@ -423,8 +423,9 @@ impl ClusterSwitcher {
             .items_center()
             .gap(SPACE_4)
             .h_full()
-            .px(crate::theme::SPACE_6)
-            .border_l(RULE)
+            .pl(SPACE_6)
+            .pr(SPACE_5)
+            .border_r(RULE)
             .border_color(palette.line)
             .cursor_pointer()
             .font_family(FONT_SANS)
@@ -570,7 +571,7 @@ impl ClusterSwitcher {
             .debug_selector(|| MENU_ID.to_owned())
             .absolute()
             .bottom_0()
-            .right(SWITCHER_WIDTH + SPACE_5)
+            .left(SWITCHER_WIDTH + SPACE_2)
             .w(SWITCHER_MENU)
             .capture_any_mouse_down(cx.listener(|this, _, _, _| this.menu_pressed = true))
             .child(header)
@@ -694,7 +695,7 @@ impl Render for ClusterSwitcher {
                 .children(menu)
                 .child(panel);
             let key = ElementId::NamedInteger(ID.into(), self.generation);
-            above_right(appear(anchor, key))
+            above_left(appear(anchor, key))
         });
         div()
             .id(ElementId::NamedInteger(ID.into(), 0))
