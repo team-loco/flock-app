@@ -135,10 +135,10 @@ Settled; change only with a new entry that says why.
     accent text is ≥ 4.5:1 on `editor`, `panel` and its own tint, `onacc` is ≥ 4.5:1 on `acc`,
     and `selfg`, `fg`, `fg2`, `mute` are ≥ 4.5:1 and status glyphs ≥ 3:1 on `sel`. The override
     applies to every window at once and to the gpui-component kit theme.
-25. **v3 sidebar and status-bar switcher** (design v3; product owner; collapse chevron and width superseded by 52): supersedes the parts of 16
+25. **v3 sidebar and status-bar switcher** (design v3; product owner; collapse chevron, expand chevron and width superseded by 52): supersedes the parts of 16
     and 18 that conflict. The sidebar is 200px: the 28px strip (traffic lights only), then a 32px
     header with the scope (All clusters, or the active tab's cluster) and the ⌘B collapse
-    chevron, then the nav. Collapsed it is 76px with only the expand chevron: the product owner
+    chevron, then the nav. Collapsed it is 0px wide (52): the product owner
     overrides the design's vertical scope label, so `kit::VerticalLabel` stays removed. The cluster
     switcher moves from the start of the status bar to its right end, after a 1px rule; the
     problem counts come first and the scope facts ellipsize. Its menu is 290px, anchored to the
@@ -191,8 +191,7 @@ Settled; change only with a new entry that says why.
     strip, so it never shares a row with the lights). The traffic lights are centred in it
     (`TRAFFIC_LIGHT_X` 10px, `TRAFFIC_LIGHT_Y` 9px) and never move. ⌘B collapses the sidebar to 0px;
     the first pane's tab strip then starts with the window controls: `TRAFFIC_LIGHTS_INSET` (78px,
-    the 60px measured span of the three lights from x 10 plus 8px) of empty, draggable row, then the
-    expand chevron. The controls' width animates with the sidebar's, so tabs never pass under the
+    the 60px measured span of the three lights from x 10 plus 8px) of empty, draggable row. The controls' width animates with the sidebar's, so tabs never pass under the
     lights. Empty parts of the title row drag the window in both states.
 30. **Split right** (#77, design v3 `Split` and `PaneTabs`; product owner; supersedes the split
     deferral in 17): ⌘\ or the 32px Split right button at the end of a pane's tab strip opens the
@@ -513,8 +512,9 @@ Settled; change only with a new entry that says why.
     `kit::RawMessage` (a forbidden list reads like the API server's, `secrets is forbidden:
     cannot list resource "secrets"`) followed by what breaks; verdicts read Ready and
     Unauthorized, and the footer counts `N of M ready`.
-52. **The sidebar resizes by dragging; dragging it closed replaces the collapse chevron** (product
-    owner; supersedes the ⌘B collapse chevron in 25 and the fixed 200px width in 25 and 29): the
+52. **The sidebar resizes by dragging; dragging it closed replaces the collapse chevron, and the
+    drag handle or ⌘B replaces the expand chevron** (product owner; supersedes the collapse and
+    expand chevrons in 25 and the fixed 200px width in 25 and 29): the
     sidebar's right edge is a `SPLITTER`-wide handle with a col-resize cursor whose 1px line stays
     the sidebar border until hovered or dragged, then turns `acc`. Dragging resizes live, with no
     animation, between `theme::SIDEBAR_MIN` (160px) and `SIDEBAR_MAX` (360px), starting from
@@ -523,7 +523,8 @@ Settled; change only with a new entry that says why.
     `SPLITTER`-wide handle on the window's left edge, from below the title row (so the traffic
     lights and window dragging keep the row) to the status bar, drags it open again; it never
     stops a mouse down, so clicks reach the content under it. ⌘B still toggles with the
-    `COLLAPSE` animation and reopens at the last open width; the expand chevron in the closed
-    title row stays. The width (`sidebar_width`, absent for the default) and whether it is closed
+    `COLLAPSE` animation and reopens at the last open width. The closed title row has no expand
+    chevron: the left-edge handle and ⌘B are the only ways back, and the title row is the
+    traffic-light inset of empty, draggable row. The width (`sidebar_width`, absent for the default) and whether it is closed
     (`sidebar_closed`) live in `AppSettings`, next to the inspector widths; each window starts
     from them and every drag or ⌘B writes them, so the width is shared by all windows.

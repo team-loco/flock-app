@@ -6,9 +6,9 @@ use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
 use flock_ui::theme::{
-    FONT_MONO, FONT_SANS, FONT_STATUS, ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SIDEBAR_CLOSE,
-    SIDEBAR_MAX, SIDEBAR_MIN, SPACE_3, SPACE_5, SPLITTER, TAB_ENTER, TAB_LEAVE, TEXT_MONO, TEXT_UI,
-    TITLE_ROW, TRAFFIC_LIGHTS_INSET,
+    FONT_MONO, FONT_SANS, FONT_STATUS, INSPECTOR_IN, SIDEBAR, SIDEBAR_CLOSE, SIDEBAR_MAX,
+    SIDEBAR_MIN, SPACE_5, SPLITTER, TAB_ENTER, TAB_LEAVE, TEXT_MONO, TEXT_UI, TITLE_ROW,
+    TRAFFIC_LIGHTS_INSET,
 };
 use gpui::{Pixels, SharedString, TextRun, font, rgb};
 
@@ -48,7 +48,7 @@ fn command_b_hides_the_sidebar_and_insets_the_tab_strip() -> anyhow::Result<()> 
     assert!(!ui.state().sidebar_open);
     assert_eq!(ui.state().location().cluster, before.location().cluster);
     assert_eq!(width(&mut ui, "sidebar"), Some(Pixels::ZERO));
-    let controls = TRAFFIC_LIGHTS_INSET + ICON_BUTTON + SPACE_3;
+    let controls = TRAFFIC_LIGHTS_INSET;
     assert_eq!(width(&mut ui, "window-controls"), Some(controls));
     assert_eq!(left(&mut ui, "tab-0"), Some(controls));
     ui.press("cmd-b")?;
@@ -60,15 +60,13 @@ fn command_b_hides_the_sidebar_and_insets_the_tab_strip() -> anyhow::Result<()> 
 }
 
 #[test]
-fn the_expand_chevron_sits_after_the_traffic_lights_in_the_title_row() -> anyhow::Result<()> {
+fn a_closed_sidebar_has_no_expand_chevron_and_reopens_from_the_edge_or_command_b()
+-> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     ui.press("cmd-b")?;
-    let chevron = ui
-        .bounds("expand-sidebar")
-        .ok_or_else(|| anyhow::anyhow!("no expand chevron"))?;
-    assert_eq!(chevron.origin.x, TRAFFIC_LIGHTS_INSET);
-    assert_eq!(chevron.center().y, TITLE_ROW / 2.);
-    ui.click("expand-sidebar")?;
+    assert!(ui.bounds("expand-sidebar").is_none());
+    assert!(ui.bounds("sidebar-reopen").is_some());
+    ui.press("cmd-b")?;
     assert!(ui.state().sidebar_open);
     Ok(())
 }
@@ -2144,7 +2142,7 @@ fn the_sidebar_names_its_scope_and_hides_it_when_collapsed() -> anyhow::Result<(
     assert!(ui.bounds("sidebar-scope").is_some());
     ui.press("cmd-b")?;
     assert!(ui.bounds("sidebar-scope").is_none());
-    assert!(ui.bounds("expand-sidebar").is_some());
+    assert!(ui.bounds("expand-sidebar").is_none());
     Ok(())
 }
 
