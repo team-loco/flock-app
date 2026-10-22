@@ -1,9 +1,6 @@
-use std::ops::Range;
-
 use gpui::{App, Hsla, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div};
 
 use super::selectable::SelectableWords;
-use super::text::Highlighted;
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, RADIUS_SMALL, RULE, SPACE_1, SPACE_3, TEXT_SMALL,
 };
@@ -19,7 +16,6 @@ pub struct RawMessage {
     text: SharedString,
     color: Option<Hsla>,
     layout: Layout,
-    highlights: Vec<Range<usize>>,
 }
 
 impl RawMessage {
@@ -28,17 +24,11 @@ impl RawMessage {
             text: text.into(),
             color: None,
             layout: Layout::Block,
-            highlights: Vec::new(),
         }
     }
 
     pub fn color(mut self, color: Hsla) -> Self {
         self.color = Some(color);
-        self
-    }
-
-    pub fn highlights(mut self, ranges: Vec<Range<usize>>) -> Self {
-        self.highlights = ranges;
         self
     }
 
@@ -66,13 +56,7 @@ impl RenderOnce for RawMessage {
             .text_color(self.color.unwrap_or(palette.fg2));
         match self.layout {
             Layout::Block => frame.child(SelectableWords::new(self.text)),
-            Layout::Line if self.highlights.is_empty() => {
-                frame.overflow_hidden().truncate().child(self.text)
-            }
-            Layout::Line => frame
-                .overflow_hidden()
-                .truncate()
-                .child(Highlighted::new(self.text, self.highlights)),
+            Layout::Line => frame.overflow_hidden().truncate().child(self.text),
         }
     }
 }

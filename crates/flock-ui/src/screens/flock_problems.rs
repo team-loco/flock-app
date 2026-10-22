@@ -10,7 +10,7 @@ use gpui::{
 
 use crate::kit::{
     Button, Column, EmptyState, FilterBar, FilterEvent, Inspector, KeyValue, PanelSection,
-    RawMessage, StatusGlyph, Table, TableEvent, chip_label, status_symbols,
+    StatusGlyph, Table, TableEvent, chip_label, status_symbols,
 };
 use crate::screens::{ListShape, empty_list};
 use crate::theme::{
@@ -339,6 +339,13 @@ fn object(problem: &Problem, palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
+fn row_message(row: &Row) -> SharedString {
+    match row {
+        Row::Item(p) => p.message.clone().into(),
+        Row::Group { .. } => SharedString::default(),
+    }
+}
+
 fn columns() -> Vec<Column<Row>> {
     vec![
         Column::new("", |row: &Row, _| match row {
@@ -358,14 +365,10 @@ fn columns() -> Vec<Column<Row>> {
         })
         .mono()
         .flex(OBJECT_WEIGHT, OBJECT_MIN),
-        Column::new("Message", |row: &Row, palette| match row {
-            Row::Item(p) => RawMessage::new(p.message.clone())
-                .color(palette.fg2)
-                .line()
-                .into_any_element(),
-            Row::Group { .. } => div().into_any_element(),
-        })
-        .flex(MESSAGE_WEIGHT, MESSAGE_MIN),
+        Column::colored_text("Message", row_message, |_, p| p.fg2)
+            .highlight()
+            .tooltip(row_message)
+            .flex(MESSAGE_WEIGHT, MESSAGE_MIN),
         Column::new("Age", |row: &Row, palette| match row {
             Row::Item(p) => text(age(p.age), palette.mute),
             Row::Group { .. } => div().into_any_element(),

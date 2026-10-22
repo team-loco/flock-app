@@ -21,8 +21,8 @@ use gpui::{
 use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::kit::{
     ActionMenu, Activate, AmountText, EmptyState, EventRow, HealthTile, HealthTiles, InputEvent,
-    InspectorPane, Link, PageHeader, PanelSection, RawMessage, SectionLabel, Skeleton, StackedBar,
-    StatusGlyph, TextField, TextFieldState, TileNote, events_count, events_empty,
+    InspectorPane, Link, PageHeader, PanelSection, SectionLabel, Skeleton, StackedBar, StatusGlyph,
+    TextField, TextFieldState, TileNote, events_count, events_empty,
 };
 use crate::screens::edit::{EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{ScreenEvent, edit_item};
@@ -574,7 +574,9 @@ fn issue_row(
         div()
             .flex_1()
             .min_w_0()
-            .child(RawMessage::new(issue.issue.message.clone()).line())
+            .truncate()
+            .text_color(palette.fg2)
+            .child(issue.issue.message.clone())
     });
     div()
         .debug_selector(move || selector)
