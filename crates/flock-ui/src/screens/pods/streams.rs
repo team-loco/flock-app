@@ -4,14 +4,13 @@ use flock_core::{
     Sink, Source, Status, TermSize, time,
 };
 use gpui::{
-    AnyElement, Context, Focusable, InteractiveElement, IntoElement, ParentElement, Styled,
+    AnyElement, App, Context, Focusable, InteractiveElement, IntoElement, ParentElement, Styled,
     Subscription, Task, Window, div,
 };
 
-use super::PodsScreen;
-use crate::assets::DOWNLOAD;
+use super::{CONTAINER_SELECT, PodsScreen};
 use crate::kit::{
-    Button, Dock, DockTab, EmptyState, IconButton, LogView, Segmented, Terminal, TerminalEvent,
+    Button, Dock, DockState, DockTab, EmptyState, LogView, MenuItem, Terminal, TerminalEvent,
     TextField, Toast, confirm, toast,
 };
 use crate::screens::no_shell::{DEBUG_IMAGE, confirm_debug, no_shell_state, start_debug_button};
@@ -23,18 +22,16 @@ const LOGS_TAB: usize = 0;
 const TERMINAL_TAB: usize = 1;
 const LOGS_LABEL: &str = "Logs";
 const TERMINAL_LABEL: &str = "Terminal";
-const FOLLOW: &str = "follow";
-const WRAP: &str = "wrap";
-const RAW: &str = "raw";
 const SEPARATOR: &str = " · ";
 const PREVIOUS_INSTANCE: &str = "previous instance";
 const PREVIOUS_BANNER: &str = "pod-logs-previous-banner";
-const TIME: &str = "time";
+const PREVIOUS_ITEM: &str = "Previous container logs";
+const DOWNLOAD_ITEM: &str = "Download logs";
+const CONTAINER_LABEL: &str = "pod-container-label";
 const SELECT_FOR_LOGS: &str = "Select a pod to see its logs.";
 const SELECT_FOR_SHELL: &str = "Select a pod to open a shell.";
 const DOCK_EMPTY: &str = "pods-dock-empty";
 const DEBUG: &str = "debug container";
-const DOWNLOAD_TOOLTIP: &str = "Download logs";
 const DOWNLOADS: &str = "Downloads";
 const SAVE_FAILED: &str = "Could not save the logs";
 const SAVED: &str = "Saved logs";
@@ -110,6 +107,16 @@ pub fn exit_note(code: Option<i32>) -> String {
     }
 }
 
+fn close_with(
+    cx: &Context<PodsScreen>,
+    close: fn(&mut PodsScreen, &mut Context<PodsScreen>),
+) -> impl Fn(&mut Window, &mut App) + 'static {
+    let screen = cx.weak_entity();
+    move |_, cx| {
+        screen.update(cx, close).ok();
+    }
+}
+
 impl PodsScreen {
     fn container_name(&self) -> Option<String> {
         self.selected_container().map(|c| c.name.clone())
@@ -139,32 +146,95 @@ impl PodsScreen {
         cx.notify();
     }
 
-    pub(super) fn sync_streams(&mut self, cx: &mut Context<Self>) {
-        let pod = self.selected_pod().map(Pod::resource);
-        let container = self.container_name();
-        let target = pod.zip(container);
-        let instance = self.log_instance();
-        let log_key = target.clone().map(|(pod, container)| LogKey {
+    fn log_key(&self) -> Option<LogKey> {
+        let pod = self.selected_pod().map(Pod::resource)?;
+        let container = self.container_name()?;
+        Some(LogKey {
             pod,
             container,
-            instance,
-        });
-        if self.log.as_ref().map(|s| &s.key) != log_key.as_ref() {
-            self.log = None;
-            self.logs.update(cx, LogView::clear);
-            if let Some(key) = log_key {
-                self.open_log(key, cx);
-            }
+            instance: self.log_instance(),
+        })
+    }
+
+    fn follow_logs(&mut self, cx: &mut Context<Self>) {
+        let key = self.log_key();
+        if self.log.as_ref().map(|s| &s.key) == key.as_ref() {
+            return;
         }
-        let shell_key = target.map(|(pod, container)| ShellKey { pod, container });
+        self.log = None;
+        self.logs.update(cx, LogView::clear);
+        if let Some(key) = key {
+            self.open_log(key, cx);
+        }
+    }
+
+    fn close_logs_tab(&mut self, cx: &mut Context<Self>) {
+        self.log = None;
+        self.logs.update(cx, |logs, cx| {
+            logs.clear(cx);
+            logs.set_query("", cx);
+        });
+        self.clear_search = true;
+        self.leave_closed_tab(TERMINAL_TAB, self.shell.is_some(), cx);
+    }
+
+    fn close_terminal_tab(&mut self, cx: &mut Context<Self>) {
+        self.terminal.update(cx, Terminal::clear);
+        self.close_shell(cx);
+        self.leave_closed_tab(LOGS_TAB, self.log.is_some(), cx);
+    }
+
+    fn leave_closed_tab(&mut self, other: usize, other_open: bool, cx: &mut Context<Self>) {
+        self.dock.update(cx, |dock, cx| {
+            if other_open {
+                dock.select(other, cx);
+            } else {
+                dock.close(cx);
+            }
+        });
+        cx.notify();
+    }
+
+    pub(super) fn reset_dock(&mut self, cx: &mut Context<Self>) {
+        self.log = None;
+        self.logs.update(cx, |logs, cx| {
+            logs.clear(cx);
+            logs.set_query("", cx);
+        });
+        self.clear_search = true;
+        self.terminal.update(cx, Terminal::clear);
+        self.close_shell(cx);
+        self.dock.update(cx, DockState::close);
+    }
+
+    pub(super) fn sync_streams(&mut self, cx: &mut Context<Self>) {
+        let live = self
+            .log
+            .as_ref()
+            .map(|s| &s.key.pod)
+            .or(self.shell.as_ref().map(|s| &s.key.pod));
+        let Some(live) = live else {
+            return;
+        };
+        let pod = self.selected_pod().map(Pod::resource);
+        if Some(live) != pod.as_ref() || !self.dock.read(cx).is_open() {
+            self.reset_dock(cx);
+            return;
+        }
+        if self.log.is_some() {
+            self.follow_logs(cx);
+        }
+        let shell_key = self
+            .selected_pod()
+            .map(Pod::resource)
+            .zip(self.container_name())
+            .map(|(pod, container)| ShellKey { pod, container });
         let moved = self
             .shell
             .as_ref()
             .is_some_and(|s| Some(&s.key) != shell_key.as_ref());
         if moved {
             self.terminal.update(cx, Terminal::clear);
-        }
-        if moved || !self.dock.read(cx).is_open() {
             self.close_shell(cx);
         }
     }
@@ -365,15 +435,11 @@ impl PodsScreen {
         .detach();
     }
 
-    pub fn show_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dock
             .update(cx, |dock, cx| dock.select(TERMINAL_TAB, cx));
         let focus = self.terminal.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
-    }
-
-    pub(super) fn open_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.show_terminal(window, cx);
         if !self.shell.as_ref().is_some_and(|session| session.open) {
             self.start_shell(window, cx);
         }
@@ -381,84 +447,61 @@ impl PodsScreen {
 
     pub(super) fn show_logs(&mut self, cx: &mut Context<Self>) {
         self.dock.update(cx, |dock, cx| dock.select(LOGS_TAB, cx));
-        self.sync_streams(cx);
+        self.follow_logs(cx);
         cx.notify();
     }
 
+    fn container_picker(&self) -> AnyElement {
+        let single = self
+            .selected_pod()
+            .is_some_and(|pod| pod.containers.len() < 2);
+        if !single {
+            return self.containers.clone().into_any_element();
+        }
+        let name = self.container_name().unwrap_or_default();
+        div()
+            .debug_selector(|| CONTAINER_LABEL.to_owned())
+            .flex_none()
+            .w(CONTAINER_SELECT)
+            .truncate()
+            .font_family(FONT_MONO)
+            .text_size(TEXT_SMALL)
+            .child(name)
+            .into_any_element()
+    }
+
     fn log_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let follow = self.logs.read(cx).follow();
-        let wrap = self.logs.read(cx).wrap();
-        let timestamps = self.logs.read(cx).timestamps();
-        let raw = self.logs.read(cx).raw();
-        let instance = self.log_instance();
-        let instances = self.previous_termination().map(|_| {
-            let selected = LogInstance::ALL
-                .iter()
-                .position(|option| *option == instance)
-                .unwrap_or_default();
-            LogInstance::ALL
-                .iter()
-                .fold(Segmented::new("pod-logs-instance"), |group, option| {
-                    group.option(option.label())
+        let previous = self.log_instance() == LogInstance::Previous;
+        let mut items = LogView::option_items(&self.logs, true, cx);
+        if self.previous_termination().is_some() {
+            let screen = cx.weak_entity();
+            items.push(
+                MenuItem::new(PREVIOUS_ITEM, move |_, cx| {
+                    let instance = if previous {
+                        LogInstance::Current
+                    } else {
+                        LogInstance::Previous
+                    };
+                    screen
+                        .update(cx, |this, cx| this.set_instance(instance, cx))
+                        .ok();
                 })
-                .small()
-                .mono()
-                .selected(selected)
-                .on_select(cx.listener(|this, ix: &usize, _, cx| {
-                    if let Some(instance) = LogInstance::ALL.get(*ix).copied() {
-                        this.set_instance(instance, cx);
-                    }
-                }))
-        });
+                .checked(previous),
+            );
+        }
+        let screen = cx.weak_entity();
+        items.push(MenuItem::new(DOWNLOAD_ITEM, move |_, cx| {
+            screen.update(cx, |this, cx| this.download_logs(cx)).ok();
+        }));
+        self.options
+            .update(cx, |menu, cx| menu.set_items(items, cx));
         div()
             .flex()
             .items_center()
             .gap(SPACE_3)
-            .child(self.containers.clone())
-            .children(instances)
+            .child(self.container_picker())
             .child(TextField::search(&self.search))
-            .child(
-                Button::new("pod-logs-follow", FOLLOW)
-                    .small()
-                    .selected(follow)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.logs
-                            .update(cx, |logs, cx| logs.set_follow(!follow, cx));
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("pod-logs-time", TIME)
-                    .small()
-                    .selected(timestamps)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.logs
-                            .update(cx, |logs, cx| logs.set_timestamps(!timestamps, cx));
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("pod-logs-wrap", WRAP)
-                    .small()
-                    .selected(wrap)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.logs.update(cx, |logs, cx| logs.set_wrap(!wrap, cx));
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("pod-logs-raw", RAW)
-                    .small()
-                    .selected(raw)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.logs.update(cx, |logs, cx| logs.set_raw(!raw, cx));
-                        cx.notify();
-                    })),
-            )
-            .child(
-                IconButton::svg("pod-logs-download", DOWNLOAD, DOWNLOAD_TOOLTIP)
-                    .on_click(cx.listener(|this, _, _, cx| this.download_logs(cx))),
-            )
+            .child(self.options.clone())
     }
 
     fn terminal_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -466,7 +509,7 @@ impl PodsScreen {
         let button = if open {
             Button::new("pod-close-shell", "Close shell")
                 .small()
-                .on_click(cx.listener(|this, _, _, cx| this.close_shell(cx)))
+                .on_click(cx.listener(|this, _, _, cx| this.close_terminal_tab(cx)))
         } else {
             Button::new("pod-open-shell", "Open shell")
                 .small()
@@ -511,12 +554,16 @@ impl PodsScreen {
         Dock::new(&self.dock)
             .tab(
                 DockTab::new(LOGS_LABEL)
+                    .hidden(self.log.is_none())
+                    .closable(close_with(cx, Self::close_logs_tab))
                     .detail(detail.clone())
                     .tools(self.log_tools(cx))
                     .content(self.log_content(cx)),
             )
             .tab(
                 DockTab::new(TERMINAL_LABEL)
+                    .hidden(self.shell.is_none())
+                    .closable(close_with(cx, Self::close_terminal_tab))
                     .detail(terminal_detail)
                     .tools(self.terminal_tools(cx))
                     .content(self.terminal_content(cx)),

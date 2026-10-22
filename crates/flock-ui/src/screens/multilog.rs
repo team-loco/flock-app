@@ -11,8 +11,8 @@ use gpui::{
 
 use crate::highlight::{SOURCE_COLORS, source_colors};
 use crate::kit::{
-    Button, FILTER_PLACEHOLDER, InputEvent, LogLine, LogView, MetaLine, PageHeader, TextField,
-    TextFieldState, find_matches,
+    ActionMenu, FILTER_PLACEHOLDER, InputEvent, LogLine, LogView, MenuItem, MetaLine, PageHeader,
+    TextField, TextFieldState, find_matches,
 };
 use crate::screens::workload::kit_line;
 use crate::theme::{
@@ -21,10 +21,7 @@ use crate::theme::{
 };
 
 const BATCH: usize = 512;
-const FOLLOW: &str = "follow";
-const PAUSE: &str = "pause";
-const TIMESTAMPS: &str = "timestamps";
-const WRAP: &str = "wrap";
+const PAUSE: &str = "Pause";
 const META_SEPARATOR: &str = " · ";
 const CONTAINER_SEPARATOR: &str = "/";
 const ENDED: &str = "ended";
@@ -58,6 +55,7 @@ pub struct MultiLogs {
     slots: ColorSlots,
     logs: Entity<LogView>,
     filter: Entity<TextFieldState>,
+    options: Entity<ActionMenu>,
     query: String,
     paused: bool,
     pending: usize,
@@ -82,6 +80,7 @@ impl MultiLogs {
         let id: SharedString = id.into();
         let logs = cx.new(|_| LogView::new(id.clone()));
         let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
+        let options = cx.new(|cx| ActionMenu::new(format!("{id}-options"), cx));
         let subscription = cx.subscribe(&filter, |this, filter, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
                 let query = filter.read(cx).value().to_string();
@@ -96,6 +95,7 @@ impl MultiLogs {
             slots: ColorSlots::new(SOURCE_COLORS),
             logs,
             filter,
+            options,
             query: String::new(),
             paused: false,
             pending: 0,
@@ -290,57 +290,32 @@ impl MultiLogs {
         cx.notify();
     }
 
-    pub fn tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let logs = self.logs.read(cx);
-        let follow = logs.follow();
-        let wrap = logs.wrap();
-        let timestamps = logs.timestamps();
+    pub fn tools(&self, extra: Vec<MenuItem>, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let paused = self.paused;
         let pause = if paused && self.pending > 0 {
             format!("{PAUSE} · {}", self.pending)
         } else {
             PAUSE.to_owned()
         };
-        let id = self.id.clone();
-        let button = |name: &str, label: String| {
-            Button::new(SharedString::from(format!("{id}-{name}")), label).small()
-        };
+        let mut items = LogView::option_items(&self.logs, false, cx);
+        let screen = cx.weak_entity();
+        items.extend(extra);
+        items.push(
+            MenuItem::new(pause, move |_, cx| {
+                screen
+                    .update(cx, |this, cx| this.set_paused(!paused, cx))
+                    .ok();
+            })
+            .checked(paused),
+        );
+        self.options
+            .update(cx, |menu, cx| menu.set_items(items, cx));
         div()
             .flex()
             .items_center()
             .gap(SPACE_3)
             .child(TextField::search(&self.filter))
-            .child(
-                button(FOLLOW, FOLLOW.to_owned())
-                    .selected(follow)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.logs
-                            .update(cx, |logs, cx| logs.set_follow(!follow, cx));
-                        cx.notify();
-                    })),
-            )
-            .child(
-                button(PAUSE, pause)
-                    .selected(paused)
-                    .on_click(cx.listener(move |this, _, _, cx| this.set_paused(!paused, cx))),
-            )
-            .child(
-                button(TIMESTAMPS, TIMESTAMPS.to_owned())
-                    .selected(timestamps)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.logs
-                            .update(cx, |logs, cx| logs.set_timestamps(!timestamps, cx));
-                        cx.notify();
-                    })),
-            )
-            .child(
-                button(WRAP, WRAP.to_owned())
-                    .selected(wrap)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.logs.update(cx, |logs, cx| logs.set_wrap(!wrap, cx));
-                        cx.notify();
-                    })),
-            )
+            .child(self.options.clone())
     }
 
     pub fn summary(&self) -> String {
@@ -532,7 +507,7 @@ impl Render for MultiLogsScreen {
             .meta(MetaLine::new(summary));
         let tools = self
             .view
-            .update(cx, |view, cx| view.tools(cx).into_any_element());
+            .update(cx, |view, cx| view.tools(Vec::new(), cx).into_any_element());
         div()
             .size_full()
             .flex()

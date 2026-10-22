@@ -120,6 +120,8 @@ pub struct WorkloadScreen {
     watch_task: Option<Task<()>>,
     deadline: Option<Task<()>>,
     log_task: Option<Task<()>>,
+    clear_filter: bool,
+    log_options: Entity<ActionMenu>,
     all_pods: Option<(Entity<crate::screens::multilog::MultiLogs>, Subscription)>,
     _subscriptions: Vec<Subscription>,
 }
@@ -163,7 +165,8 @@ impl WorkloadScreen {
         let menu = cx.new(|cx| {
             ActionMenu::new("workload-actions", cx).labeled(ACTIONS, Some(ACTIONS_KEYS.into()))
         });
-        let dock = cx.new(|_| DockState::new());
+        let log_options = cx.new(|cx| ActionMenu::new("workload-logs-options", cx));
+        let dock = cx.new(|_| DockState::collapsed_on(dock::EVENTS));
         let logs = cx.new(|_| LogView::new("workload-logs"));
         let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
         let terminal = cx.new(|cx| Terminal::new("workload-terminal", cx));
@@ -204,6 +207,8 @@ impl WorkloadScreen {
             watch_task: None,
             deadline: None,
             log_task: None,
+            clear_filter: false,
+            log_options,
             all_pods: None,
             _subscriptions: subscriptions,
         }
@@ -357,20 +362,17 @@ impl WorkloadScreen {
         self.menu.update(cx, |menu, cx| menu.set_items(items, cx));
         self.workload = Some(workload);
         if pod != self.pod {
-            self.discard_shell(cx);
+            self.reset_dock(cx);
             self.pod = pod;
-            self.follow_logs(cx);
         }
         cx.notify();
     }
 
     fn select_pod(&mut self, name: String, cx: &mut Context<Self>) {
         if self.pod.as_ref() != Some(&name) {
-            self.discard_shell(cx);
+            self.reset_dock(cx);
             self.pod = Some(name);
-            self.follow_logs(cx);
         }
-        self.dock.update(cx, |dock, cx| dock.select(dock::LOGS, cx));
         cx.notify();
     }
 
@@ -378,7 +380,9 @@ impl WorkloadScreen {
         if ix != self.container {
             self.discard_shell(cx);
             self.container = ix;
-            self.follow_logs(cx);
+            if self.log_task.is_some() {
+                self.follow_logs(cx);
+            }
         }
         cx.notify();
     }
@@ -1069,7 +1073,11 @@ impl Focusable for WorkloadScreen {
 }
 
 impl Render for WorkloadScreen {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if std::mem::take(&mut self.clear_filter) {
+            self.filter
+                .update(cx, |field, cx| field.set_value("", window, cx));
+        }
         let palette = *cx.palette();
         let context = if self.showing_yaml {
             format!("{KEY_CONTEXT} {YAML_CONTEXT}")

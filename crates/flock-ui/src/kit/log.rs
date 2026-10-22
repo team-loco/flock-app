@@ -2,14 +2,17 @@ use std::collections::VecDeque;
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, Context, ElementId, HighlightStyle, Hsla, InteractiveElement, IntoElement,
-    ListAlignment, ListState, ParentElement, Pixels, Render, ScrollStrategy, SharedString, Styled,
-    UniformListScrollHandle, Window, div, list, prelude::FluentBuilder, px, uniform_list,
+    AnyElement, App, Context, ElementId, Entity, HighlightStyle, Hsla, InteractiveElement,
+    IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, ScrollStrategy,
+    SharedString, Styled, UniformListScrollHandle, Window, div, list, prelude::FluentBuilder, px,
+    uniform_list,
 };
 
 use flock_core::LogLevel;
 use flock_core::logparse::{self, ParsedLine};
 
+use super::button::Button;
+use super::menu::MenuItem;
 use super::selectable::SelectableText;
 use crate::highlight::{SOURCE_COLORS, source_colors};
 use crate::theme::{
@@ -18,6 +21,11 @@ use crate::theme::{
 };
 
 pub const LOG_CAPACITY: usize = 10_000;
+const TIMESTAMPS_ITEM: &str = "Timestamps";
+const WRAP_ITEM: &str = "Wrap";
+const RAW_ITEM: &str = "Raw";
+const LATEST: &str = "↓ Latest";
+const LATEST_ID: &str = "logs-latest";
 const NO_LINES: &str = "No log lines yet.";
 const ESC: char = '\u{1b}';
 const BEL: char = '\u{7}';
@@ -512,6 +520,37 @@ impl LogView {
         cx.notify();
     }
 
+    pub fn option_items(logs: &Entity<Self>, with_raw: bool, cx: &App) -> Vec<MenuItem> {
+        let view = logs.read(cx);
+        let (timestamps, wrap, raw) = (view.timestamps, view.wrap, view.raw());
+        let mut items = vec![
+            MenuItem::new(TIMESTAMPS_ITEM, {
+                let logs = logs.clone();
+                move |_, cx| {
+                    logs.update(cx, |view, cx| view.set_timestamps(!timestamps, cx));
+                }
+            })
+            .checked(timestamps),
+            MenuItem::new(WRAP_ITEM, {
+                let logs = logs.clone();
+                move |_, cx| {
+                    logs.update(cx, |view, cx| view.set_wrap(!wrap, cx));
+                }
+            })
+            .checked(wrap),
+        ];
+        if with_raw {
+            let logs = logs.clone();
+            items.push(
+                MenuItem::new(RAW_ITEM, move |_, cx| {
+                    logs.update(cx, |view, cx| view.set_raw(!raw, cx));
+                })
+                .checked(raw),
+            );
+        }
+        items
+    }
+
     pub fn follow(&self) -> bool {
         self.follow
     }
@@ -712,6 +751,7 @@ impl Render for LogView {
         div()
             .id(ElementId::NamedInteger(self.id.clone(), 0))
             .debug_selector(|| selector)
+            .relative()
             .size_full()
             .flex()
             .flex_col()
@@ -727,6 +767,9 @@ impl Render for LogView {
                 if this.follow && at_end == Some(false) {
                     this.follow = false;
                     cx.notify();
+                } else if !this.follow && at_end == Some(true) {
+                    this.follow = true;
+                    cx.notify();
                 }
             }))
             .when(self.buffer.is_empty(), |view| {
@@ -741,6 +784,16 @@ impl Render for LogView {
                 )
             })
             .child(lines)
+            .when(!self.follow && !self.buffer.is_empty(), |view| {
+                view.child(
+                    div().absolute().bottom(SPACE_6).right(SPACE_6).child(
+                        Button::new(LATEST_ID, LATEST)
+                            .small()
+                            .primary()
+                            .on_click(cx.listener(|this, _, _, cx| this.set_follow(true, cx))),
+                    ),
+                )
+            })
     }
 }
 

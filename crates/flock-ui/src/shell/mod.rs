@@ -880,7 +880,7 @@ impl Shell {
     pub fn show_pod_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.focused_screens()
             .pods
-            .update(cx, |pods, cx| pods.show_terminal(window, cx));
+            .update(cx, |pods, cx| pods.open_terminal(window, cx));
     }
 
     fn pane_views(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

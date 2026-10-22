@@ -261,7 +261,7 @@ Settled; change only with a new entry that says why.
     `MAX_STREAMS` log requests run at once per view. The UI merges lines by their RFC 3339
     timestamp into a buffer of `MERGED_LINES` and colours each pod from a palette derived from the
     theme. Entry points: the workload Actions menu (Logs for all pods), the workload dock's
-    `all pods` toggle, the Pods row menu (⇧-click rows or apply a label filter, then Logs for N selected pods or Logs for <selector>) and the
+    `All pods` menu item, the Pods row menu (⇧-click rows or apply a label filter, then Logs for N selected pods or Logs for <selector>) and the
     palette's `Logs: follow all <workload> pods`, which opened the workload page before.
 36. **Edit YAML applies server-side, pinned to what the user saw** (#231): every object opens in an
     Edit YAML tab (row menus, inspectors, ⌘E while YAML shows). The editable text drops `status`,
@@ -545,3 +545,14 @@ Settled; change only with a new entry that says why.
     reconciles and goes when the object turns healthy, so Reconcile does not move the sections
     below it. A Loco card shows the controller's own reason and message, and its object line is
     built from fields (`Application checkout · Degraded=True · 6m`).
+55. **The log and terminal dock connects only on an explicit action** (#443, product owner;
+    amends 23 and 35): selecting a pod opens the inspector only. Logs start from the pod's row
+    menu "Logs", the Workload Actions "Logs" or "Previous container logs" in the logs menu; the
+    terminal starts from "Shell" or the Shell button. Each action opens only its own dock tab.
+    Each tab has a close × that ends only its stream or exec session; closing the last tab
+    closes the dock. Selecting another pod, deselecting or collapsing the dock ends every session
+    and clears lines and filter text. Both docks start collapsed. The logs toolbar is the
+    container (a label for one container, the picker for several, same width), Filter, a ⋯ menu
+    (Timestamps, Wrap, Raw, Previous container logs, Download; on/off shown with a check) and the
+    ⌄ collapse. There is no follow button: logs follow while scrolled to the bottom, stop when
+    the user scrolls up, and a floating "↓ Latest" button resumes following.

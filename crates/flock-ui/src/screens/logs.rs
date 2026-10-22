@@ -5,14 +5,12 @@ use gpui::{
 };
 
 use crate::kit::{
-    Button, FILTER_PLACEHOLDER, InputEvent, LogView, MetaLine, PageHeader, TextField,
+    ActionMenu, FILTER_PLACEHOLDER, InputEvent, LogView, MetaLine, PageHeader, TextField,
     TextFieldState,
 };
 use crate::screens::workload::kit_line;
 use crate::theme::{ActiveTheme, RULE, SPACE_3, SPACE_4, SPACE_8};
 
-const FOLLOW: &str = "follow";
-const WRAP: &str = "wrap";
 const META_SEPARATOR: &str = " · ";
 
 pub struct LogsScreen {
@@ -21,6 +19,7 @@ pub struct LogsScreen {
     container: String,
     logs: Entity<LogView>,
     filter: Entity<TextFieldState>,
+    options: Entity<ActionMenu>,
     stream: Option<Task<()>>,
     compact: bool,
     _filter_events: Subscription,
@@ -37,6 +36,7 @@ impl LogsScreen {
     ) -> Self {
         let logs = cx.new(|_| LogView::new("tab-logs"));
         let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
+        let options = cx.new(|cx| ActionMenu::new("tab-logs-options", cx));
         let filter_events = cx.subscribe(&filter, |this, filter, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
                 let query = filter.read(cx).value();
@@ -49,6 +49,7 @@ impl LogsScreen {
             container,
             logs,
             filter,
+            options,
             stream: None,
             compact: false,
             _filter_events: filter_events,
@@ -92,32 +93,15 @@ impl LogsScreen {
     }
 
     fn tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let follow = self.logs.read(cx).follow();
-        let wrap = self.logs.read(cx).wrap();
+        let items = LogView::option_items(&self.logs, false, cx);
+        self.options
+            .update(cx, |menu, cx| menu.set_items(items, cx));
         div()
             .flex()
             .items_center()
             .gap(SPACE_3)
             .child(TextField::search(&self.filter))
-            .child(
-                Button::new("tab-logs-follow", FOLLOW)
-                    .small()
-                    .selected(follow)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.logs
-                            .update(cx, |logs, cx| logs.set_follow(!follow, cx));
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("tab-logs-wrap", WRAP)
-                    .small()
-                    .selected(wrap)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.logs.update(cx, |logs, cx| logs.set_wrap(!wrap, cx));
-                        cx.notify();
-                    })),
-            )
+            .child(self.options.clone())
     }
 }
 

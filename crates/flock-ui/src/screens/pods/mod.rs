@@ -31,10 +31,10 @@ pub(crate) use streams::exit_note;
 use streams::{LogSession, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
-    Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, Entrance, ErrorBlocks,
-    FILTER_PLACEHOLDER, FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue, Link, LogView,
-    MenuItem, PanelHeader, PanelSection, Select, SelectEvent, ShowAll, StatusText, Table,
-    TableEvent, Terminal, TextFieldState, YamlRow, chip_label, confirm, swap_in,
+    ActionMenu, Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, Entrance,
+    ErrorBlocks, FILTER_PLACEHOLDER, FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue,
+    Link, LogView, MenuItem, PanelHeader, PanelSection, Select, SelectEvent, ShowAll, StatusText,
+    Table, TableEvent, Terminal, TextFieldState, YamlRow, chip_label, confirm, swap_in,
 };
 use crate::screens::edit::edit_command;
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section, related_count};
@@ -66,7 +66,7 @@ const CPU: Pixels = px(84.);
 const MEMORY: Pixels = px(68.);
 const AGE: Pixels = px(44.);
 const NAMESPACE_SELECT: Pixels = px(180.);
-const CONTAINER_SELECT: Pixels = px(160.);
+pub(super) const CONTAINER_SELECT: Pixels = px(160.);
 const INSPECTOR_LABEL: Pixels = px(96.);
 const CONTAINER_LABEL: Pixels = px(80.);
 const SEPARATOR: &str = " · ";
@@ -110,6 +110,8 @@ pub struct PodsScreen {
     preferences: Preferences,
     containers: Entity<Select>,
     search: Entity<TextFieldState>,
+    clear_search: bool,
+    options: Entity<ActionMenu>,
     logs: Entity<LogView>,
     terminal: Entity<Terminal>,
     dock: Entity<DockState>,
@@ -154,7 +156,8 @@ impl PodsScreen {
         });
         let logs = cx.new(|_| LogView::new("pod-logs").parsed());
         let terminal = cx.new(|cx| Terminal::new(TERMINAL_ID, cx));
-        let dock = cx.new(|_| DockState::new());
+        let options = cx.new(|cx| ActionMenu::new("pod-logs-options", cx));
+        let dock = cx.new(|_| DockState::collapsed());
         let subscriptions = vec![
             cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
                 this.table_event(&table, event, cx);
@@ -212,6 +215,8 @@ impl PodsScreen {
             preferences: Preferences::default(),
             containers,
             search,
+            clear_search: false,
+            options,
             logs,
             terminal,
             dock,
@@ -486,6 +491,7 @@ impl PodsScreen {
         if self.selected == pod {
             return;
         }
+        self.reset_dock(cx);
         self.selected = pod;
         self.inspected.clone_from(&self.selected);
         if let Some(pod) = self.selected.clone().filter(|_| self.panel_open) {
@@ -1171,7 +1177,11 @@ impl Render for ElsewhereLink {
 }
 
 impl Render for PodsScreen {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if std::mem::take(&mut self.clear_search) {
+            self.search
+                .update(cx, |field, cx| field.set_value("", window, cx));
+        }
         let inspector = self.panel_open.then(|| self.inspector(cx));
         let dock = self.dock_view(cx).into_any_element();
         let namespace = self.query.namespace.as_deref().map(|namespace| {

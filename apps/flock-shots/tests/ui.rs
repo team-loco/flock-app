@@ -836,7 +836,7 @@ fn escape_closes_a_menu_or_the_palette_before_the_pods_panel() -> anyhow::Result
 #[test]
 fn escape_goes_to_a_running_terminal_and_closes_the_panel_once_it_ends() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::PodsShell)?;
-    ui.click("pod-open-shell")?;
+    ui.click("pod-shell")?;
     ui.press("escape")?;
     assert!(ui.bounds("pod-inspector-pane").is_some());
     assert!(ui.bounds("pod-close-shell").is_some());
@@ -871,11 +871,11 @@ fn node_shells_open_only_after_the_confirmation() -> anyhow::Result<()> {
 fn command_j_toggles_the_dock() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Workload)?;
     let dock = |ui: &Ui| ui.read(Shell::dock_open);
-    assert_eq!(dock(&ui), Some(true));
-    ui.press("cmd-j")?;
     assert_eq!(dock(&ui), Some(false));
     ui.press("cmd-j")?;
     assert_eq!(dock(&ui), Some(true));
+    ui.press("cmd-j")?;
+    assert_eq!(dock(&ui), Some(false));
     assert!(ui.state().workload().is_some());
     Ok(())
 }
@@ -1570,14 +1570,18 @@ fn node_filters_narrow_by_pool_and_status_chip() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn open_pod_logs(ui: &mut Ui) -> anyhow::Result<()> {
+    ui.right_click("pods-row-0")?;
+    ui.click("pods-row-menu-item-2")
+}
+
 #[test]
 fn the_terminal_tab_waits_for_an_open_shell_click() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Workload)?;
-    ui.click("dock-tab-2")?;
-    assert!(ui.bounds("workload-open-shell").is_some());
+    assert!(ui.bounds("dock-tab-2").is_none());
     assert!(ui.bounds("workload-close-shell").is_none());
-    let mut pods = Ui::open(Screen::PodsShell)?;
-    assert!(pods.bounds("pod-open-shell").is_some());
+    let mut pods = Ui::open(Screen::Pods)?;
+    assert!(pods.bounds("dock-tab-1").is_none());
     assert!(pods.bounds("pod-close-shell").is_none());
     Ok(())
 }
@@ -1602,7 +1606,7 @@ fn the_workload_shell_action_and_shortcut_start_a_shell() -> anyhow::Result<()> 
     ui.click("workload-actions-item-2")?;
     assert!(ui.bounds("workload-close-shell").is_some());
     ui.click("workload-close-shell")?;
-    ui.click("dock-tab-0")?;
+    ui.click("dock-tab-1")?;
     ui.press("ctrl-`")?;
     assert!(ui.bounds("workload-close-shell").is_some());
     Ok(())
@@ -1638,9 +1642,11 @@ fn keys_typed_in_an_open_shell_reach_it_including_tab_arrows_and_control_c() -> 
     ] {
         let mut ui = Ui::open(screen)?;
         if let Screen::Workload = screen {
-            ui.click("dock-tab-2")?;
+            ui.click("workload-actions")?;
+            ui.click("workload-actions-item-2")?;
+        } else {
+            ui.click("pod-shell")?;
         }
-        ui.click(open)?;
         assert!(ui.bounds(close).is_some());
         ui.type_text("whoami")?;
         ui.press("tab left up ctrl-c")?;
@@ -1653,40 +1659,54 @@ fn keys_typed_in_an_open_shell_reach_it_including_tab_arrows_and_control_c() -> 
 }
 
 #[test]
-fn close_shell_and_collapsing_the_dock_end_the_session_but_switching_tabs_keeps_it()
--> anyhow::Result<()> {
+fn selecting_a_workload_pod_leaves_the_dock_closed_and_logs_close_alone() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Workload)?;
-    ui.click("dock-tab-2")?;
-    ui.click("workload-open-shell")?;
-    ui.click("workload-close-shell")?;
-    assert!(ui.bounds("workload-open-shell").is_some());
-    ui.click("workload-open-shell")?;
-    ui.click("dock-tab-0")?;
-    ui.click("dock-tab-2")?;
+    ui.click("pods-row-1")?;
+    assert_eq!(ui.read(Shell::dock_open), Some(false));
+    assert!(ui.bounds("dock-tab-0").is_none());
+    ui.click("workload-actions")?;
+    ui.click("workload-actions-item-0")?;
+    assert_eq!(ui.read(Shell::dock_open), Some(true));
+    assert!(ui.bounds("dock-tab-0").is_some());
+    assert!(ui.bounds("dock-tab-2").is_none());
+    ui.click("pods-row-0")?;
+    assert_eq!(ui.read(Shell::dock_open), Some(false));
+    assert!(ui.bounds("dock-tab-0").is_none());
+    ui.click("workload-actions")?;
+    ui.click("workload-actions-item-0")?;
+    ui.click("dock-tab-close-0")?;
+    assert!(ui.bounds("dock-tab-0").is_none());
+    Ok(())
+}
+
+#[test]
+fn closing_the_terminal_tab_or_collapsing_the_dock_ends_the_session() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    ui.click("workload-actions")?;
+    ui.click("workload-actions-item-2")?;
     assert!(ui.bounds("workload-close-shell").is_some());
+    ui.click("dock-tab-close-2")?;
+    assert!(ui.bounds("dock-tab-2").is_none());
+    assert!(ui.bounds("workload-close-shell").is_none());
+    ui.click("workload-actions")?;
+    ui.click("workload-actions-item-2")?;
     ui.click("dock-toggle")?;
     ui.click("dock-toggle")?;
-    assert!(ui.bounds("workload-open-shell").is_some());
-    ui.click("workload-open-shell")?;
-    ui.click("terminal-containers-1")?;
-    assert!(ui.bounds("workload-open-shell").is_some());
+    assert!(ui.bounds("dock-tab-2").is_none());
     Ok(())
 }
 
 #[test]
 fn logs_before_restart_open_the_previous_instance_with_a_banner() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
-    assert!(ui.bounds("pod-logs-raw").is_some());
-    assert!(ui.bounds("pod-logs-previous-banner").is_none());
     let crashed = (0..POD_ROWS).find_map(|ix| {
         let row: &'static str = format!("pods-row-{ix}").leak();
         ui.click(row).ok()?;
         ui.bounds("pod-logs-before-restart-0").map(|_| ix)
     });
     assert!(crashed.is_some(), "no demo pod shows a last termination");
-    assert!(ui.bounds("pod-logs-instance-1").is_some());
-    ui.press("cmd-j")?;
     assert_eq!(ui.read(Shell::dock_open), Some(false));
+    assert!(ui.bounds("pod-logs-previous-banner").is_none());
     ui.scroll(
         "pod-inspector-pane",
         gpui::point(gpui::px(0.), gpui::px(-INSPECTOR_SCROLL)),
@@ -1694,11 +1714,14 @@ fn logs_before_restart_open_the_previous_instance_with_a_banner() -> anyhow::Res
     ui.click("pod-logs-before-restart-0")?;
     assert_eq!(ui.read(Shell::dock_open), Some(true));
     assert!(ui.bounds("pod-logs-previous-banner").is_some());
-    ui.click("pod-logs-raw")?;
+    ui.click("pod-logs-options")?;
+    ui.click("pod-logs-options-item-2")?;
     assert!(ui.bounds("pod-logs-previous-banner").is_some());
-    ui.click("pod-logs-instance-0")?;
+    ui.click("pod-logs-options")?;
+    ui.click("pod-logs-options-item-3")?;
     assert!(ui.bounds("pod-logs-previous-banner").is_none());
-    ui.click("pod-logs-instance-1")?;
+    ui.click("pod-logs-options")?;
+    ui.click("pod-logs-options-item-3")?;
     assert!(ui.bounds("pod-logs-previous-banner").is_some());
     Ok(())
 }
@@ -2003,7 +2026,10 @@ fn command_enter_in_the_palette_and_row_menus_open_new_tabs() -> anyhow::Result<
 #[test]
 fn the_workload_dock_opens_a_pods_logs_in_a_tab() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Workload)?;
-    ui.click("logs-open-tab")?;
+    ui.click("workload-actions")?;
+    ui.click("workload-actions-item-0")?;
+    ui.click("workload-logs-options")?;
+    ui.click("workload-logs-options-item-3")?;
     let state = ui.state();
     let location = state.location();
     assert_eq!(location.page, Page::Logs);
@@ -2018,7 +2044,7 @@ fn the_workload_dock_opens_a_pods_logs_in_a_tab() -> anyhow::Result<()> {
         ]
     );
     assert_eq!(active_tab(&ui), 1);
-    assert!(ui.bounds("tab-logs-follow").is_some());
+    assert!(ui.bounds("tab-logs-options").is_some());
     Ok(())
 }
 
@@ -2473,7 +2499,7 @@ fn split_panes_render_compact_logs_and_kustomization_views() -> anyhow::Result<(
     ui.click("tab-1")?;
     ui.click("pane-1-tab-1")?;
     assert!(ui.bounds("flux-full-view").is_some());
-    assert!(ui.bounds("tab-logs-follow").is_none());
+    assert!(ui.bounds("tab-logs-options").is_none());
     let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     ui.save_png(&dir.join("split-logs-kustomization.png"))?;
     ui.click("flux-full-view")?;
@@ -2565,6 +2591,8 @@ fn log_lines_select_across_lines() -> anyhow::Result<()> {
     use gpui::{point, px};
     let mut ui = Ui::open(Screen::Workload)?;
     ui.click("pods-row-1")?;
+    ui.click("workload-actions")?;
+    ui.click("workload-actions-item-0")?;
     let logs = bounds_of(&mut ui, "workload-logs")?;
     let from = logs.origin + point(px(165.), px(20.));
     let to = logs.origin + point(px(300.), px(80.));
@@ -2780,7 +2808,8 @@ fn keyboard_selection_uses_the_row_fill_without_an_outline() -> anyhow::Result<(
 #[test]
 fn app_shortcuts_work_with_the_terminal_focused_and_after_the_dock_closes() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::PodsShell)?;
-    ui.click("pod-open-shell")?;
+    ui.click("pod-shell")?;
+    assert!(ui.bounds("pod-close-shell").is_some());
     ui.press("cmd-b")?;
     assert!(!ui.state().sidebar_open);
     ui.press("cmd-b")?;
@@ -3179,17 +3208,48 @@ fn the_pod_owner_chain_links_each_owner() -> anyhow::Result<()> {
 }
 
 #[test]
-fn the_pods_dock_waits_for_a_pod_before_offering_log_controls() -> anyhow::Result<()> {
+fn the_pods_dock_stays_closed_until_logs_are_asked_for() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
-    assert!(ui.bounds("pod-logs-follow").is_some());
-    assert!(ui.bounds("pods-dock-empty").is_none());
+    assert_eq!(ui.read(Shell::dock_open), Some(false));
+    assert!(ui.bounds("pod-logs-options").is_none());
+    ui.click("pods-row-1")?;
+    assert_eq!(ui.read(Shell::dock_open), Some(false));
+    assert!(ui.bounds("dock-tab-0").is_none());
+    assert!(ui.bounds("dock-tab-1").is_none());
+    open_pod_logs(&mut ui)?;
+    assert_eq!(ui.read(Shell::dock_open), Some(true));
+    assert!(ui.bounds("dock-tab-0").is_some());
+    assert!(ui.bounds("dock-tab-1").is_none());
+    assert!(ui.bounds("pod-logs-options").is_some());
+    ui.click("pods-row-2")?;
+    assert_eq!(ui.read(Shell::dock_open), Some(false));
+    assert!(ui.bounds("dock-tab-0").is_none());
     ui.press("/")?;
     ui.type_text("nothing-is-called-this")?;
-    assert!(ui.bounds("pod-logs-follow").is_none());
-    assert!(ui.bounds("pod-logs-download").is_none());
-    assert!(ui.bounds("pods-dock-empty").is_some());
+    assert!(ui.bounds("pod-logs-options").is_none());
     ui.click("empty-clear-filter")?;
-    assert!(ui.bounds("pod-logs-follow").is_some());
+    assert_eq!(ui.read(Shell::dock_open), Some(false));
+    Ok(())
+}
+
+#[test]
+fn the_pod_shell_opens_only_its_own_tab_and_each_tab_closes_alone() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.click("pod-shell")?;
+    assert!(ui.bounds("dock-tab-1").is_some());
+    assert!(ui.bounds("dock-tab-0").is_none());
+    open_pod_logs(&mut ui)?;
+    assert!(ui.bounds("dock-tab-0").is_some());
+    assert!(ui.bounds("dock-tab-1").is_some());
+    let close = bounds_of(&mut ui, "dock-tab-close-0")?;
+    ui.click("dock-tab-close-0")?;
+    assert!(ui.bounds("dock-tab-0").is_none());
+    assert!(ui.bounds("dock-tab-1").is_some());
+    assert_eq!(ui.read(Shell::dock_open), Some(true));
+    assert!(close.size.width > Pixels::ZERO);
+    ui.click("dock-tab-close-1")?;
+    assert_eq!(ui.read(Shell::dock_open), Some(false));
+    assert!(ui.bounds("dock-tab-1").is_none());
     Ok(())
 }
 
@@ -3459,11 +3519,13 @@ fn a_workloads_logs_tab_merges_every_pod_in_time_order() -> anyhow::Result<()> {
 fn pausing_the_merged_logs_holds_new_lines_until_resumed() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Logs)?;
     ui.settle()?;
-    ui.click("tab-pod-logs-pause")?;
+    ui.click("tab-pod-logs-options")?;
+    ui.click("tab-pod-logs-options-item-2")?;
     let held = pod_logs(&ui).1;
     ui.advance_clock(std::time::Duration::from_secs(2))?;
     assert_eq!(pod_logs(&ui).1, held);
-    ui.click("tab-pod-logs-pause")?;
+    ui.click("tab-pod-logs-options")?;
+    ui.click("tab-pod-logs-options-item-2")?;
     ui.advance_clock(std::time::Duration::from_secs(1))?;
     assert!(pod_logs(&ui).1.len() > held.len());
     Ok(())
@@ -3484,11 +3546,15 @@ fn the_workload_menu_and_dock_follow_all_pods() -> anyhow::Result<()> {
     );
     ui.click("tab-0")?;
     assert_eq!(ui.state().location().page, Page::Deployments);
-    ui.click("logs-all-pods")?;
+    ui.click("workload-actions")?;
+    ui.click("workload-actions-item-0")?;
+    ui.click("workload-logs-options")?;
+    ui.click("workload-logs-options-item-2")?;
     ui.settle()?;
     assert!(ui.bounds("workload-pod-logs-legend").is_some());
     assert!(ui.bounds("workload-pod-logs-source-0").is_some());
-    ui.click("logs-open-tab")?;
+    ui.click("workload-pod-logs-options")?;
+    ui.click("workload-pod-logs-options-item-3")?;
     let state = ui.state();
     assert_eq!(state.location().page, Page::Logs);
     assert_eq!(
@@ -4223,7 +4289,6 @@ fn a_node_inspector_opens_the_pods_list_filtered_to_its_node() -> anyhow::Result
 fn crashing_pod_inspector_leads_with_its_error_block_above_conditions_and_events()
 -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
-    ui.press("cmd-j")?;
     ui.scroll(
         "pod-inspector-pane",
         gpui::point(gpui::px(0.), gpui::px(-INSPECTOR_SCROLL)),

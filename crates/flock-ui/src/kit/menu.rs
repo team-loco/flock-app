@@ -9,10 +9,11 @@ use gpui::{
 use super::button::{Button, IconButton};
 use super::popover::{self, Dismissal, Step};
 use crate::theme::{
-    ActiveTheme, CONTROL, FONT_MONO, MENU_WIDTH, RADIUS, ROW_MENU_PAD_Y, SPACE_1, SPACE_4, SPACE_5,
-    TEXT_BODY, TEXT_LABEL, TEXT_SMALL,
+    ActiveTheme, CHECK_SLOT, CONTROL, FONT_MONO, MENU_WIDTH, RADIUS, ROW_MENU_PAD_Y, SPACE_1,
+    SPACE_4, SPACE_5, TEXT_BODY, TEXT_LABEL, TEXT_SMALL,
 };
 
+const CHECK: &str = "✓";
 const MORE: &str = "⋯";
 const MORE_TOOLTIP: &str = "More actions";
 const DESCRIPTION_LINE: f32 = 1.35;
@@ -26,6 +27,7 @@ pub struct MenuItem {
     shortcut: Option<SharedString>,
     destructive: bool,
     disabled: bool,
+    checked: Option<bool>,
     handler: MenuHandler,
 }
 
@@ -40,6 +42,7 @@ impl MenuItem {
             shortcut: None,
             destructive: false,
             disabled: false,
+            checked: None,
             handler: Rc::new(handler),
         }
     }
@@ -51,6 +54,11 @@ impl MenuItem {
 
     pub fn shortcut(mut self, keys: impl Into<SharedString>) -> Self {
         self.shortcut = Some(keys.into());
+        self
+    }
+
+    pub fn checked(mut self, checked: bool) -> Self {
+        self.checked = Some(checked);
         self
     }
 
@@ -244,6 +252,16 @@ impl ActionMenu {
             .flex()
             .items_center()
             .gap(SPACE_5)
+            .when_some(item.checked, |row, checked| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .w(CHECK_SLOT)
+                        .text_size(TEXT_BODY)
+                        .text_color(label_color)
+                        .child(if checked { CHECK } else { "" }),
+                )
+            })
             .child(
                 div()
                     .flex_1()
