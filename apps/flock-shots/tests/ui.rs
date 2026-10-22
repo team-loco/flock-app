@@ -4563,7 +4563,8 @@ fn filter_terms_are_highlighted_in_event_message_cells() -> anyhow::Result<()> {
 }
 
 #[test]
-fn filter_placeholder_stays_left_of_the_shortcut_hint_and_leaves_when_typing() -> anyhow::Result<()> {
+fn filter_placeholder_stays_left_of_the_shortcut_hint_and_leaves_when_typing() -> anyhow::Result<()>
+{
     let mut ui = Ui::open(Screen::Nodes)?;
     let placeholder = ui.bounds("node-filter-placeholder");
     let shortcut = ui.bounds("node-filter-shortcut");

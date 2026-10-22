@@ -433,12 +433,12 @@ impl FilterBar {
                     }),
             )
             .when(empty, |field| {
-                    field.child(
-                        div()
-                            .id("filter-shortcut")
-                            .debug_selector(|| format!("{}-shortcut", self.id))
-                            .child(Kbd::new("/")),
-                    )
+                field.child(
+                    div()
+                        .id("filter-shortcut")
+                        .debug_selector(|| format!("{}-shortcut", self.id))
+                        .child(Kbd::new("/")),
+                )
             })
             .when(focused && !self.suggestions.is_empty(), |field| {
                 field.child(self.suggestion_popover(&palette, cx))
