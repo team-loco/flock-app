@@ -32,7 +32,9 @@ use gpui::{
 };
 
 use super::ScreenEvent;
-use crate::kit::{ActionMenu, Activate, Link, MenuItem, SectionLabel, Segmented, problem_link};
+use crate::kit::{
+    ActionMenu, Activate, Link, MenuItem, SectionLabel, Segmented, problem_link, status_symbols,
+};
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, RULE, SPACE_3, SPACE_4, SPACE_5, SPACE_7, SPACE_8,
     TEXT_CONTROL, TEXT_SMALL,
@@ -431,7 +433,7 @@ fn mono(text: impl Into<SharedString>, color: gpui::Hsla) -> Div {
         .font_family(FONT_MONO)
         .text_color(color)
         .whitespace_nowrap()
-        .child(text.into())
+        .child(status_symbols(text))
 }
 
 fn status_color(status: Option<Status>, otherwise: gpui::Hsla, palette: &Palette) -> gpui::Hsla {
