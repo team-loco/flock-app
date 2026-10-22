@@ -1058,7 +1058,7 @@ mod tests {
         assert_eq!(issue.reason, "CreateContainerConfigError");
         assert_eq!(
             issue.object,
-            format!("Application {} · since 10m", api.name)
+            format!("Application {} · Degraded=True · 10m", api.name)
         );
         assert_eq!(
             api.resources.as_ref().map(Resources::summary).as_deref(),
