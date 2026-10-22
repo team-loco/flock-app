@@ -14,8 +14,8 @@ use gpui::{
 use crate::kit::{
     ActionMenu, Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, DiffView,
     ErrorBlocks, InspectorPane, KeyValue, Link, MenuItem, PageHeader, PanelSection, Prose,
-    SectionHeader, Segmented, StatusGlyph, Table, TableEvent, Toast, confirm, issue_stack,
-    parse_unified, toast,
+    RawMessage, SectionHeader, Segmented, StatusGlyph, Table, TableEvent, Toast, confirm,
+    issue_stack, parse_unified, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{EDIT_DESCRIPTION, EDIT_YAML};
@@ -1039,13 +1039,9 @@ fn history_columns() -> Vec<Column<HistoryEntry>> {
         .mono()
         .selectable()
         .auto(REVISION_COLUMN, REVISION_MAX),
-        Column::colored_text(
-            "Message",
-            |h: &HistoryEntry| h.message.clone().into(),
-            |_, p| p.fg2,
-        )
-        .mono()
-        .selectable()
+        Column::new("Message", |h: &HistoryEntry, _| {
+            RawMessage::new(h.message.clone()).line().into_any_element()
+        })
         .flex(1., Pixels::ZERO),
         Column::colored_text(
             "Count",

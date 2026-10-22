@@ -1,5 +1,5 @@
 use flock_core::events::{ClusterEvent, EventFilter, cluster_filter_counts, filter_cluster_events};
-use flock_core::filter::label_values;
+use flock_core::filter::{highlights, label_values};
 use flock_core::time::age;
 use flock_core::{Command, Snapshot, Status};
 use gpui::{
@@ -8,7 +8,9 @@ use gpui::{
 };
 
 use super::events::reason_cell;
-use crate::kit::{Column, EmptyState, FilterBar, FilterEvent, Table, TableEvent, chip_label};
+use crate::kit::{
+    Column, EmptyState, FilterBar, FilterEvent, RawMessage, Table, TableEvent, chip_label,
+};
 use crate::theme::{
     EVENT_AGE_WIDTH, EVENT_COUNT_WIDTH, EVENT_MESSAGE_MIN, EVENT_MESSAGE_WEIGHT,
     EVENT_NAMESPACE_WIDTH, EVENT_OBJECT_MIN, EVENT_OBJECT_WEIGHT, EVENT_REASON_WIDTH,
@@ -160,13 +162,14 @@ fn columns() -> Vec<Column<ClusterEvent>> {
         )
         .fixed(EVENT_NAMESPACE_WIDTH)
         .sort_by_key(|e: &ClusterEvent| e.event.namespace.clone()),
-        Column::colored_text(
-            "Message",
-            |e: &ClusterEvent| e.event.message.clone().into(),
-            |_, palette| palette.fg2,
-        )
-        .highlight()
-        .selectable()
+        Column::highlighted("Message", |e: &ClusterEvent, _, words| {
+            let text = e.event.message.clone();
+            let ranges = highlights(words, &text);
+            RawMessage::new(text)
+                .highlights(ranges)
+                .line()
+                .into_any_element()
+        })
         .tooltip(|e: &ClusterEvent| e.event.message.clone().into())
         .flex(EVENT_MESSAGE_WEIGHT, EVENT_MESSAGE_MIN),
         Column::colored_text(

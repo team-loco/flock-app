@@ -101,8 +101,11 @@ impl<R> TextCell<R> {
     }
 }
 
+pub type HighlightedCellRenderer<R> = Rc<dyn Fn(&R, &Palette, &[String]) -> AnyElement>;
+
 enum Cell<R> {
     Custom(CellRenderer<R>),
+    Highlighted(HighlightedCellRenderer<R>),
     Text(TextCell<R>),
 }
 
@@ -165,6 +168,13 @@ impl<R: 'static> Column<R> {
         cell: impl Fn(&R, &Palette) -> AnyElement + 'static,
     ) -> Self {
         Self::build(title, Cell::Custom(Rc::new(cell)))
+    }
+
+    pub fn highlighted(
+        title: impl Into<SharedString>,
+        cell: impl Fn(&R, &Palette, &[String]) -> AnyElement + 'static,
+    ) -> Self {
+        Self::build(title, Cell::Highlighted(Rc::new(cell)))
     }
 
     fn text_cell(
@@ -247,6 +257,7 @@ impl<R: 'static> Column<R> {
     ) -> AnyElement {
         let content = match &self.cell {
             Cell::Custom(cell) => cell(row, palette),
+            Cell::Highlighted(cell) => cell(row, palette, words),
             Cell::Text(cell) if self.highlight => {
                 cell.render(row, palette, words, self.selectable, selected)
             }

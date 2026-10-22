@@ -4447,3 +4447,36 @@ fn a_raw_message_keeps_its_size_when_hovered_and_selected() -> anyhow::Result<()
 }
 
 const SELECT_INSET: f32 = 4.;
+
+#[test]
+fn filter_terms_are_highlighted_in_event_message_cells() -> anyhow::Result<()> {
+    const NEAR: f32 = 0.1;
+    let mut ui = Ui::open(Screen::Events)?;
+    let accent = ui.read_app(|cx| {
+        use flock_ui::theme::ActiveTheme;
+        cx.palette().acc
+    });
+    let rgba = accent.to_rgb();
+    let target = [rgba.r, rgba.g, rgba.b];
+    let dir = tempfile::tempdir()?;
+    let accent_pixels = |ui: &mut Ui, name: &str| -> anyhow::Result<usize> {
+        let (left, top, right, bottom) = device_span(bounds_of(ui, "events-row-0")?)?;
+        let path = dir.path().join(name);
+        ui.save_png(&path)?;
+        let image = image::open(&path)?.to_rgba8();
+        let count = (top..bottom)
+            .flat_map(|y| (left..right).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let pixel = image.get_pixel(x, y).0;
+                (0..3).all(|ix| (f32::from(pixel[ix]) / 255. - target[ix]).abs() <= NEAR)
+            })
+            .count();
+        Ok(count)
+    };
+    let before = accent_pixels(&mut ui, "before.png")?;
+    ui.press("/")?;
+    ui.type_text("restarting")?;
+    let after = accent_pixels(&mut ui, "after.png")?;
+    assert!(after > before, "no highlight drawn: {before} -> {after}");
+    Ok(())
+}
