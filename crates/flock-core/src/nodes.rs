@@ -4,8 +4,9 @@ use std::time::Duration;
 use crate::diagnosis::{self, Condition, Diagnosis};
 use crate::filter::{FilterSpec, TextFilter};
 use crate::issue::{Issue, named};
-use crate::overview::{Commitment, plural};
+use crate::overview::{Commitment, percent};
 use crate::related::NODE;
+use crate::units::figure;
 use crate::{Status, Uid};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -22,6 +23,14 @@ impl Usage {
             0.
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodePod {
+    pub name: String,
+    pub namespace: String,
+    pub cpu: f32,
+    pub memory: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,6 +56,7 @@ pub struct Node {
     pub conditions: Vec<Condition>,
     pub taints: Vec<String>,
     pub labels: Vec<String>,
+    pub top_pods: Vec<NodePod>,
 }
 
 impl Node {
@@ -104,6 +114,26 @@ impl Node {
         self.has_condition(DISK_PRESSURE_CONDITION)
     }
 
+    pub fn has_pressure(&self) -> bool {
+        PRESSURE_CONDITIONS
+            .iter()
+            .any(|kind| self.has_condition(kind))
+    }
+
+    pub fn conditions_not_ok(&self) -> usize {
+        self.conditions
+            .iter()
+            .filter(|c| {
+                let healthy = if c.kind == READY_CONDITION {
+                    CONDITION_TRUE
+                } else {
+                    CONDITION_FALSE
+                };
+                c.value != healthy
+            })
+            .count()
+    }
+
     fn has_condition(&self, kind: &str) -> bool {
         self.conditions
             .iter()
@@ -128,7 +158,13 @@ impl Node {
 
 pub const READY_CONDITION: &str = "Ready";
 pub const CONDITION_TRUE: &str = "True";
+pub const TOP_PODS: usize = 5;
+const CONDITION_FALSE: &str = "False";
 const DISK_PRESSURE_CONDITION: &str = "DiskPressure";
+const PRESSURE_CONDITIONS: [&str; 3] = ["MemoryPressure", DISK_PRESSURE_CONDITION, "PIDPressure"];
+const READY_STATE: &str = "Ready";
+const NOT_READY_STATE: &str = "NotReady";
+const STATE_SEPARATOR: char = ',';
 const POOL_LABELS: [&str; 5] = [
     "eks.amazonaws.com/nodegroup",
     "cloud.google.com/gke-nodepool",
@@ -139,6 +175,90 @@ const POOL_LABELS: [&str; 5] = [
 const SCHEDULING_DISABLED: &str = "SchedulingDisabled";
 const CORDONED_MESSAGE: &str = "Cordoned: no new pods are scheduled here.";
 
+pub fn state_label(ready: bool, schedulable: bool) -> String {
+    let readiness = if ready { READY_STATE } else { NOT_READY_STATE };
+    if schedulable {
+        readiness.to_owned()
+    } else {
+        format!("{readiness}{STATE_SEPARATOR}{SCHEDULING_DISABLED}")
+    }
+}
+
+pub fn request_line(allocatable: f32, commitment: Commitment) -> String {
+    format!(
+        "req {} ({}) · lim {} ({})",
+        figure(commitment.requests * allocatable),
+        percent(commitment.requests),
+        figure(commitment.limits * allocatable),
+        percent(commitment.limits)
+    )
+}
+
+pub fn pool_counts(nodes: &[Node]) -> Vec<(String, usize)> {
+    let mut pools: BTreeMap<&str, usize> = BTreeMap::new();
+    for node in nodes {
+        *pools.entry(node.pool()).or_default() += 1;
+    }
+    pools
+        .into_iter()
+        .map(|(pool, count)| (pool.to_owned(), count))
+        .collect()
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NodeFilter {
+    #[default]
+    All,
+    Ready,
+    NotReady,
+    Cordoned,
+    Pressure,
+}
+
+impl NodeFilter {
+    pub const ALL: [Self; 5] = [
+        Self::All,
+        Self::Ready,
+        Self::NotReady,
+        Self::Cordoned,
+        Self::Pressure,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Ready => READY_STATE,
+            Self::NotReady => NOT_READY_STATE,
+            Self::Cordoned => "Cordoned",
+            Self::Pressure => "Pressure",
+        }
+    }
+
+    pub fn at(ix: usize) -> Self {
+        Self::ALL.get(ix).copied().unwrap_or_default()
+    }
+
+    pub fn keeps(self, node: &Node) -> bool {
+        match self {
+            Self::All => true,
+            Self::Ready => node.is_ready() && node.schedulable,
+            Self::NotReady => !node.is_ready(),
+            Self::Cordoned => !node.schedulable,
+            Self::Pressure => node.has_pressure(),
+        }
+    }
+
+    pub fn counts(nodes: &[&Node]) -> Vec<(Self, usize)> {
+        Self::ALL
+            .iter()
+            .map(|filter| {
+                let count = nodes.iter().filter(|n| filter.keeps(n)).count();
+                (*filter, count)
+            })
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NodeSummary {
     pub total: usize,
@@ -147,58 +267,22 @@ pub struct NodeSummary {
     pub not_ready: usize,
     pub disk_pressure: usize,
     pub pools: usize,
-    pub instance_types: Vec<(String, usize)>,
     pub pod_capacity: u32,
 }
 
 impl NodeSummary {
     pub fn of(nodes: &[Node]) -> Self {
-        let mut instance_types: Vec<(String, usize)> = Vec::new();
-        for node in nodes {
-            match instance_types
-                .iter_mut()
-                .find(|(name, _)| *name == node.instance_type)
-            {
-                Some((_, count)) => *count += 1,
-                None => instance_types.push((node.instance_type.clone(), 1)),
-            }
-        }
-        let cordoned = nodes.iter().filter(|n| !n.schedulable).count();
-        let not_ready = nodes.iter().filter(|n| !n.is_ready()).count();
-        let ready = nodes
-            .iter()
-            .filter(|n| n.schedulable && n.is_ready())
-            .count();
+        let count = |filter: NodeFilter| nodes.iter().filter(|n| filter.keeps(n)).count();
         let pools: BTreeSet<&str> = nodes.iter().map(Node::pool).collect();
         Self {
             total: nodes.len(),
-            ready,
-            cordoned,
-            not_ready,
+            ready: count(NodeFilter::Ready),
+            cordoned: count(NodeFilter::Cordoned),
+            not_ready: count(NodeFilter::NotReady),
             disk_pressure: nodes.iter().filter(|n| n.has_disk_pressure()).count(),
             pools: pools.len(),
-            instance_types,
             pod_capacity: nodes.iter().map(|n| n.pod_capacity).sum(),
         }
-    }
-
-    pub fn meta_line(&self) -> String {
-        format!(
-            "{} · {} ready · {} cordoned · {}",
-            plural(self.total, "node", "nodes"),
-            self.ready,
-            self.cordoned,
-            self.instance_label()
-        )
-    }
-
-    pub fn instance_label(&self) -> String {
-        let parts: Vec<String> = self
-            .instance_types
-            .iter()
-            .map(|(name, count)| format!("{count} × {name}"))
-            .collect();
-        parts.join(" · ")
     }
 }
 
@@ -230,6 +314,7 @@ pub(crate) mod tests {
             conditions: vec![Condition::new(READY_CONDITION, value)],
             taints: Vec::new(),
             labels: Vec::new(),
+            top_pods: Vec::new(),
         }
     }
 
@@ -279,7 +364,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn summary_counts_ready_cordoned_and_groups_instance_types() {
+    fn summary_counts_ready_cordoned_and_pools() {
         let nodes = [
             node("a", "m6i.4xlarge", true, true),
             node("b", "m6i.4xlarge", false, true),
@@ -292,7 +377,6 @@ pub(crate) mod tests {
         assert_eq!(summary.cordoned, 1);
         assert_eq!(summary.not_ready, 1);
         assert_eq!(summary.pod_capacity, 440);
-        assert_eq!(summary.instance_label(), "3 × m6i.4xlarge · 1 × g5.2xlarge");
         assert_eq!(summary.pools, 2);
         assert_eq!(summary.disk_pressure, 0);
     }
@@ -335,19 +419,74 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn meta_line_counts_one_node_in_the_singular() {
-        let one = NodeSummary::of(&[node("a", "m6i.large", true, true)]);
+    fn pool_counts_group_nodes_by_pool_in_name_order() {
+        let mut gpu = node("a", "g5.2xlarge", true, true);
+        gpu.labels = vec!["eks.amazonaws.com/nodegroup=gpu".into()];
+        let mut general = node("b", "m6i", true, true);
+        general.labels = vec!["eks.amazonaws.com/nodegroup=general".into()];
+        let counts = pool_counts(&[gpu, general.clone(), general]);
+        assert_eq!(counts, [("general".into(), 2), ("gpu".into(), 1)]);
+    }
+
+    #[test]
+    fn state_reads_like_kubectl() {
+        assert_eq!(state_label(true, true), "Ready");
+        assert_eq!(state_label(false, true), "NotReady");
+        assert_eq!(state_label(true, false), "Ready,SchedulingDisabled");
+        assert_eq!(state_label(false, false), "NotReady,SchedulingDisabled");
+    }
+
+    #[test]
+    fn filters_count_ready_not_ready_cordoned_and_pressure() {
+        let mut pressured = node("a", "m6i", false, true);
+        pressured
+            .conditions
+            .push(Condition::new("MemoryPressure", CONDITION_TRUE));
+        let nodes = [
+            pressured,
+            node("b", "m6i", true, true),
+            node("c", "m6i", true, false),
+        ];
+        let refs: Vec<&Node> = nodes.iter().collect();
+        let counts: Vec<(&str, usize)> = NodeFilter::counts(&refs)
+            .into_iter()
+            .map(|(filter, n)| (filter.label(), n))
+            .collect();
         assert_eq!(
-            one.meta_line(),
-            "1 node · 1 ready · 0 cordoned · 1 × m6i.large"
+            counts,
+            [
+                ("All", 3),
+                ("Ready", 1),
+                ("NotReady", 1),
+                ("Cordoned", 1),
+                ("Pressure", 1)
+            ]
         );
-        let two = NodeSummary::of(&[
-            node("a", "m6i.large", true, true),
-            node("b", "m6i.large", false, true),
-        ]);
+        assert_eq!(NodeFilter::at(4), NodeFilter::Pressure);
+        assert_eq!(NodeFilter::at(9), NodeFilter::All);
+    }
+
+    #[test]
+    fn conditions_not_ok_counts_false_ready_and_true_pressure() {
+        let mut n = node("a", "m6i", true, true);
+        n.conditions
+            .push(Condition::new(DISK_PRESSURE_CONDITION, CONDITION_FALSE));
+        assert_eq!(n.conditions_not_ok(), 0);
+        n.conditions
+            .push(Condition::new("PIDPressure", CONDITION_TRUE));
+        assert_eq!(n.conditions_not_ok(), 1);
+        assert_eq!(node("b", "m6i", true, false).conditions_not_ok(), 1);
+    }
+
+    #[test]
+    fn request_line_shows_amounts_and_shares_of_allocatable() {
+        let commitment = Commitment {
+            requests: 0.89,
+            limits: 1.38,
+        };
         assert_eq!(
-            two.meta_line(),
-            "2 nodes · 1 ready · 1 cordoned · 2 × m6i.large"
+            request_line(15.89, commitment),
+            "req 14.14 (89%) · lim 21.93 (138%)"
         );
     }
 

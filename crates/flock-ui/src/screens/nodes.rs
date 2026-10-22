@@ -1,66 +1,78 @@
-use std::rc::Rc;
-
 use flock_core::emptiness::Noun;
 use flock_core::events::Event;
-use flock_core::filter::{StatusFilter, label_values};
-use flock_core::nodes::{Node, NodeSummary, Usage};
-use flock_core::overview::{Capacity, Commitment, percent};
-use flock_core::pods::PodEvent;
-use flock_core::related::Related;
+use flock_core::filter::label_values;
+use flock_core::node_pools::{kubelet_skewed, pressure};
+use flock_core::nodes::{Node, NodeFilter, NodePod, NodeSummary, Usage, pool_counts, request_line};
+use flock_core::overview::{Commitment, percent};
+use flock_core::pods::{POD_KIND, PodEvent};
 use flock_core::time::age;
-use flock_core::units::{CPU_UNIT, MEMORY_UNIT};
+use flock_core::units::{Amount, CPU_UNIT, MEMORY_UNIT, amount, figure};
 use flock_core::{
     ClusterDetail, ClusterId, ClusterSummary, Command, Page, ResourceRef, Seen, Status,
 };
 use gpui::{
-    AnyElement, AppContext, Context, Entity, EventEmitter, Hsla, IntoElement, ParentElement,
-    Pixels, Render, SharedString, Styled, WeakEntity, Window, div, px,
+    AnyElement, AppContext, Context, Entity, EventEmitter, Hsla, InteractiveElement, IntoElement,
+    ParentElement, Pixels, Render, SharedString, Styled, WeakEntity, Window, div, px,
 };
 
 use super::{NODE_KIND, ScreenEvent};
 use crate::kit::{
-    Button, CONDITIONS, CapacityMeter, Column, ConditionTable, ConfirmDialog, FilterBar,
-    FilterEvent, IconButton, Inspector, KeyValue, MenuItem, MetaLine, Meter, MiniMeter,
-    PanelSection, Presence, SectionLabel, SelectableText, StatusText, Table, TableEvent,
-    chip_label, confirm, reason_cell, reason_tooltip, slide_in, slide_out,
+    ActionMenu, CONDITIONS, Column, ConditionTable, ConfirmDialog, FilterBar, FilterEvent,
+    Inspector, KeyValue, LabelChips, Link, MenuItem, Meter, MiniMeter, PanelSection, Presence,
+    Select, SelectEvent, Table, TableEvent, chip_label, confirm, slide_in, slide_out,
 };
-use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, INSPECTOR_NODE, Palette, REASON_MIN, REASON_WEIGHT, SPACE_2, SPACE_3,
-    SPACE_4, SPACE_5, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, FONT_MONO, INSPECTOR_NODE, Palette, SEARCH_WIDTH, SPACE_3, SPACE_4, SPACE_5,
+    SPACE_6, TEXT_BODY, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
 };
 
-const NONE: &str = "none";
 const VERSION_SEPARATOR: char = '-';
-const NAME_WEIGHT: f32 = 1.4;
+const ALL_POOLS: &str = "All pools";
+const NAME_WEIGHT: f32 = 1.6;
 const NAME_MIN: Pixels = px(150.);
-const STATUS_WEIGHT: f32 = 0.8;
-const STATUS_MIN: Pixels = px(150.);
-const INSTANCE_WEIGHT: f32 = 0.5;
-const INSTANCE_WIDTH: Pixels = px(96.);
-const ZONE_WIDTH: Pixels = px(80.);
-const USAGE_WIDTH: Pixels = px(84.);
-const PODS_WIDTH: Pixels = px(60.);
+const POOL_WEIGHT: f32 = 1.;
+const POOL_MIN: Pixels = px(90.);
+const STATUS_WIDTH: Pixels = px(176.);
+const PODS_WIDTH: Pixels = px(56.);
+const REQUEST_WEIGHT: f32 = 0.8;
+const REQUEST_MIN: Pixels = px(70.);
+const REQUEST_FIGURE: Pixels = px(32.);
 const VERSION_WIDTH: Pixels = px(64.);
 const AGE_WIDTH: Pixels = px(40.);
-const INSPECTOR_LABEL: Pixels = px(84.);
-const REASON: &str = "Reason";
+const INSPECTOR_LABEL: Pixels = px(72.);
+const USAGE_LABEL: Pixels = px(64.);
+const POD_FIGURE: Pixels = px(56.);
 const INSPECTOR_ID: &str = "node-inspector";
+const ACTIONS_ID: &str = "node-actions";
+const FOOTER_NOTE: &str = "requests / allocatable";
+const USED: &str = "used";
+const BY_REQUEST: &str = "by CPU request";
+const CPU_HEADING: &str = "CPU";
+const MEMORY_HEADING: &str = "Mem";
 
 pub struct NodesScreen {
     cluster: Option<ClusterId>,
     cluster_name: String,
+    control_plane: Option<String>,
     shown: usize,
     summary: NodeSummary,
     nodes: Vec<Node>,
     events: Vec<Event>,
     confirm_destructive: bool,
     selected: Option<String>,
-    related: Vec<Related>,
-    table: Entity<Table<Node>>,
+    pool: Option<String>,
+    table: Entity<Table<NodeRow>>,
     filter: Entity<FilterBar>,
+    pools: Entity<Select>,
+    actions: Entity<ActionMenu>,
     presence: Presence<Node>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct NodeRow {
+    node: Node,
+    skewed: bool,
 }
 
 fn node_ref(cluster: &ClusterId, name: &str) -> ResourceRef {
@@ -98,35 +110,54 @@ impl NodesScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
             Table::new("nodes", columns(), cx)
-                .row_key(|n: &Node| n.name.clone().into())
-                .row_status(|n: &Node| (n.status != Status::Ok).then_some(n.status))
+                .row_key(|r: &NodeRow| r.node.name.clone().into())
+                .row_status(|r: &NodeRow| (r.node.status != Status::Ok).then_some(r.node.status))
         });
         cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
             let TableEvent::Selected(ix) = event else {
                 return;
             };
-            let name = table.read(cx).row(*ix).map(|n| n.name.clone());
+            let name = table.read(cx).row(*ix).map(|r| r.node.name.clone());
             this.select(name, cx);
         })
         .detach();
-        let filter =
-            cx.new(|cx| FilterBar::new("node-filter", Node::FILTER.placeholder(), window, cx));
+        let pools = cx.new(|cx| {
+            Select::new("node-pool", vec![ALL_POOLS.into()], cx)
+                .mono()
+                .width(SEARCH_WIDTH)
+        });
+        cx.subscribe(&pools, |this, select, _: &SelectEvent, cx| {
+            let select = select.read(cx);
+            this.pool = (select.selected_index() > 0)
+                .then(|| select.selected_label().map(ToString::to_string))
+                .flatten();
+            this.refresh(cx);
+        })
+        .detach();
+        let filter = cx.new(|cx| {
+            FilterBar::new("node-filter", Node::FILTER.placeholder(), window, cx)
+                .scope(pools.clone())
+        });
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })
         .detach();
+        let actions = cx.new(|cx| ActionMenu::new(ACTIONS_ID, cx));
         Self {
             cluster: None,
             cluster_name: String::new(),
+            control_plane: None,
             shown: 0,
             summary: NodeSummary::default(),
             nodes: Vec::new(),
             events: Vec::new(),
             confirm_destructive: true,
             selected: None,
-            related: Vec::new(),
+            pool: None,
             table,
             filter,
+            pools,
+            actions,
             presence: Presence::default(),
         }
     }
@@ -141,19 +172,16 @@ impl NodesScreen {
         self.selected = kept_selection(self.cluster.as_ref(), &cluster.id, self.selected.take());
         self.cluster = Some(cluster.id.clone());
         self.cluster_name.clone_from(&cluster.name);
-        if self.confirm_destructive != confirm_destructive {
-            self.confirm_destructive = confirm_destructive;
-            self.refresh(cx);
-        }
+        let changed = self.confirm_destructive != confirm_destructive
+            || self.control_plane != cluster.version
+            || self.nodes != detail.nodes;
+        self.confirm_destructive = confirm_destructive;
+        self.control_plane.clone_from(&cluster.version);
         if self.events != detail.events {
             self.events.clone_from(&detail.events);
             cx.notify();
         }
-        if self.related != detail.related {
-            self.related.clone_from(&detail.related);
-            cx.notify();
-        }
-        if self.nodes == detail.nodes {
+        if !changed {
             return;
         }
         self.nodes.clone_from(&detail.nodes);
@@ -165,11 +193,39 @@ impl NodesScreen {
         {
             self.selected = None;
         }
+        self.set_pools(cx);
         self.refresh(cx);
     }
 
     pub fn filter_bar(&self) -> &Entity<FilterBar> {
         &self.filter
+    }
+
+    fn set_pools(&mut self, cx: &mut Context<Self>) {
+        let counts = pool_counts(&self.nodes);
+        if self
+            .pool
+            .as_ref()
+            .is_some_and(|pool| !counts.iter().any(|(name, _)| name == pool))
+        {
+            self.pool = None;
+        }
+        let options: Vec<SharedString> = std::iter::once(ALL_POOLS.into())
+            .chain(counts.iter().map(|(name, _)| name.clone().into()))
+            .collect();
+        let numbers: Vec<usize> = std::iter::once(self.nodes.len())
+            .chain(counts.iter().map(|(_, count)| *count))
+            .collect();
+        let selected = self
+            .pool
+            .as_ref()
+            .and_then(|pool| counts.iter().position(|(name, _)| name == pool))
+            .map_or(0, |ix| ix + 1);
+        self.pools.update(cx, |select, cx| {
+            select.set_options(options, cx);
+            select.set_counts(numbers, cx);
+            select.set_selected(selected, cx);
+        });
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -180,16 +236,26 @@ impl NodesScreen {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let base: Vec<&Node> = self.nodes.iter().filter(|n| n.matches(&query)).collect();
-        let chips = StatusFilter::counts(base.iter().map(|n| n.status))
+        let pool = self.pool.as_deref();
+        let base: Vec<&Node> = self
+            .nodes
+            .iter()
+            .filter(|n| pool.is_none_or(|pool| n.pool() == pool))
+            .filter(|n| n.matches(&query))
+            .collect();
+        let chips = NodeFilter::counts(&base)
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))
             .collect();
-        let chip = StatusFilter::at(chip);
-        let rows: Vec<Node> = base
+        let chip = NodeFilter::at(chip);
+        let control_plane = self.control_plane.as_deref();
+        let rows: Vec<NodeRow> = base
             .into_iter()
-            .filter(|n| chip.keeps(n.status))
-            .cloned()
+            .filter(|n| chip.keeps(n))
+            .map(|node| NodeRow {
+                node: node.clone(),
+                skewed: control_plane.is_some_and(|server| kubelet_skewed(&node.version, server)),
+            })
             .collect();
         let shown = rows.len();
         self.shown = shown;
@@ -210,6 +276,7 @@ impl NodesScreen {
             table.set_rows(rows, cx);
         });
         self.select_in_table(cx);
+        self.set_inspector_actions(cx);
         cx.notify();
     }
 
@@ -220,6 +287,7 @@ impl NodesScreen {
         self.cluster = Some(cluster);
         self.selected = Some(name);
         self.select_in_table(cx);
+        self.set_inspector_actions(cx);
         cx.notify();
     }
 
@@ -231,7 +299,7 @@ impl NodesScreen {
         self.table.update(cx, |table, cx| {
             let position = (0..)
                 .map_while(|ix| table.row(ix))
-                .position(|n| n.name == name);
+                .position(|r| r.node.name == name);
             if position.is_some() {
                 table.select(position, cx);
             }
@@ -248,6 +316,7 @@ impl NodesScreen {
         let command = target.map_or(Command::CloseInspector, |(name, cluster)| {
             Command::InspectResource(node_ref(cluster, name))
         });
+        self.set_inspector_actions(cx);
         cx.emit(ScreenEvent::Command(command));
         cx.notify();
     }
@@ -262,81 +331,152 @@ impl NodesScreen {
         self.nodes.iter().find(|n| &n.name == name)
     }
 
-    fn target(&self, node: &Node) -> Option<Seen> {
-        let cluster = self.cluster.as_ref()?;
-        Some(node_target(node, cluster))
+    fn skewed(&self, node: &Node) -> bool {
+        self.control_plane
+            .as_deref()
+            .is_some_and(|server| kubelet_skewed(&node.version, server))
     }
 
-    fn row_actions(&self, cx: &mut Context<Self>) -> impl Fn(&Node) -> Vec<MenuItem> + 'static {
+    fn set_inspector_actions(&mut self, cx: &mut Context<Self>) {
+        let screen = cx.weak_entity();
+        let items = self
+            .selected_node()
+            .zip(self.cluster.as_ref())
+            .map(|(node, cluster)| {
+                let actions = NodeActions::of(node, cluster, self.confirm_destructive, &screen);
+                vec![actions.toggle, actions.drain, actions.edit]
+            })
+            .unwrap_or_default();
+        self.actions
+            .update(cx, |menu, cx| menu.set_items(items, cx));
+    }
+
+    fn row_actions(&self, cx: &mut Context<Self>) -> impl Fn(&NodeRow) -> Vec<MenuItem> + 'static {
         let cluster = self.cluster.clone();
         let confirm_destructive = self.confirm_destructive;
         let screen = cx.weak_entity();
-        move |node: &Node| {
+        move |row: &NodeRow| {
             let Some(cluster) = cluster.clone() else {
                 return Vec::new();
             };
-            node_items(node, &cluster, confirm_destructive, screen.clone())
+            let node = &row.node;
+            let target = node_target(node, &cluster);
+            let open_screen = screen.clone();
+            let open = new_tab_item(Command::OpenResource(target.target), move |command, cx| {
+                let _ = open_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+            });
+            let actions = NodeActions::of(node, &cluster, confirm_destructive, &screen);
+            vec![open, actions.edit, actions.toggle, actions.drain]
         }
     }
 
     fn inspector(&self, node: &Node, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let target = self.target(node);
-        let primary = target.map(|target| {
-            let (label, command) = if node.schedulable {
-                ("Cordon", Command::Cordon(target))
-            } else {
-                ("Uncordon", Command::Uncordon(target))
-            };
-            Button::new("node-primary", label)
-                .primary()
-                .disabled(node.status == Status::Progress)
-                .on_click(cx.listener(move |_, _, _, cx| {
-                    cx.emit(ScreenEvent::Command(command.clone()));
-                }))
-        });
-        let close = IconButton::glyph("close-node", "×", "Close")
-            .on_click(cx.listener(|this, _, _, cx| this.close(cx)));
-        let facts = KeyValue::new()
+        let skewed = self.skewed(node);
+        let kubelet_color = if skewed { palette.warn } else { palette.fg };
+        let kubelet = div().text_color(kubelet_color).child(node.version.clone());
+        let details = KeyValue::new()
             .label_width(INSPECTOR_LABEL)
+            .text("pool", node.pool().to_owned())
             .text("instance", node.instance_type.clone())
             .text("zone", node.zone.clone())
             .text("internal IP", node.internal_ip.clone())
-            .text("kubelet", node.version.clone())
+            .row("kubelet", kubelet)
             .text("OS image", node.os_image.clone())
             .text("runtime", node.runtime.clone())
             .text("age", age(node.age));
-        let capacity = node_capacity(node, palette);
         let events: Vec<PodEvent> =
             flock_core::diagnosis::about(&self.events, NODE_KIND, None, &node.name)
                 .into_iter()
                 .map(PodEvent::from)
                 .collect();
-        let screen = cx.weak_entity();
-        let pick: OnPick = Rc::new(move |pick, _, cx| {
-            if let Pick::Object(target) = pick {
-                let command = ScreenEvent::Command(Command::OpenResource(target));
-                let _ = screen.update(cx, |_, cx| cx.emit(command));
-            }
-        });
-        let related = self.cluster.as_ref().and_then(|cluster| {
-            let target = node_ref(cluster, &node.name);
-            self.related.iter().find(|related| related.target == target)
-        });
-        let related = inspector_section(related, &pick, cx);
-        let inspector = Inspector::new(INSPECTOR_ID, node.name.clone())
+        let not_ok = node.conditions_not_ok();
+        let condition_color = if not_ok > 0 {
+            palette.warn
+        } else {
+            palette.mute
+        };
+        let conditions = PanelSection::new(INSPECTOR_ID, CONDITIONS)
+            .count(node.conditions.len().to_string())
+            .count_color(condition_color)
+            .closed()
+            .child(ConditionTable::new(&node.conditions));
+        let taints = PanelSection::new(INSPECTOR_ID, "Taints")
+            .count(node.taints.len().to_string())
+            .child(LabelChips::new(node.taints.clone()));
+        let pods = PanelSection::new(INSPECTOR_ID, "Pods")
+            .count(pods_count(node))
+            .child(self.top_pods(node, palette, cx));
+        Inspector::new(INSPECTOR_ID, node.name.clone())
             .mono()
             .width(INSPECTOR_NODE)
             .status(node.status, node.state.clone())
             .issues(node.issue())
-            .actions(div().flex().gap(SPACE_3).children(primary).child(close));
-        inspector
-            .section(Some(CONDITIONS), ConditionTable::new(&node.conditions))
+            .actions(self.actions.clone())
+            .panel(PanelSection::new(INSPECTOR_ID, "Usage").child(node_usage(node, palette)))
+            .panel(PanelSection::new(INSPECTOR_ID, "Details").child(details))
+            .panel(taints)
+            .panel(PanelSection::labels(INSPECTOR_ID, node.labels.clone()).closed())
+            .panel(conditions)
+            .panel(pods)
             .panel(PanelSection::events(INSPECTOR_ID, events))
-            .section(None, facts.into_any_element())
-            .section(Some("Capacity"), capacity.into_any_element())
-            .section(Some(RELATED), related)
-            .section(Some("Taints"), label_list(&node.taints, palette))
-            .panel(PanelSection::labels(INSPECTOR_ID, node.labels.clone()))
+            .into_any_element()
+    }
+
+    fn top_pods(&self, node: &Node, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let heading = pod_line(
+            div().child(BY_REQUEST).into_any_element(),
+            CPU_HEADING,
+            MEMORY_HEADING,
+        )
+        .font_family(crate::theme::FONT_SANS)
+        .text_size(TEXT_LABEL)
+        .text_color(palette.mute);
+        let cluster = self.cluster.clone();
+        let screen = cx.weak_entity();
+        let rows = node.top_pods.iter().enumerate().map(|(ix, pod)| {
+            let target = cluster.as_ref().map(|cluster| pod_ref(cluster, pod));
+            let screen = screen.clone();
+            let name = Link::new(
+                SharedString::from(format!("node-pod-{ix}")),
+                pod.name.clone(),
+            )
+            .mono()
+            .color(palette.fg)
+            .on_click(move |_, _, cx| {
+                if let Some(target) = target.clone() {
+                    let command = ScreenEvent::Command(Command::OpenResource(target));
+                    let _ = screen.update(cx, |_, cx| cx.emit(command));
+                }
+            });
+            let label = div()
+                .flex()
+                .gap(SPACE_3)
+                .min_w_0()
+                .overflow_hidden()
+                .child(name)
+                .child(
+                    div()
+                        .truncate()
+                        .text_color(palette.mute)
+                        .child(pod.namespace.clone()),
+                )
+                .into_any_element();
+            pod_line(
+                label,
+                figure(pod.cpu),
+                Amount::of(figure(pod.memory), MEMORY_UNIT).labelled(),
+            )
+            .text_color(palette.fg2)
+            .into_any_element()
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap(SPACE_3)
+            .font_family(FONT_MONO)
+            .text_size(TEXT_SMALL)
+            .child(heading)
+            .children(rows)
             .into_any_element()
     }
 }
@@ -344,7 +484,6 @@ impl NodesScreen {
 impl Render for NodesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
-        let meta = self.summary.meta_line();
         let shape = ListShape {
             shown: self.shown,
             total: self.nodes.len(),
@@ -356,6 +495,14 @@ impl Render for NodesScreen {
             Some(empty) => empty.into_any_element(),
             None => self.table.clone().into_any_element(),
         };
+        let footer = div()
+            .debug_selector(|| "node-footer".to_owned())
+            .px(SPACE_6)
+            .py(SPACE_4)
+            .font_family(FONT_MONO)
+            .text_size(TEXT_LABEL)
+            .text_color(palette.mute)
+            .child(footer_line(self.shown, self.nodes.len()));
         let current = self.selected_node().cloned();
         let shown = current.as_ref().map(|node| (node, node.name.as_str()));
         let motion = self.presence.track(shown, presence, cx);
@@ -378,68 +525,94 @@ impl Render for NodesScreen {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(MetaLine::new(meta))
                     .child(self.filter.clone())
-                    .child(div().flex_1().min_h_0().child(body)),
+                    .child(div().flex_1().min_h_0().child(body))
+                    .child(footer),
             )
             .children(inspector)
     }
 }
 
-fn node_target(node: &Node, cluster: &ClusterId) -> Seen {
-    let target = ResourceRef {
-        cluster: cluster.clone(),
-        kind: NODE_KIND.into(),
-        namespace: None,
-        name: node.name.clone(),
-    };
-    Seen::new(target, node.uid.clone())
+fn footer_line(shown: usize, total: usize) -> String {
+    format!("{shown} of {total} nodes · {FOOTER_NOTE}")
 }
 
-fn node_items(
-    node: &Node,
-    cluster: &ClusterId,
-    confirm_destructive: bool,
-    screen: WeakEntity<NodesScreen>,
-) -> Vec<MenuItem> {
-    let target = node_target(node, cluster);
-    let open_screen = screen.clone();
-    let open = new_tab_item(
-        Command::OpenResource(target.target.clone()),
-        move |command, cx| {
-            let _ = open_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
-        },
-    );
-    let (label, description, command) = if node.schedulable {
-        (
-            "Cordon",
-            "Stop scheduling new pods here; running pods stay.",
-            Command::Cordon(target.clone()),
-        )
+fn pods_count(node: &Node) -> String {
+    let listed = node.top_pods.len();
+    if listed == 0 {
+        node.pods.to_string()
     } else {
-        (
-            "Uncordon",
-            "Let the scheduler place new pods here again.",
-            Command::Uncordon(target.clone()),
-        )
+        format!("{} · top {listed}", node.pods)
+    }
+}
+
+fn pod_ref(cluster: &ClusterId, pod: &NodePod) -> ResourceRef {
+    ResourceRef {
+        cluster: cluster.clone(),
+        kind: POD_KIND.to_owned(),
+        namespace: Some(pod.namespace.clone()),
+        name: pod.name.clone(),
+    }
+}
+
+fn pod_line(
+    label: AnyElement,
+    cpu: impl Into<SharedString>,
+    memory: impl Into<SharedString>,
+) -> gpui::Div {
+    let figure = |text: SharedString| {
+        div()
+            .flex_none()
+            .w(POD_FIGURE)
+            .flex()
+            .justify_end()
+            .child(text)
     };
-    let toggle_screen = screen.clone();
-    let toggle = MenuItem::new(label, move |_, cx| {
-        let command = command.clone();
-        let _ = toggle_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
-    })
-    .disabled(node.status == Status::Progress)
-    .description(description);
-    let edit_screen = screen.clone();
-    let edit = edit_item(target.target.clone(), move |command, cx| {
-        let _ = edit_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
-    });
-    let detail = format!("{} · {}", target.target.cluster, target.target.name);
-    vec![
-        open,
-        edit,
-        toggle,
-        MenuItem::new("Drain…", move |window, cx| {
+    div()
+        .flex()
+        .items_center()
+        .gap(SPACE_5)
+        .child(div().flex_1().min_w_0().child(label))
+        .child(figure(cpu.into()))
+        .child(figure(memory.into()))
+}
+
+fn node_target(node: &Node, cluster: &ClusterId) -> Seen {
+    Seen::new(node_ref(cluster, &node.name), node.uid.clone())
+}
+
+struct NodeActions {
+    toggle: MenuItem,
+    drain: MenuItem,
+    edit: MenuItem,
+}
+
+impl NodeActions {
+    fn of(
+        node: &Node,
+        cluster: &ClusterId,
+        confirm_destructive: bool,
+        screen: &WeakEntity<NodesScreen>,
+    ) -> Self {
+        let target = node_target(node, cluster);
+        let (label, command) = if node.schedulable {
+            ("Cordon", Command::Cordon(target.clone()))
+        } else {
+            ("Uncordon", Command::Uncordon(target.clone()))
+        };
+        let toggle_screen = screen.clone();
+        let toggle = MenuItem::new(label, move |_, cx| {
+            let command = command.clone();
+            let _ = toggle_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+        })
+        .disabled(node.status == Status::Progress);
+        let edit_screen = screen.clone();
+        let edit = edit_item(target.target.clone(), move |command, cx| {
+            let _ = edit_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
+        });
+        let detail = format!("{} · {}", target.target.cluster, target.target.name);
+        let screen = screen.clone();
+        let drain = MenuItem::new("Drain…", move |window, cx| {
             let screen = screen.clone();
             let target = target.clone();
             if !confirm_destructive {
@@ -459,39 +632,13 @@ fn node_items(
             .detail(detail.clone());
             confirm(dialog, window, cx);
         })
-        .destructive()
-        .description("Cordon, then evict every pod except DaemonSet pods."),
-    ]
-}
-
-fn label_list(items: &[String], palette: &Palette) -> AnyElement {
-    let lines: Vec<AnyElement> = if items.is_empty() {
-        vec![
-            div()
-                .text_color(palette.mute)
-                .child(NONE)
-                .into_any_element(),
-        ]
-    } else {
-        items
-            .iter()
-            .map(|item| {
-                div()
-                    .min_w_0()
-                    .child(SelectableText::new(item.clone()))
-                    .into_any_element()
-            })
-            .collect()
-    };
-    div()
-        .flex()
-        .flex_col()
-        .gap(SPACE_2)
-        .font_family(FONT_MONO)
-        .text_size(TEXT_SMALL)
-        .text_color(palette.fg2)
-        .children(lines)
-        .into_any_element()
+        .destructive();
+        Self {
+            toggle,
+            drain,
+            edit,
+        }
+    }
 }
 
 fn count(value: u32) -> f32 {
@@ -503,149 +650,192 @@ fn short_version(version: &str) -> SharedString {
     short.to_owned().into()
 }
 
-fn node_capacity(node: &Node, palette: &Palette) -> gpui::Div {
+fn pressure_color(fraction: f32, palette: &Palette) -> Option<Hsla> {
+    pressure(fraction).map(|status| palette.status(status))
+}
+
+fn node_usage(node: &Node, palette: &Palette) -> AnyElement {
+    let pods = Usage {
+        used: count(node.pods),
+        allocatable: count(node.pod_capacity),
+    };
     div()
         .flex()
         .flex_col()
-        .gap(SPACE_5)
-        .child(capacity_row(
+        .gap(SPACE_6)
+        .child(usage_row(
             "CPU",
+            amount(node.cpu.used, node.cpu.allocatable, CPU_UNIT).labelled(),
             node.cpu,
-            node.cpu_commitment,
-            CPU_UNIT,
-            palette.acc,
+            Some(node.cpu_commitment),
+            palette,
         ))
-        .child(capacity_row(
+        .child(usage_row(
             "Memory",
+            amount(node.memory.used, node.memory.allocatable, MEMORY_UNIT).labelled(),
             node.memory,
-            node.memory_commitment,
-            MEMORY_UNIT,
-            palette.ai,
+            Some(node.memory_commitment),
+            palette,
         ))
         .child(usage_row(
             "Pods",
-            Usage {
-                used: count(node.pods),
-                allocatable: count(node.pod_capacity),
-            },
+            format!("{} / {}", node.pods, node.pod_capacity),
+            pods,
+            None,
             palette,
         ))
+        .into_any_element()
 }
 
-fn capacity_row(
+fn usage_row(
     label: &'static str,
+    figures: String,
     usage: Usage,
-    commitment: Commitment,
-    unit: &str,
-    color: Hsla,
+    commitment: Option<Commitment>,
+    palette: &Palette,
 ) -> impl IntoElement {
-    let capacity = Capacity {
-        used: usage.used,
-        total: usage.allocatable,
-        unit: unit.into(),
-        requests: commitment.requests,
-        limits: commitment.limits,
+    let fraction = usage.fraction();
+    let warning = pressure_color(fraction, palette);
+    let share = match commitment {
+        Some(_) => format!("{} {USED}", percent(fraction)),
+        None => percent(fraction),
     };
-    let id = format!("node-capacity-{label}");
+    let meter = Meter::new(fraction).color(warning.unwrap_or(palette.acc));
+    let meter = match commitment {
+        Some(commitment) => meter.request(commitment.requests),
+        None => meter,
+    };
+    let sub = commitment.map(|commitment| {
+        div()
+            .font_family(FONT_MONO)
+            .text_size(TEXT_LABEL)
+            .text_color(palette.mute)
+            .child(request_line(usage.allocatable, commitment))
+    });
     div()
-        .flex()
-        .flex_col()
-        .gap(SPACE_4)
-        .child(SectionLabel::new(label))
-        .child(CapacityMeter::new(id, capacity, color))
-}
-
-fn usage_row(label: &'static str, usage: Usage, palette: &Palette) -> impl IntoElement {
-    let amount = format!("{} / {}", usage.used, usage.allocatable);
-    div()
+        .debug_selector(move || format!("node-usage-{label}"))
         .flex()
         .flex_col()
         .gap(SPACE_3)
         .child(
             div()
                 .flex()
-                .child(SectionLabel::new(label))
+                .items_center()
+                .gap(SPACE_4)
+                .font_family(FONT_MONO)
+                .text_size(TEXT_MONO)
+                .child(
+                    div()
+                        .flex_none()
+                        .w(USAGE_LABEL)
+                        .font_family(crate::theme::FONT_SANS)
+                        .text_size(TEXT_BODY)
+                        .text_color(palette.mute)
+                        .child(label),
+                )
+                .child(figures)
                 .child(div().flex_1())
                 .child(
                     div()
-                        .font_family(FONT_MONO)
-                        .text_size(TEXT_MONO)
-                        .text_color(palette.mute)
-                        .child(format!("{amount} · {}", percent(usage.fraction()))),
+                        .text_color(warning.unwrap_or(palette.fg2))
+                        .child(share),
                 ),
         )
-        .child(Meter::new(usage.fraction()))
+        .child(div().ml(USAGE_LABEL + SPACE_4).child(meter))
+        .children(sub.map(|sub| div().ml(USAGE_LABEL + SPACE_4).child(sub)))
 }
 
-fn usage_cell(usage: Usage, color: Hsla) -> AnyElement {
+fn request_cell(fraction: f32, palette: &Palette) -> AnyElement {
+    let warning = pressure_color(fraction, palette);
     div()
+        .w_full()
+        .min_w_0()
         .flex()
         .items_center()
-        .gap(SPACE_4)
-        .child(MiniMeter::new(usage.fraction()).color(color))
-        .child(percent(usage.fraction()))
+        .gap(SPACE_3)
+        .child(
+            MiniMeter::new(fraction)
+                .fill()
+                .color(warning.unwrap_or(palette.acc)),
+        )
+        .child(
+            div()
+                .flex_none()
+                .w(REQUEST_FIGURE)
+                .flex()
+                .justify_end()
+                .text_color(warning.unwrap_or(palette.fg2))
+                .child(percent(fraction)),
+        )
         .into_any_element()
 }
 
-fn columns() -> Vec<Column<Node>> {
+fn columns() -> Vec<Column<NodeRow>> {
     vec![
-        Column::status_text(
-            "Name",
-            |n: &Node| n.status,
-            |n: &Node| n.name.clone().into(),
-        )
-        .highlight()
-        .mono()
-        .flex(NAME_WEIGHT, NAME_MIN)
-        .sort_by_key(|n: &Node| n.name.clone()),
-        Column::new("Status", |n: &Node, _| {
-            StatusText::new(n.status, n.state.clone()).into_any_element()
-        })
-        .flex(STATUS_WEIGHT, STATUS_MIN)
-        .sort_by_key(|n: &Node| std::cmp::Reverse(n.status)),
+        Column::text("Name", |r: &NodeRow| r.node.name.clone().into())
+            .highlight()
+            .mono()
+            .flex(NAME_WEIGHT, NAME_MIN)
+            .sort_by_key(|r: &NodeRow| r.node.name.clone()),
         Column::colored_text(
-            "Instance",
-            |n: &Node| n.instance_type.clone().into(),
+            "Pool",
+            |r: &NodeRow| r.node.pool().to_owned().into(),
             |_, p| p.fg2,
         )
         .mono()
-        .flex(INSTANCE_WEIGHT, INSTANCE_WIDTH)
-        .sort_by_key(|n: &Node| n.instance_type.clone()),
-        Column::colored_text("Zone", |n: &Node| n.zone.clone().into(), |_, p| p.fg2)
-            .mono()
-            .fixed(ZONE_WIDTH)
-            .sort_by_key(|n: &Node| n.zone.clone()),
-        Column::new("CPU", |n: &Node, p| usage_cell(n.cpu, p.acc))
-            .mono()
-            .fixed(USAGE_WIDTH)
-            .sortable(|a: &Node, b: &Node| a.cpu.fraction().total_cmp(&b.cpu.fraction())),
-        Column::new("Memory", |n: &Node, p| usage_cell(n.memory, p.ai))
-            .mono()
-            .fixed(USAGE_WIDTH)
-            .sortable(|a: &Node, b: &Node| a.memory.fraction().total_cmp(&b.memory.fraction())),
-        Column::text("Pods", |n: &Node| {
-            format!("{}/{}", n.pods, n.pod_capacity).into()
-        })
+        .flex(POOL_WEIGHT, POOL_MIN)
+        .sort_by_key(|r: &NodeRow| r.node.pool().to_owned()),
+        Column::colored_text(
+            "Status",
+            |r: &NodeRow| r.node.state.clone().into(),
+            |r: &NodeRow, p| p.status(r.node.status),
+        )
+        .fixed(STATUS_WIDTH)
+        .sort_by_key(|r: &NodeRow| std::cmp::Reverse(r.node.status)),
+        Column::colored_text(
+            "Pods",
+            |r: &NodeRow| format!("{}/{}", r.node.pods, r.node.pod_capacity).into(),
+            |_, p| p.fg2,
+        )
         .mono()
         .end()
         .fixed(PODS_WIDTH)
-        .sort_by_key(|n: &Node| n.pods),
+        .sort_by_key(|r: &NodeRow| r.node.pods),
+        Column::new("CPU req", |r: &NodeRow, p| {
+            request_cell(r.node.cpu_commitment.requests, p)
+        })
+        .mono()
+        .flex(REQUEST_WEIGHT, REQUEST_MIN)
+        .sortable(|a: &NodeRow, b: &NodeRow| {
+            a.node
+                .cpu_commitment
+                .requests
+                .total_cmp(&b.node.cpu_commitment.requests)
+        }),
+        Column::new("Mem req", |r: &NodeRow, p| {
+            request_cell(r.node.memory_commitment.requests, p)
+        })
+        .mono()
+        .flex(REQUEST_WEIGHT, REQUEST_MIN)
+        .sortable(|a: &NodeRow, b: &NodeRow| {
+            a.node
+                .memory_commitment
+                .requests
+                .total_cmp(&b.node.memory_commitment.requests)
+        }),
         Column::colored_text(
-            "Version",
-            |n: &Node| short_version(&n.version),
-            |_, p| p.fg2,
+            "Kubelet",
+            |r: &NodeRow| short_version(&r.node.version),
+            |r: &NodeRow, p| if r.skewed { p.warn } else { p.fg2 },
         )
         .mono()
-        .fixed(VERSION_WIDTH),
-        Column::new(REASON, |n: &Node, palette| {
-            reason_cell(n.status, n.diagnosis().as_ref(), palette)
-        })
-        .tooltip(|n: &Node| reason_tooltip(n.diagnosis().as_ref()))
-        .flex(REASON_WEIGHT, REASON_MIN),
-        Column::colored_text("Age", |n: &Node| age(n.age).into(), |_, p| p.mute)
+        .fixed(VERSION_WIDTH)
+        .sort_by_key(|r: &NodeRow| r.node.version.clone()),
+        Column::colored_text("Age", |r: &NodeRow| age(r.node.age).into(), |_, p| p.mute)
             .mono()
+            .end()
             .fixed(AGE_WIDTH)
-            .sort_by_key(|n: &Node| n.age),
+            .sort_by_key(|r: &NodeRow| r.node.age),
     ]
 }
 
@@ -675,5 +865,10 @@ mod tests {
     fn version_drops_the_build_suffix() {
         assert_eq!(short_version("v1.31.2-eks-7f9249a"), "v1.31.2");
         assert_eq!(short_version("v1.29.8"), "v1.29.8");
+    }
+
+    #[test]
+    fn footer_counts_shown_nodes_against_all() {
+        assert_eq!(footer_line(9, 64), "9 of 64 nodes · requests / allocatable");
     }
 }

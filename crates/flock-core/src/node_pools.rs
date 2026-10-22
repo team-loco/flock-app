@@ -191,6 +191,11 @@ fn leading_number(text: &str) -> Option<u32> {
     text.get(..end)?.parse().ok()
 }
 
+pub fn kubelet_skewed(kubelet: &str, control_plane: &str) -> bool {
+    let versions = Version::parse(kubelet).zip(Version::parse(control_plane));
+    versions.is_some_and(|(kubelet, server)| !kubelet.same_minor(server))
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct KubeletSkew {
     pub control_plane: String,
@@ -340,6 +345,13 @@ mod tests {
         let mut node = pooled(name, pool, "m6i", (0., 0.));
         node.version = version.into();
         node
+    }
+
+    #[test]
+    fn a_kubelet_is_skewed_only_on_another_minor() {
+        assert!(kubelet_skewed("v1.30.4-eks-a737599", "v1.31.2"));
+        assert!(!kubelet_skewed("v1.31.0", "v1.31.2-eks-7f9249a"));
+        assert!(!kubelet_skewed("", "v1.31.2"));
     }
 
     #[test]

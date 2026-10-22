@@ -10,7 +10,7 @@ use flock_core::control_plane::{
 use flock_core::events::Event;
 use flock_core::expiry::{Expiring, SupportEnd};
 use flock_core::home::Problem;
-use flock_core::nodes::{CONDITION_TRUE, Node, READY_CONDITION, Usage};
+use flock_core::nodes::{CONDITION_TRUE, Node, NodePod, READY_CONDITION, Usage, state_label};
 use flock_core::overview::{Commitment, NetworkFacts, Overview, PodPhases, TimeRange, Utilization};
 use flock_core::pod_tops::PodTops;
 use flock_core::{ClusterDetail, ClusterId, Counts, ResourceRef, Status, Uid};
@@ -27,16 +27,19 @@ const GPU_MEMORY: f32 = 40.;
 const POD_CAPACITY: u32 = 110;
 const KUBELET: &str = "v1.31.2-eks-7f9249a";
 const GPU_KUBELET: &str = "v1.30.4-eks-a737599";
-const GPU_COMMITMENT: (Commitment, Commitment) = (
-    Commitment {
-        requests: 0.96,
-        limits: 1.,
-    },
-    Commitment {
-        requests: 0.71,
-        limits: 0.9,
-    },
-);
+const CPU_LIMIT_RATIO: f32 = 1.4;
+const MEMORY_LIMIT_RATIO: f32 = 1.2;
+const GENERAL_PODS: [(&str, &str, f32, f32); 5] = [
+    ("search-indexer-0", "search", 2., 4.),
+    ("prometheus-k8s-0", "monitoring", 1.5, 8.),
+    ("payments-db-0", "payments", 1., 4.),
+    ("payments-worker-5d8b-7hx2c", "payments", 0.5, 0.5),
+    ("coredns-5d78c9869d-8hjvq", "kube-system", 0.1, 0.07),
+];
+const GPU_PODS: [(&str, &str, f32, f32); 2] = [
+    ("ml-batch-5c7f-9kq2d", "ml", 6., 24.),
+    ("aws-node-7kx2p", "kube-system", 0.03, 0.03),
+];
 const OS_IMAGE: &str = "Amazon Linux 2023.5.20240916";
 const EVENT_FIRST_AGE: Duration = Duration::from_secs(3600);
 const BAR_SEED: u64 = 11;
@@ -54,8 +57,6 @@ const GENERAL: &str = "m6i.4xlarge";
 const GPU: &str = "g5.2xlarge";
 const UNSCHEDULABLE_TAINT: &str = "node.kubernetes.io/unschedulable:NoSchedule";
 const GPU_TAINT: &str = "nvidia.com/gpu=present:NoSchedule";
-pub const SCHEDULING_DISABLED: &str = "SchedulingDisabled";
-pub const READY: &str = "Ready";
 
 pub fn minutes(n: u64) -> Duration {
     Duration::from_secs(n * MINUTE)
@@ -416,6 +417,7 @@ struct NodeSeed {
     memory: f32,
     pods: u32,
     age_days: u64,
+    requests: (f32, f32),
 }
 
 const NODES: [NodeSeed; 14] = [
@@ -427,6 +429,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 23.,
         pods: 34,
         age_days: 34,
+        requests: (0.74, 0.66),
     },
     NodeSeed {
         name: "ip-10-4-12-87",
@@ -436,6 +439,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 26.,
         pods: 38,
         age_days: 34,
+        requests: (0.94, 0.81),
     },
     NodeSeed {
         name: "ip-10-4-13-150",
@@ -445,6 +449,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 21.,
         pods: 31,
         age_days: 34,
+        requests: (0.7, 0.62),
     },
     NodeSeed {
         name: "ip-10-4-14-201",
@@ -454,6 +459,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 25.,
         pods: 36,
         age_days: 34,
+        requests: (0.86, 0.7),
     },
     NodeSeed {
         name: "ip-10-4-20-19",
@@ -463,6 +469,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 20.,
         pods: 30,
         age_days: 34,
+        requests: (0.68, 0.6),
     },
     NodeSeed {
         name: "ip-10-4-21-212",
@@ -472,6 +479,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 22.,
         pods: 33,
         age_days: 34,
+        requests: (0.72, 0.64),
     },
     NodeSeed {
         name: "ip-10-4-22-63",
@@ -481,6 +489,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 24.,
         pods: 35,
         age_days: 34,
+        requests: (0.83, 0.66),
     },
     NodeSeed {
         name: "ip-10-4-23-8",
@@ -490,6 +499,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 21.,
         pods: 30,
         age_days: 12,
+        requests: (0.66, 0.58),
     },
     NodeSeed {
         name: "ip-10-4-30-5",
@@ -499,6 +509,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 28.,
         pods: 37,
         age_days: 34,
+        requests: (0.97, 0.77),
     },
     NodeSeed {
         name: "ip-10-4-31-12",
@@ -508,6 +519,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 8.,
         pods: 6,
         age_days: 34,
+        requests: (0.22, 0.18),
     },
     NodeSeed {
         name: "ip-10-4-32-77",
@@ -517,6 +529,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 23.,
         pods: 32,
         age_days: 34,
+        requests: (0.75, 0.67),
     },
     NodeSeed {
         name: "ip-10-4-33-140",
@@ -526,6 +539,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 21.,
         pods: 30,
         age_days: 12,
+        requests: (0.69, 0.61),
     },
     NodeSeed {
         name: "ip-10-4-40-7",
@@ -535,6 +549,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 25.,
         pods: 20,
         age_days: 9,
+        requests: (0.96, 0.71),
     },
     NodeSeed {
         name: "ip-10-4-41-66",
@@ -544,6 +559,7 @@ const NODES: [NodeSeed; 14] = [
         memory: 25.,
         pods: 20,
         age_days: 9,
+        requests: (0.96, 0.71),
     },
 ];
 
@@ -560,27 +576,41 @@ fn node(seed: &NodeSeed) -> Node {
     } else {
         (GENERAL, GENERAL_MEMORY, "general", KUBELET)
     };
-    let (cpu_commitment, memory_commitment) = if seed.gpu {
-        GPU_COMMITMENT
-    } else {
-        (overview().cpu, overview().memory)
+    let (cpu_request, memory_request) = seed.requests;
+    let cpu_commitment = Commitment {
+        requests: cpu_request,
+        limits: cpu_request * CPU_LIMIT_RATIO,
     };
+    let memory_commitment = Commitment {
+        requests: memory_request,
+        limits: memory_request * MEMORY_LIMIT_RATIO,
+    };
+    let top: &[(&str, &str, f32, f32)] = if seed.gpu { &GPU_PODS } else { &GENERAL_PODS };
+    let top_pods = top
+        .iter()
+        .map(|&(name, namespace, cpu, memory)| NodePod {
+            name: name.into(),
+            namespace: namespace.into(),
+            cpu,
+            memory,
+        })
+        .collect();
     let mut taints = Vec::new();
     if seed.gpu {
         taints.push(GPU_TAINT.to_owned());
     }
-    let (status, state) = if schedulable {
-        (Status::Ok, READY)
+    let status = if schedulable {
+        Status::Ok
     } else {
         taints.push(UNSCHEDULABLE_TAINT.to_owned());
-        (Status::Warn, SCHEDULING_DISABLED)
+        Status::Warn
     };
     let internal_ip = seed.name.trim_start_matches("ip-").replace('-', ".");
     Node {
         uid: Uid::default(),
         name: seed.name.into(),
         status,
-        state: state.into(),
+        state: state_label(true, schedulable),
         schedulable,
         instance_type: instance.into(),
         zone: seed.zone.into(),
@@ -608,6 +638,7 @@ fn node(seed: &NodeSeed) -> Node {
             format!("topology.kubernetes.io/zone={}", seed.zone),
             format!("eks.amazonaws.com/nodegroup={group}"),
         ],
+        top_pods,
     }
 }
 

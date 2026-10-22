@@ -22,9 +22,6 @@ const MEMORY: &str = "memory";
 const PODS: &str = "pods";
 const PHASE_PENDING: &str = "Pending";
 const PHASE_SUCCEEDED: &str = "Succeeded";
-const STATE_READY: &str = "Ready";
-const STATE_NOT_READY: &str = "NotReady";
-const STATE_CORDONED: &str = "SchedulingDisabled";
 const INSTANCE_TYPE_LABELS: [&str; 2] = [
     "node.kubernetes.io/instance-type",
     "beta.kubernetes.io/instance-type",
@@ -83,6 +80,7 @@ pub struct PodIndex {
     namespaces: HashMap<String, NamespaceFacts>,
     per_node: HashMap<String, u32>,
     node_resources: HashMap<String, (Totals, Totals)>,
+    node_pods: HashMap<String, Vec<nodes::NodePod>>,
     requests: Totals,
     limits: Totals,
 }
@@ -158,6 +156,17 @@ impl PodIndex {
                 let totals = index.node_resources.entry(name.clone()).or_default();
                 totals.0.add(requests);
                 totals.1.add(limits);
+                let requested = nodes::NodePod {
+                    name: pod.metadata.name.clone().unwrap_or_default(),
+                    namespace: namespace.to_owned(),
+                    cpu: cores(requests.cpu),
+                    memory: gib(requests.memory),
+                };
+                index
+                    .node_pods
+                    .entry(name.clone())
+                    .or_default()
+                    .push(requested);
             }
             index.requests.add(requests);
             index.limits.add(limits);
@@ -177,6 +186,18 @@ impl PodIndex {
 
     pub fn commitments(&self, capacity: Allocatable) -> (Commitment, Commitment) {
         commitments(self.requests, self.limits, capacity)
+    }
+
+    fn top_pods(&self, node: &str) -> Vec<nodes::NodePod> {
+        let mut pods = self.node_pods.get(node).cloned().unwrap_or_default();
+        pods.sort_by(|a, b| {
+            b.cpu
+                .total_cmp(&a.cpu)
+                .then(b.memory.total_cmp(&a.memory))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        pods.truncate(nodes::TOP_PODS);
+        pods
     }
 
     pub fn issue(&self, owner: &OwnerKey) -> Option<Status> {
@@ -246,10 +267,10 @@ pub fn node(node: &Node, pods: u32, usage: Option<&Usage>, now: Timestamp) -> no
     let info = status.and_then(|s| s.node_info.as_ref());
     let ready = node_ready(node);
     let can_schedule = schedulable(node);
-    let (health, state) = match (ready, can_schedule) {
-        (false, _) => (Status::Err, STATE_NOT_READY),
-        (true, false) => (Status::Warn, STATE_CORDONED),
-        (true, true) => (Status::Ok, STATE_READY),
+    let health = match (ready, can_schedule) {
+        (false, _) => Status::Err,
+        (true, false) => Status::Warn,
+        (true, true) => Status::Ok,
     };
     let platform = info.map(|i| format!("{}/{}", i.operating_system, i.architecture));
     let capacity = allocatable(node);
@@ -273,7 +294,7 @@ pub fn node(node: &Node, pods: u32, usage: Option<&Usage>, now: Timestamp) -> no
         name: node.metadata.name.clone().unwrap_or_default(),
         uid: Uid::new(node.metadata.uid.clone().unwrap_or_default()),
         status: health,
-        state: state.to_owned(),
+        state: nodes::state_label(ready, can_schedule),
         schedulable: can_schedule,
         instance_type: first_label(labels, &INSTANCE_TYPE_LABELS)
             .or(platform)
@@ -305,6 +326,7 @@ pub fn node(node: &Node, pods: u32, usage: Option<&Usage>, now: Timestamp) -> no
             .flatten()
             .map(|(k, v)| format!("{k}={v}"))
             .collect(),
+        top_pods: Vec::new(),
     }
 }
 
@@ -325,6 +347,7 @@ pub fn nodes(
             let (cpu, memory) = commitments(requests, limits, allocatable(n));
             row.cpu_commitment = cpu;
             row.memory_commitment = memory;
+            row.top_pods = index.top_pods(name);
             row
         })
         .collect();
@@ -611,6 +634,35 @@ mod tests {
             }
         );
         assert_eq!(rows[2].cpu_commitment, Commitment::default());
+    }
+
+    #[test]
+    fn node_rows_list_their_biggest_cpu_requests_first() {
+        let mut pods: Vec<Arc<Pod>> = ["100m", "2", "300m", "1500m", "200m", "50m"]
+            .iter()
+            .enumerate()
+            .map(|(ix, cpu)| pod_with_resources(&format!("p{ix}"), "w1", cpu, "1Gi"))
+            .collect();
+        pods.push(pod_with_resources("elsewhere", "w2", "4", "1Gi"));
+        let index = PodIndex::build(&pods, now());
+        let rows = nodes(&[worker("w1")], &index, &[], now());
+        let top: Vec<(&str, f32)> = rows[0]
+            .top_pods
+            .iter()
+            .map(|pod| (pod.name.as_str(), pod.cpu))
+            .collect();
+        assert_eq!(
+            top,
+            [
+                ("p1", 2.),
+                ("p3", 1.5),
+                ("p2", 0.3),
+                ("p4", 0.2),
+                ("p0", 0.1)
+            ]
+        );
+        assert_eq!(rows[0].top_pods[0].namespace, "web");
+        assert!((rows[0].top_pods[0].memory - 1.).abs() < f32::EPSILON);
     }
 
     #[test]

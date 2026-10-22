@@ -5,6 +5,7 @@ use crate::diagnosis::{self, Condition, Diagnosis};
 use crate::events::Event;
 use crate::filter::{FilterSpec, StatusFilter, TextFilter};
 use crate::issue::{Issue, named};
+use crate::nodes::NodeFilter;
 use crate::pods::PodFilter;
 use crate::{Page, Status, Uid};
 
@@ -127,6 +128,7 @@ pub fn attention_chip(page: Page) -> usize {
         Page::Pods => PodFilter::ALL
             .iter()
             .position(|f| *f == PodFilter::Attention),
+        Page::Nodes => NodeFilter::ALL.iter().position(|f| *f == NodeFilter::All),
         _ => StatusFilter::ALL
             .iter()
             .position(|f| *f == StatusFilter::Attention),
@@ -245,11 +247,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_attention_chip_points_at_needs_attention_in_every_list() {
+    fn the_attention_chip_points_at_needs_attention_and_at_all_nodes() {
         let pods = PodFilter::ALL.get(attention_chip(Page::Pods)).copied();
         assert_eq!(pods, Some(PodFilter::Attention));
-        let nodes = StatusFilter::at(attention_chip(Page::Nodes));
-        assert_eq!(nodes, StatusFilter::Attention);
+        let nodes = NodeFilter::at(attention_chip(Page::Nodes));
+        assert_eq!(nodes, NodeFilter::All);
+        let deployments = StatusFilter::at(attention_chip(Page::Deployments));
+        assert_eq!(deployments, StatusFilter::Attention);
     }
 
     pub(crate) fn resource(namespace: &str, name: &str, status: Status) -> Resource {

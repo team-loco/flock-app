@@ -219,11 +219,21 @@ impl RenderOnce for CapacityMeter {
 pub struct MiniMeter {
     value: f32,
     color: Option<Hsla>,
+    fill: bool,
 }
 
 impl MiniMeter {
     pub fn new(value: f32) -> Self {
-        Self { value, color: None }
+        Self {
+            value,
+            color: None,
+            fill: false,
+        }
+    }
+
+    pub fn fill(mut self) -> Self {
+        self.fill = true;
+        self
     }
 
     pub fn color(mut self, color: Hsla) -> Self {
@@ -235,17 +245,17 @@ impl MiniMeter {
 impl RenderOnce for MiniMeter {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = cx.palette();
-        div()
-            .flex_none()
-            .w(METER_MINI_WIDTH)
-            .h(METER_MINI)
-            .bg(palette.line2)
-            .child(
-                div()
-                    .h_full()
-                    .w(relative(fraction(self.value)))
-                    .bg(self.color.unwrap_or(palette.fg2)),
-            )
+        let bar = if self.fill {
+            div().flex_1().min_w_0()
+        } else {
+            div().flex_none().w(METER_MINI_WIDTH)
+        };
+        bar.h(METER_MINI).bg(palette.line2).child(
+            div()
+                .h_full()
+                .w(relative(fraction(self.value)))
+                .bg(self.color.unwrap_or(palette.fg2)),
+        )
     }
 }
 
