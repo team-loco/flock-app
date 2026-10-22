@@ -1,12 +1,14 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use flock_core::{ExecEvent, NodeShellRequest};
+use jiff::Timestamp;
 use k8s_openapi::api::core::v1::{
     Container, HostPathVolumeSource, Pod, PodSpec, SecurityContext, Toleration, Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
-use kube::api::{DeleteParams, ListParams, PostParams};
+use kube::api::{DeleteParams, ListParams, Patch, PatchParams, PostParams};
 use kube::{Api, ResourceExt};
 
 use super::exec::{
@@ -14,12 +16,16 @@ use super::exec::{
     exit_code, seed, suffix,
 };
 use super::failure::action_failure;
+use crate::clock;
 use crate::error::{Error, Result};
 use crate::manager::ClusterHandle;
 use crate::ops::{ExecExit, ExecSession, FIELD_MANAGER};
 
 pub const NAMESPACE: &str = "default";
 pub const SHELL_LABEL: &str = "flock.dev/node-shell";
+pub const HEARTBEAT_ANNOTATION: &str = "flock.dev/heartbeat";
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+pub const STALE_TIMEOUT: Duration = Duration::from_secs(180);
 const NAME_PREFIX: &str = "node-shell-";
 const CONTAINER: &str = "shell";
 const HOST_VOLUME: &str = "host-root";
@@ -39,7 +45,25 @@ pub fn pod_name(node: &str, seed: u128) -> String {
     format!("{NAME_PREFIX}{node}-{}", suffix(seed))
 }
 
-pub fn shell_pod(name: &str, node: &str, image: &str, run: &str) -> Pod {
+pub fn heartbeat_value(now: Timestamp) -> String {
+    now.as_second().to_string()
+}
+
+pub fn is_stale(pod: &Pod, now: Timestamp) -> bool {
+    let beat = pod
+        .annotations()
+        .get(HEARTBEAT_ANNOTATION)
+        .and_then(|value| value.parse::<i64>().ok())
+        .and_then(|seconds| Timestamp::from_second(seconds).ok());
+    let silent = match beat {
+        Some(beat) => clock::between(beat, now),
+        None => clock::age(&pod.metadata, now),
+    };
+    silent > STALE_TIMEOUT
+}
+
+pub fn shell_pod(name: &str, node: &str, image: &str, run: &str, now: Timestamp) -> Pod {
+    let annotations = BTreeMap::from([(HEARTBEAT_ANNOTATION.to_owned(), heartbeat_value(now))]);
     let labels = BTreeMap::from([(SHELL_LABEL.to_owned(), run.to_owned())]);
     let command = SHELL.iter().map(|part| (*part).to_owned()).collect();
     let container = Container {
@@ -75,6 +99,7 @@ pub fn shell_pod(name: &str, node: &str, image: &str, run: &str) -> Pod {
         metadata: ObjectMeta {
             name: Some(name.to_owned()),
             labels: Some(labels),
+            annotations: Some(annotations),
             ..ObjectMeta::default()
         },
         spec: Some(PodSpec {
@@ -124,7 +149,8 @@ async fn remove_stale(pods: &Api<Pod>) {
             return;
         }
     };
-    for pod in listed.items {
+    let now = Timestamp::now();
+    for pod in listed.items.iter().filter(|pod| is_stale(pod, now)) {
         remove(pods, &pod.name_any()).await;
     }
 }
@@ -136,6 +162,18 @@ async fn remove(pods: &Api<Pod>, name: &str) {
     };
     if let Err(error) = pods.delete(name, &params).await {
         tracing::debug!(%error, name, "deleting node shell pod failed");
+    }
+}
+
+async fn beat(pods: &Api<Pod>, name: &str) {
+    loop {
+        tokio::time::sleep(HEARTBEAT_INTERVAL).await;
+        let value = heartbeat_value(Timestamp::now());
+        let patch = serde_json::json!({"metadata": {"annotations": {HEARTBEAT_ANNOTATION: value}}});
+        let params = PatchParams::default();
+        if let Err(error) = pods.patch(name, &params, &Patch::Merge(&patch)).await {
+            tracing::debug!(%error, name, "node shell heartbeat failed");
+        }
     }
 }
 
@@ -163,7 +201,13 @@ async fn start(
     request: &NodeShellRequest,
 ) -> Result<ExecSession> {
     remove_stale(pods).await;
-    let pod = shell_pod(name, &request.node.name, &request.image, &RUN);
+    let pod = shell_pod(
+        name,
+        &request.node.name,
+        &request.image,
+        &RUN,
+        Timestamp::now(),
+    );
     let params = PostParams {
         field_manager: Some(FIELD_MANAGER.to_owned()),
         ..PostParams::default()
@@ -219,9 +263,10 @@ pub async fn run(handle: ClusterHandle, request: NodeShellRequest) {
     };
     let pods: Api<Pod> = Api::namespaced(client, NAMESPACE);
     let name = pod_name(&request.node.name, seed());
-    let finished = handle
-        .until_closed(session(&handle, &pods, &name, &request))
-        .await;
+    let finished = tokio::select! {
+        finished = handle.until_closed(session(&handle, &pods, &name, &request)) => finished,
+        () = beat(&pods, &name) => None,
+    };
     if finished.is_none() {
         exec::fail(&request.output, &Error::NotConnected.to_string());
     }
@@ -233,6 +278,7 @@ mod tests {
     use k8s_openapi::api::core::v1::{
         ContainerState, ContainerStateRunning, ContainerStateWaiting, ContainerStatus, PodStatus,
     };
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 
     use super::*;
 
@@ -259,7 +305,13 @@ mod tests {
 
     #[test]
     fn the_pod_is_pinned_to_the_node_and_shares_its_namespaces() {
-        let pod = shell_pod("node-shell-n1-abcde", "n1", "busybox:1.36", "run01");
+        let pod = shell_pod(
+            "node-shell-n1-abcde",
+            "n1",
+            "busybox:1.36",
+            "run01",
+            at(1_000),
+        );
         let spec = spec(&pod);
         assert_eq!(spec.node_name.as_deref(), Some("n1"));
         assert_eq!(spec.host_pid, Some(true));
@@ -275,7 +327,7 @@ mod tests {
 
     #[test]
     fn the_pod_tolerates_every_taint() {
-        let pod = shell_pod("p", "n1", "busybox:1.36", "run01");
+        let pod = shell_pod("p", "n1", "busybox:1.36", "run01", at(1_000));
         let Some(tolerations) = spec(&pod).tolerations.as_ref() else {
             panic!("no tolerations");
         };
@@ -287,7 +339,7 @@ mod tests {
 
     #[test]
     fn the_container_is_privileged_and_enters_the_host() {
-        let pod = shell_pod("p", "n1", "busybox:1.36", "run01");
+        let pod = shell_pod("p", "n1", "busybox:1.36", "run01", at(1_000));
         let spec = spec(&pod);
         let Some(container) = spec.containers.first() else {
             panic!("no container");
@@ -320,6 +372,65 @@ mod tests {
             .and_then(|volumes| volumes.first())
             .and_then(|volume| volume.host_path.as_ref());
         assert_eq!(host.map(|host| host.path.as_str()), Some("/"));
+    }
+
+    fn at(seconds: i64) -> Timestamp {
+        Timestamp::from_second(seconds).unwrap_or_default()
+    }
+
+    fn beating(seconds: &str) -> Pod {
+        let mut pod = Pod::default();
+        pod.metadata.annotations = Some(BTreeMap::from([(
+            HEARTBEAT_ANNOTATION.to_owned(),
+            seconds.to_owned(),
+        )]));
+        pod
+    }
+
+    fn created(seconds: i64) -> Pod {
+        let mut pod = Pod::default();
+        pod.metadata.creation_timestamp = Some(Time(at(seconds)));
+        pod
+    }
+
+    #[test]
+    fn a_fresh_heartbeat_is_alive_and_an_old_one_is_stale() {
+        let now = at(10_000);
+        let limit = i64::try_from(STALE_TIMEOUT.as_secs()).unwrap_or_default();
+        assert!(!is_stale(&beating("9990"), now));
+        assert!(!is_stale(&beating(&(10_000 - limit).to_string()), now));
+        assert!(is_stale(&beating(&(10_000 - limit - 1).to_string()), now));
+    }
+
+    #[test]
+    fn without_a_heartbeat_the_creation_time_decides() {
+        let now = at(10_000);
+        let limit = i64::try_from(STALE_TIMEOUT.as_secs()).unwrap_or_default();
+        assert!(!is_stale(&created(9_990), now));
+        assert!(is_stale(&created(10_000 - limit - 1), now));
+        assert!(!is_stale(&Pod::default(), now));
+        assert!(is_stale(
+            &{
+                let mut pod = created(0);
+                pod.metadata.annotations = Some(BTreeMap::from([(
+                    HEARTBEAT_ANNOTATION.to_owned(),
+                    "garbage".to_owned(),
+                )]));
+                pod
+            },
+            now
+        ));
+    }
+
+    #[test]
+    fn new_pods_start_with_a_heartbeat() {
+        let pod = shell_pod("n", "n1", "img", "run01", at(1_234));
+        assert_eq!(
+            pod.annotations()
+                .get(HEARTBEAT_ANNOTATION)
+                .map(String::as_str),
+            Some("1234")
+        );
     }
 
     #[test]
