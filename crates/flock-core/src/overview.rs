@@ -208,7 +208,6 @@ impl UtilizationSource {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Overview {
-    pub metrics_source: String,
     pub utilization_source: UtilizationSource,
     pub cpu: Commitment,
     pub memory: Commitment,

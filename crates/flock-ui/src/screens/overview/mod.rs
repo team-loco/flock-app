@@ -20,7 +20,6 @@ use flock_core::node_pools::{KubeletSkew, NodePool};
 use flock_core::nodes::NodeSummary;
 use flock_core::overview::{
     Capacity, NetworkFacts, PodPhases, TimeRange, Utilization, UtilizationSource, WorkloadHealth,
-    plural,
 };
 use flock_core::pod_tops::PodTops;
 use flock_core::{
@@ -33,18 +32,13 @@ use gpui::{
 };
 
 use super::ScreenEvent;
-use crate::kit::{
-    ActionMenu, Activate, Button, Link, MenuItem, SectionLabel, Segmented, problem_link,
-};
+use crate::kit::{ActionMenu, Activate, Link, MenuItem, SectionLabel, Segmented, problem_link};
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, RULE, SPACE_3, SPACE_4, SPACE_5, SPACE_7, SPACE_8,
     TEXT_CONTROL, TEXT_SMALL,
 };
 
 const CHANGES_BAND_WEIGHTS: [f32; 2] = [3., 2.];
-const LIVE: &str = "Live";
-const LIVE_TOOLTIP: &str = "Follow new data; turn off to hold the current view";
-const SEPARATOR: &str = " · ";
 const ACTIONS: &str = "overview-actions";
 const SCROLL: &str = "overview-scroll";
 const ESCAPE: &str = "escape";
@@ -55,7 +49,6 @@ const CLUSTER_SETTINGS_DESCRIPTION: &str =
 #[derive(Clone, Debug, PartialEq)]
 struct OverviewData {
     cluster: ClusterId,
-    meta: String,
     problems: Counts,
     flux: Option<header::FluxLine>,
     source: UtilizationSource,
@@ -79,19 +72,10 @@ struct OverviewData {
 
 impl OverviewData {
     fn new(cluster: &ClusterSummary, detail: &ClusterDetail) -> Self {
-        let namespaces = plural(detail.namespaces.len(), "namespace", "namespaces");
-        let meta = [
-            cluster.distro.clone(),
-            cluster.region.clone(),
-            namespaces,
-            detail.overview.metrics_source.clone(),
-        ];
-        let meta: Vec<String> = meta.into_iter().filter(|part| !part.is_empty()).collect();
         let mut changes = detail.overview.changes.clone();
         newest_first(&mut changes);
         Self {
             cluster: cluster.id.clone(),
-            meta: meta.join(SEPARATOR),
             problems: cluster.problems,
             flux: header::FluxLine::of(cluster),
             source: detail.overview.utilization_source.clone(),
@@ -120,8 +104,6 @@ impl OverviewData {
 
 pub struct OverviewScreen {
     data: Option<OverviewData>,
-    paused: Option<OverviewData>,
-    live: bool,
     range: TimeRange,
     horizon: Horizon,
     sort: NamespaceSort,
@@ -138,8 +120,6 @@ impl OverviewScreen {
         let menu = cx.new(|cx| ActionMenu::new(ACTIONS, cx));
         Self {
             data: None,
-            paused: None,
-            live: true,
             range: TimeRange::default(),
             horizon: Horizon::default(),
             sort: NamespaceSort::default(),
@@ -157,11 +137,7 @@ impl OverviewScreen {
         cx: &mut Context<Self>,
     ) {
         let data = OverviewData::new(cluster, detail);
-        if self.live || self.data.is_none() {
-            self.show(data, cx);
-        } else {
-            self.paused = Some(data);
-        }
+        self.show(data, cx);
     }
 
     fn show(&mut self, data: OverviewData, cx: &mut Context<Self>) {
@@ -195,14 +171,6 @@ impl OverviewScreen {
             .update(cx, |menu, cx| menu.set_items(vec![settings], cx));
     }
 
-    fn toggle_live(&mut self, cx: &mut Context<Self>) {
-        self.live = !self.live;
-        if let Some(data) = self.paused.take().filter(|_| self.live) {
-            self.show(data, cx);
-        }
-        cx.notify();
-    }
-
     pub fn header_controls(screen: &Entity<Self>, cx: &App) -> impl IntoElement {
         let this = screen.read(cx);
         let selected = TimeRange::ALL
@@ -219,20 +187,11 @@ impl OverviewScreen {
             .on_select(move |ix, _, cx| {
                 ranges_screen.update(cx, |screen, cx| screen.select_range(*ix, cx));
             });
-        let live_screen = screen.clone();
-        let live = Button::new("overview-live", LIVE)
-            .small()
-            .selected(this.live)
-            .tooltip(LIVE_TOOLTIP)
-            .on_click(move |_, _, cx| {
-                live_screen.update(cx, OverviewScreen::toggle_live);
-            });
         div()
             .flex()
             .items_center()
             .gap(SPACE_4)
             .child(ranges)
-            .child(live)
             .child(this.menu.clone())
     }
 
@@ -508,14 +467,8 @@ mod tests {
     }
 
     #[test]
-    fn meta_line_reads_like_the_design() {
-        let mut detail = ClusterDetail::default();
-        detail.overview.metrics_source = "monitoring/prometheus-k8s".into();
-        let data = OverviewData::new(&summary(), &detail);
-        assert_eq!(
-            data.meta,
-            "EKS · us-east-1 · 0 namespaces · monitoring/prometheus-k8s"
-        );
+    fn flux_line_is_absent_without_flux() {
+        let data = OverviewData::new(&summary(), &ClusterDetail::default());
         assert_eq!(data.flux, None);
     }
 }

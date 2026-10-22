@@ -13,16 +13,16 @@ use gpui::{
 
 use crate::kit::{
     ActionMenu, Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, DiffView,
-    ErrorBlocks, InspectorPane, KeyValue, Link, MenuItem, PageHeader, PanelSection, Prose,
-    RawMessage, SectionHeader, Segmented, StatusGlyph, Table, TableEvent, Toast, confirm,
-    issue_stack, parse_unified, toast,
+    InspectorPane, KeyValue, Link, MenuItem, PageHeader, PanelSection, Prose, RawMessage,
+    SectionHeader, Segmented, StatusGlyph, Table, TableEvent, Toast, confirm, issue_stack,
+    parse_unified, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{EDIT_DESCRIPTION, EDIT_YAML};
 use crate::screens::{FullView, full_view_link};
 use crate::theme::{
-    ASIDE_WIDTH, ActiveTheme, FONT_MONO, FONT_SANS, Palette, ROW_DOCUMENT, ROW_TABLE_MIN, RULE,
-    SPACE_2, SPACE_3, SPACE_5, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
+    ASIDE_WIDTH, ActiveTheme, CONTROL, FONT_MONO, FONT_SANS, Palette, ROW_DOCUMENT, ROW_TABLE_MIN,
+    RULE, SPACE_2, SPACE_3, SPACE_5, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
 };
 
 pub(crate) const FLUX_CONTEXT: &str = "FluxObject";
@@ -58,6 +58,8 @@ const OTHER_CLUSTERS: &str = "Other clusters";
 const DEPENDS_ON: &str = "Depends on";
 const VALUES: &str = "Values";
 const SPEC: &str = "Spec";
+const CONDITION_LINE: &str = "flux-condition";
+const READ_ONLY: &str = "read-only";
 
 gpui::actions!(
     flux_object,
@@ -323,18 +325,16 @@ impl FluxObjectPage {
         let this = cx.weak_entity();
         let object = &page.object;
         let source = object.source.clone();
-        let source_name = source.as_ref().map_or_else(String::new, |s| s.name.clone());
         let mut items = Vec::new();
         if let Some(label) = fetch_label(object.key.kind) {
-            items.push(
-                item(&this, label, |page, _, cx| {
-                    page.act(FluxAction::ReconcileWithSource, cx);
-                })
-                .shortcut(WITH_SOURCE_KEYS)
-                .description(format!(
-                    "Pull {source_name} now instead of waiting for the next poll."
-                )),
-            );
+            let fetch = item(&this, label, |page, _, cx| {
+                page.act(FluxAction::ReconcileWithSource, cx);
+            })
+            .shortcut(WITH_SOURCE_KEYS);
+            items.push(described(
+                fetch,
+                object.key.cli(FluxAction::ReconcileWithSource),
+            ));
         }
         items.push(suspend_item(&this, object));
         if object.key.kind == FluxKind::Kustomization {
@@ -342,36 +342,24 @@ impl FluxObjectPage {
                 item(&this, "Diff cluster against git", |_, _, cx| {
                     cx.emit(Command::SelectPage(Page::Changes));
                 })
-                .shortcut(DIFF_KEYS)
-                .description("What the next reconcile would change."),
+                .shortcut(DIFF_KEYS),
             );
         }
         items.push(
             item(&this, "View YAML", |page, _, cx| page.toggle_yaml(cx))
                 .shortcut(YAML_KEYS)
-                .description(yaml_description(object)),
+                .description(READ_ONLY),
         );
         items.push(
             item(&this, EDIT_YAML, |page, _, cx| page.edit_yaml(cx))
                 .shortcut(EDIT_KEYS)
                 .description(EDIT_DESCRIPTION),
         );
-        items.push(
-            item(&this, "Copy YAML", |page, _, cx| page.copy_yaml(cx))
-                .description("Copy the live object, status included."),
-        );
+        items.push(item(&this, "Copy YAML", |page, _, cx| page.copy_yaml(cx)));
         if let Some(source) = source {
-            let description = format!(
-                "{} {}: URL, ref and last fetch.",
-                source.kind.label(),
-                source.name
-            );
-            items.push(
-                item(&this, "Open source", move |_, _, cx| {
-                    cx.emit(Command::OpenFluxObject(source.clone()));
-                })
-                .description(description),
-            );
+            items.push(item(&this, "Open source", move |_, _, cx| {
+                cx.emit(Command::OpenFluxObject(source.clone()));
+            }));
         }
         if let Some(force) = force_item(&this, object) {
             items.push(force);
@@ -400,6 +388,7 @@ impl FluxObjectPage {
             .status(object.status(), object.phase.label())
             .action(primary.primary())
             .action(self.menu.clone())
+            .detail(Some(condition_line(object, cx.palette())))
             .meta(Self::meta(object, cx))
             .into_any_element()
     }
@@ -650,7 +639,6 @@ impl FluxObjectPage {
             .border_color(palette.line)
             .bg(palette.panel)
             .text_size(TEXT_BODY)
-            .child(ErrorBlocks::new(object.issues()))
             .children(peers)
             .children(dependencies)
             .children(values)
@@ -731,39 +719,69 @@ fn item(
     })
 }
 
-fn suspend_item(this: &WeakEntity<FluxObjectPage>, object: &FluxObject) -> MenuItem {
-    if object.phase.is_suspended() {
-        let source = object
-            .source
-            .as_ref()
-            .map_or_else(|| "the latest revision".to_owned(), |s| s.name.clone());
-        item(this, RESUME, |page, _, cx| {
-            page.act(FluxAction::Resume, cx);
-        })
-        .description(format!(
-            "Apply {source} here again, starting with a reconcile now."
-        ))
-    } else {
-        item(this, "Suspend", |page, _, cx| {
-            page.act(FluxAction::Suspend, cx);
-        })
-        .description("Stop Flux applying changes here until resumed.")
+fn described(item: MenuItem, description: Option<String>) -> MenuItem {
+    match description {
+        Some(description) => item.description(description),
+        None => item,
     }
 }
 
+fn suspend_item(this: &WeakEntity<FluxObjectPage>, object: &FluxObject) -> MenuItem {
+    if object.phase.is_suspended() {
+        let resume = item(this, RESUME, |page, _, cx| {
+            page.act(FluxAction::Resume, cx);
+        });
+        described(resume, object.key.cli(FluxAction::Resume))
+    } else {
+        let suspend = item(this, "Suspend", |page, _, cx| {
+            page.act(FluxAction::Suspend, cx);
+        });
+        described(suspend, object.key.cli(FluxAction::Suspend))
+    }
+}
+
+fn condition_line(object: &FluxObject, palette: &Palette) -> impl IntoElement + use<> {
+    let line = div()
+        .debug_selector(|| CONDITION_LINE.to_owned())
+        .flex()
+        .items_center()
+        .gap(SPACE_3)
+        .h(CONTROL)
+        .min_w_0()
+        .font_family(FONT_MONO)
+        .text_size(TEXT_MONO);
+    let Some(condition) = object.headline_condition() else {
+        return line;
+    };
+    let state = format!("{}={}", condition.kind, condition.value);
+    let message: Vec<&str> = [condition.reason.as_str(), condition.message.as_str()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect();
+    let message = (!message.is_empty()).then(|| {
+        div()
+            .flex_1()
+            .min_w_0()
+            .child(RawMessage::new(message.join(PHRASE_SEPARATOR)).line())
+    });
+    let state = div()
+        .flex_none()
+        .text_color(palette.status(condition.status()))
+        .child(state);
+    line.child(state).children(message)
+}
+
 fn force_item(this: &WeakEntity<FluxObjectPage>, object: &FluxObject) -> Option<MenuItem> {
-    let (label, body, confirm_label, description) = match object.key.kind {
+    let (label, body, confirm_label) = match object.key.kind {
         FluxKind::Kustomization => (
             "Force apply…",
             "Flux deletes and recreates every object whose immutable fields changed. Pods behind them restart.",
             "Force apply",
-            "Recreate objects whose immutable fields changed.",
         ),
         FluxKind::HelmRelease => (
             "Force upgrade…",
             "Helm upgrades the release now even if nothing changed, and the retry count starts over. Pods may restart.",
             "Force upgrade",
-            "Run helm upgrade now, even with retries used up.",
         ),
         FluxKind::GitRepository => return None,
         FluxKind::HelmRepository => return None,
@@ -782,12 +800,10 @@ fn force_item(this: &WeakEntity<FluxObjectPage>, object: &FluxObject) -> Option<
             .detail(detail.clone());
             confirm(dialog, window, cx);
         };
-    Some(
-        item(this, label, open)
-            .destructive()
-            .disabled(object.phase.is_suspended())
-            .description(description),
-    )
+    let force = item(this, label, open)
+        .destructive()
+        .disabled(object.phase.is_suspended());
+    Some(described(force, object.key.cli(FluxAction::Force)))
 }
 
 fn fetch_label(kind: FluxKind) -> Option<&'static str> {
@@ -797,19 +813,6 @@ fn fetch_label(kind: FluxKind) -> Option<&'static str> {
         FluxKind::GitRepository => None,
         FluxKind::HelmRepository => None,
         FluxKind::OciRepository => None,
-    }
-}
-
-fn yaml_description(object: &FluxObject) -> String {
-    match object.key.kind {
-        FluxKind::Kustomization => object.source.as_ref().map_or_else(
-            || "Read-only. Edits belong in git.".to_owned(),
-            |s| format!("Read-only. Edits belong in {}.", s.name),
-        ),
-        FluxKind::HelmRelease => "Read-only. Edits belong in git.".to_owned(),
-        FluxKind::GitRepository => "Read-only. Edits belong in git.".to_owned(),
-        FluxKind::HelmRepository => "Read-only. Edits belong in git.".to_owned(),
-        FluxKind::OciRepository => "Read-only. Edits belong in git.".to_owned(),
     }
 }
 

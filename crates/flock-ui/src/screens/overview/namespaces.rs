@@ -232,11 +232,7 @@ pub(super) fn render(
 ) -> AnyElement {
     let total = data.namespaces.len();
     let shown = sort.top(&data.namespaces, TOP_NAMESPACES);
-    let meta = format!(
-        "top {} of {total} · sorted by {}",
-        shown.len(),
-        sort.label().to_lowercase()
-    );
+    let meta = format!("{} of {total}", shown.len());
     let all = Link::new("overview-ns-all", format!("All {total} →")).on_click(
         cx.listener(|_, _, _, cx| cx.emit(super::ScreenEvent::Navigate(Page::Namespaces))),
     );

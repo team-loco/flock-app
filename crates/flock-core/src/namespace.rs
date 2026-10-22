@@ -1,5 +1,6 @@
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use crate::cluster::{ClusterDetail, Namespace};
 use crate::events::Event;
@@ -223,6 +224,7 @@ impl Tile {
 pub struct NamespaceIssue {
     pub target: ResourceRef,
     pub issue: Issue,
+    pub age: Duration,
 }
 
 impl NamespaceIssue {
@@ -256,6 +258,7 @@ impl NamespaceIssue {
         Self {
             target: target.clone(),
             issue,
+            age: problem.age,
         }
     }
 }
@@ -550,8 +553,6 @@ impl NamespacePage {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
     use crate::ClusterId;
     use crate::related::{Fact, contents};

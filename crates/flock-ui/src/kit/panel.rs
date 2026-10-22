@@ -30,7 +30,6 @@ const COUNT_PREFIX: &str = "×";
 const SAVE_FAILED: &str = "Could not save the section state";
 
 type Handler = Rc<dyn Fn(&mut Window, &mut App)>;
-type IndexHandler = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
 pub fn events_count(shown: usize, total: usize) -> String {
     if shown < total {
@@ -290,21 +289,11 @@ impl RenderOnce for PanelHeader {
 pub struct ErrorBlock {
     ix: usize,
     issue: Issue,
-    on_click: Option<Handler>,
 }
 
 impl ErrorBlock {
     pub fn new(ix: usize, issue: Issue) -> Self {
-        Self {
-            ix,
-            issue,
-            on_click: None,
-        }
-    }
-
-    pub fn on_click(mut self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
-        self.on_click = Some(Rc::new(handler));
-        self
+        Self { ix, issue }
     }
 }
 
@@ -343,7 +332,6 @@ impl RenderOnce for ErrorBlock {
                 .child(SelectableText::new(object))
         });
         let selector = format!("error-block-{}", self.ix);
-        let hover = palette.hover;
         div()
             .id(("error-block", self.ix))
             .debug_selector(move || selector)
@@ -359,32 +347,17 @@ impl RenderOnce for ErrorBlock {
             .children(reason)
             .children(message)
             .children(object)
-            .when_some(self.on_click, |block, handler| {
-                block
-                    .cursor_pointer()
-                    .hover(move |style| style.bg(hover))
-                    .on_click(move |_, window, cx| handler(window, cx))
-            })
     }
 }
 
 #[derive(IntoElement)]
 pub struct ErrorBlocks {
     issues: Vec<Issue>,
-    on_open: Option<IndexHandler>,
 }
 
 impl ErrorBlocks {
     pub fn new(issues: Vec<Issue>) -> Self {
-        Self {
-            issues,
-            on_open: None,
-        }
-    }
-
-    pub fn on_open(mut self, handler: impl Fn(usize, &mut Window, &mut App) + 'static) -> Self {
-        self.on_open = Some(Rc::new(handler));
-        self
+        Self { issues }
     }
 }
 
@@ -393,14 +366,11 @@ impl RenderOnce for ErrorBlocks {
         if self.issues.is_empty() {
             return div().into_any_element();
         }
-        let on_open = self.on_open;
-        let blocks = self.issues.into_iter().enumerate().map(|(ix, issue)| {
-            let block = ErrorBlock::new(ix, issue);
-            match on_open.clone() {
-                Some(handler) => block.on_click(move |window, cx| handler(ix, window, cx)),
-                None => block,
-            }
-        });
+        let blocks = self
+            .issues
+            .into_iter()
+            .enumerate()
+            .map(|(ix, issue)| ErrorBlock::new(ix, issue));
         div()
             .debug_selector(|| "error-blocks".into())
             .flex()

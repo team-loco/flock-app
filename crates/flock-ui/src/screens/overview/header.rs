@@ -110,13 +110,7 @@ pub(super) fn render(
         .items_center()
         .gap(SPACE_5)
         .min_w_0()
-        .children(problems(data, palette, cx))
-        .child(
-            div()
-                .truncate()
-                .text_color(palette.mute)
-                .child(data.meta.clone()),
-        );
+        .children(problems(data, palette, cx));
     let flux = data.flux.as_ref().map(|line| flux(line, palette, cx));
     div()
         .debug_selector(|| "meta-line".to_owned())

@@ -8,7 +8,6 @@ const CONNECTING: &str = "Connecting";
 const HISTORY_START: &str = "Oct 14, 16:00";
 const LAST_SAMPLE: &str = "Oct 19, 12:28";
 const RECENT_START: f32 = 0.95;
-const METRICS_SERVER: &str = "metrics-server";
 const PROMETHEUS_DOWN: &str = "Prometheus: service unavailable (503)";
 const PAGES: [Page; 2] = [Page::ClusterOverview, Page::Deployments];
 
@@ -66,7 +65,6 @@ fn metrics(fixture: StateFixture, overview: &mut Overview) {
     match fixture {
         StateFixture::MetricsLocal => {
             overview.utilization_source = local;
-            METRICS_SERVER.clone_into(&mut overview.metrics_source);
             for range in &mut overview.utilization {
                 let steps = range.cpu.len().saturating_sub(1).max(1);
                 range.cpu_positions = (0..range.cpu.len())
@@ -78,7 +76,6 @@ fn metrics(fixture: StateFixture, overview: &mut Overview) {
         StateFixture::MetricsEmpty => {
             overview.utilization.clear();
             overview.utilization_source = local;
-            METRICS_SERVER.clone_into(&mut overview.metrics_source);
         }
         StateFixture::MetricsError => {
             overview.utilization.clear();

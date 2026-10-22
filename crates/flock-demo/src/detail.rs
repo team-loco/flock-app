@@ -87,7 +87,6 @@ pub fn prod_us_east() -> ClusterDetail {
 fn overview() -> Overview {
     Overview {
         utilization_source: flock_core::overview::UtilizationSource::Prometheus,
-        metrics_source: "monitoring/prometheus-k8s".into(),
         cpu: Commitment {
             requests: 0.74,
             limits: 1.31,

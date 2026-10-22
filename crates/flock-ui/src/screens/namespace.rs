@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use flock_core::issue::Issue;
-use flock_core::namespace::{Listing, NamespacePage, Policy, Quota, Requested, Tile};
+use flock_core::namespace::{
+    Listing, NamespaceIssue, NamespacePage, Policy, Quota, Requested, Tile,
+};
 use flock_core::pods::PodEvent;
 use flock_core::related::{Group, Item};
 use flock_core::resource::short_kind;
@@ -19,23 +20,25 @@ use gpui::{
 
 use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::kit::{
-    ActionMenu, Activate, AmountText, EmptyState, ErrorBlocks, EventRow, HealthTile, HealthTiles,
-    InputEvent, InspectorPane, Link, PageHeader, PanelSection, SectionLabel, Skeleton, StackedBar,
-    TextField, TextFieldState, TileNote, events_count, events_empty,
+    ActionMenu, Activate, AmountText, EmptyState, EventRow, HealthTile, HealthTiles, InputEvent,
+    InspectorPane, Link, PageHeader, PanelSection, RawMessage, SectionLabel, Skeleton, StackedBar,
+    StatusGlyph, TextField, TextFieldState, TileNote, events_count, events_empty,
 };
 use crate::screens::edit::{EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{ScreenEvent, edit_item};
 use crate::theme::{
-    ASIDE_WIDTH, ActiveTheme, FONT_MONO, ICON, NAMESPACE_CONTENT_AGE, NAMESPACE_CONTENT_NAME,
-    NAMESPACE_FILTER_WIDTH, NAMESPACE_USAGE_BAR, NAMESPACE_USAGE_LABEL, Palette, ROW_TABLE,
-    ROW_TABLE_MAX, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_8, TEXT_BODY,
-    TEXT_MONO, TEXT_SMALL,
+    ASIDE_WIDTH, ActiveTheme, FONT_MONO, ICON, NAMESPACE_AGE_WIDTH, NAMESPACE_CONTENT_AGE,
+    NAMESPACE_CONTENT_NAME, NAMESPACE_FILTER_WIDTH, NAMESPACE_KIND_WIDTH, NAMESPACE_NAME_WIDTH,
+    NAMESPACE_USAGE_BAR, NAMESPACE_USAGE_LABEL, Palette, ROW_TABLE, ROW_TABLE_MAX, RULE, SPACE_1,
+    SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
 };
 
 const KICKER: &str = "Namespace";
 const SHORT_KICKER: &str = "ns";
 const ACTIONS: &str = "namespace-actions";
 const CONTENTS: &str = "Contents";
+const NEEDS_ATTENTION: &str = "Needs attention";
+const ISSUE_ROW: &str = "namespace-issue";
 const FILTER: &str = "Filter by name";
 const NO_MATCH: &str = "Nothing in this namespace matches the filter.";
 const EMPTY: &str = "Empty: ";
@@ -259,6 +262,32 @@ impl NamespaceScreen {
         HealthTiles::new(tiles).into_any_element()
     }
 
+    fn attention(&self, palette: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.page.issues.is_empty() {
+            return None;
+        }
+        let rows: Vec<AnyElement> = self
+            .page
+            .issues
+            .iter()
+            .enumerate()
+            .map(|(ix, issue)| issue_row(ix, issue, palette, cx))
+            .collect();
+        let section = div()
+            .flex()
+            .flex_col()
+            .child(section_title(NEEDS_ATTENTION, None))
+            .child(
+                div()
+                    .border_t(RULE)
+                    .border_color(palette.line)
+                    .flex()
+                    .flex_col()
+                    .children(rows),
+            );
+        Some(section.into_any_element())
+    }
+
     fn contents(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let query = self.filter.read(cx).value().to_string();
         let filtering = !query.trim().is_empty();
@@ -416,12 +445,6 @@ impl NamespaceScreen {
             .into_any_element()
     }
 
-    fn open_issue(&mut self, ix: usize, cx: &mut Context<Self>) {
-        if let Some(issue) = self.page.issues.get(ix) {
-            cx.emit(Command::OpenResource(issue.target.clone()));
-        }
-    }
-
     fn aside(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let detail = self.page.detail.as_ref();
         let cpu = self.page.cpu();
@@ -447,7 +470,7 @@ impl NamespaceScreen {
                 .iter()
                 .map(|(key, value)| format!("{key}={value}"))
                 .collect();
-            PanelSection::labels(INSPECTOR_ID, labels)
+            PanelSection::labels(INSPECTOR_ID, labels).closed()
         });
         let policies = detail.map(|detail| {
             let lines = fallback(&detail.policies, palette)
@@ -462,16 +485,6 @@ impl NamespaceScreen {
                         .child(lines),
                 )
         });
-        let issues: Vec<Issue> = self
-            .page
-            .issues
-            .iter()
-            .map(|issue| issue.issue.clone())
-            .collect();
-        let screen = cx.weak_entity();
-        let blocks = ErrorBlocks::new(issues).on_open(move |ix, _, cx| {
-            screen.update(cx, |this, cx| this.open_issue(ix, cx)).ok();
-        });
         div()
             .id("namespace-aside")
             .size_full()
@@ -480,7 +493,6 @@ impl NamespaceScreen {
             .border_color(palette.line)
             .bg(palette.panel)
             .text_size(TEXT_BODY)
-            .child(blocks)
             .children(usage)
             .children(labels)
             .children(policies)
@@ -539,6 +551,87 @@ fn section_title(title: &'static str, count: Option<String>) -> gpui::Div {
             )
         })
         .child(div().flex_1())
+}
+
+fn issue_row(
+    ix: usize,
+    issue: &NamespaceIssue,
+    palette: &Palette,
+    cx: &mut Context<NamespaceScreen>,
+) -> AnyElement {
+    let target = issue.target.clone();
+    let selector = row_selector(ISSUE_ROW, ix);
+    let status = issue.issue.status;
+    let reason = (!issue.issue.reason.is_empty()).then(|| {
+        div()
+            .flex_none()
+            .font_family(FONT_MONO)
+            .text_size(TEXT_MONO)
+            .text_color(palette.status(status))
+            .child(issue.issue.reason.clone())
+    });
+    let message = (!issue.issue.message.is_empty()).then(|| {
+        div()
+            .flex_1()
+            .min_w_0()
+            .child(RawMessage::new(issue.issue.message.clone()).line())
+    });
+    div()
+        .debug_selector(move || selector)
+        .id((ISSUE_ROW, ix))
+        .flex()
+        .items_center()
+        .gap(SPACE_6)
+        .h(ROW_TABLE_MAX)
+        .px(SPACE_8)
+        .border_b(RULE)
+        .border_color(palette.line)
+        .text_size(TEXT_BODY)
+        .cursor_pointer()
+        .hover(|style| style.bg(palette.hover))
+        .on_click(cx.listener(move |_, _, _, cx| {
+            cx.emit(Command::OpenResource(target.clone()));
+        }))
+        .child(div().w(ICON).flex_none().child(StatusGlyph::new(status)))
+        .child(
+            div()
+                .w(NAMESPACE_KIND_WIDTH)
+                .flex_none()
+                .truncate()
+                .text_color(palette.mute)
+                .child(issue.target.kind.clone()),
+        )
+        .child(
+            div()
+                .w(NAMESPACE_NAME_WIDTH)
+                .flex_none()
+                .truncate()
+                .font_family(FONT_MONO)
+                .text_size(TEXT_MONO)
+                .child(issue.target.name.clone()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap(SPACE_3)
+                .children(reason)
+                .children(message),
+        )
+        .child(
+            div()
+                .w(NAMESPACE_AGE_WIDTH)
+                .flex_none()
+                .flex()
+                .justify_end()
+                .font_family(FONT_MONO)
+                .text_size(TEXT_SMALL)
+                .text_color(palette.mute)
+                .child(age(issue.age)),
+        )
+        .into_any_element()
 }
 
 fn content_row(
@@ -712,6 +805,7 @@ impl Render for NamespaceScreen {
         }
         let main = main
             .child(self.tiles(&palette, cx))
+            .children(self.attention(&palette, cx))
             .child(self.contents(&palette, cx))
             .child(div().h(SPACE_8));
         let aside = InspectorPane::new(INSPECTOR_ID, self.aside(&palette, cx)).width(ASIDE_WIDTH);

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::filter::{FilterSpec, TextFilter};
 
-use crate::issue::{Issue, failing_condition, object_line};
+use crate::issue::{Issue, failing_condition, headline_condition, object_line};
 use crate::{
     ClusterId, Condition, Diagnosis, Page, ResourceRef, Snapshot, Status, Uid, time, units,
 };
@@ -36,6 +36,8 @@ pub enum FluxKind {
 const KUSTOMIZE_GROUP: &str = "kustomize.toolkit.fluxcd.io";
 const HELM_GROUP: &str = "helm.toolkit.fluxcd.io";
 const SOURCE_GROUP: &str = "source.toolkit.fluxcd.io";
+const FLUX_CLI: &str = "flux";
+const FLUX_NAMESPACE: &str = "flux-system";
 
 impl FluxKind {
     pub const ALL: [Self; 5] = [
@@ -86,6 +88,16 @@ impl FluxKind {
     pub fn from_label(label: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|kind| kind.label() == label)
     }
+
+    pub const fn cli(self) -> &'static str {
+        match self {
+            Self::Kustomization => "ks",
+            Self::HelmRelease => "hr",
+            Self::GitRepository => "source git",
+            Self::HelmRepository => "source helm",
+            Self::OciRepository => "source oci",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -129,6 +141,27 @@ impl FluxKey {
 
     pub fn same_object(&self, other: &Self) -> bool {
         self.kind == other.kind && self.namespace == other.namespace && self.name == other.name
+    }
+
+    pub fn cli(&self, action: FluxAction) -> Option<String> {
+        let (verb, flag) = match action {
+            FluxAction::Reconcile => ("reconcile", ""),
+            FluxAction::ReconcileWithSource => ("reconcile", " --with-source"),
+            FluxAction::Force if self.kind == FluxKind::HelmRelease => ("reconcile", " --force"),
+            FluxAction::Force => return None,
+            FluxAction::Suspend => ("suspend", ""),
+            FluxAction::Resume => ("resume", ""),
+        };
+        let namespace = if self.namespace == FLUX_NAMESPACE {
+            String::new()
+        } else {
+            format!(" -n {}", self.namespace)
+        };
+        Some(format!(
+            "{FLUX_CLI} {verb} {} {}{namespace}{flag}",
+            self.kind.cli(),
+            self.name
+        ))
     }
 }
 
@@ -456,6 +489,10 @@ impl FluxObject {
         vec![Issue::from_diagnosis(self.status(), diagnosis, object)]
     }
 
+    pub fn headline_condition(&self) -> Option<&Condition> {
+        headline_condition(&self.conditions)
+    }
+
     pub fn current_diagnosis(&self) -> Option<&Diagnosis> {
         self.diagnosis
             .as_ref()
@@ -619,6 +656,34 @@ pub(crate) mod tests {
             conditions: Vec::new(),
             diagnosis: None,
         }
+    }
+
+    #[test]
+    fn menu_actions_name_the_matching_flux_command() {
+        let ks = FluxKey::new("east", FluxKind::Kustomization, "flux-system", "apps");
+        assert_eq!(
+            ks.cli(FluxAction::ReconcileWithSource).as_deref(),
+            Some("flux reconcile ks apps --with-source")
+        );
+        assert_eq!(
+            ks.cli(FluxAction::Suspend).as_deref(),
+            Some("flux suspend ks apps")
+        );
+        assert_eq!(ks.cli(FluxAction::Force), None);
+        let hr = FluxKey::new("east", FluxKind::HelmRelease, "payments", "api");
+        assert_eq!(
+            hr.cli(FluxAction::Force).as_deref(),
+            Some("flux reconcile hr api -n payments --force")
+        );
+        assert_eq!(
+            hr.cli(FluxAction::Resume).as_deref(),
+            Some("flux resume hr api -n payments")
+        );
+        let git = FluxKey::new("east", FluxKind::GitRepository, "flux-system", "infra");
+        assert_eq!(
+            git.cli(FluxAction::Suspend).as_deref(),
+            Some("flux suspend source git infra")
+        );
     }
 
     #[test]

@@ -30,9 +30,6 @@ use crate::resources::WatchKind;
 use crate::snapshot::{Facts, count, node_counts, page_kind, pod_counts, summarize};
 use crate::usage::{UsageRing, sample};
 
-const METRICS_SERVER: &str = "metrics-server";
-const NO_METRICS: &str = "unavailable";
-const PROMETHEUS: &str = "Prometheus";
 const SINCE_FORMAT: &str = "%b %-d, %H:%M";
 
 fn since_label(at: Timestamp, zone: &TimeZone) -> String {
@@ -249,7 +246,7 @@ fn cluster_detail(
     } = *parts;
     let (cpu, memory) = index.commitments(capacity(nodes));
     let usage = extras.node_usage.as_deref().unwrap_or_default();
-    let (metrics_source, utilization_source, utilization) = extras.prometheus.as_ref().map_or_else(
+    let (utilization_source, utilization) = extras.prometheus.as_ref().map_or_else(
         || local_history(extras, now, &TimeZone::system()),
         prometheus_history,
     );
@@ -291,7 +288,6 @@ fn cluster_detail(
     let info = handle.info();
     ClusterDetail {
         overview: Overview {
-            metrics_source,
             utilization_source,
             cpu,
             memory,
@@ -320,7 +316,7 @@ fn cluster_detail(
     }
 }
 
-type History = (String, UtilizationSource, Vec<Utilization>);
+type History = (UtilizationSource, Vec<Utilization>);
 
 fn prometheus_history(prometheus: &Prometheus) -> History {
     let ranges = prometheus.utilization.clone();
@@ -330,11 +326,7 @@ fn prometheus_history(prometheus: &Prometheus) -> History {
         .map_or(UtilizationSource::Prometheus, |reason| {
             UtilizationSource::Error(reason.clone())
         });
-    let label = prometheus
-        .target
-        .as_ref()
-        .map_or_else(|| PROMETHEUS.to_owned(), PrometheusTarget::label);
-    (label, source, ranges)
+    (source, ranges)
 }
 
 fn local_history(extras: &Extras, now: Timestamp, zone: &TimeZone) -> History {
@@ -342,17 +334,12 @@ fn local_history(extras: &Extras, now: Timestamp, zone: &TimeZone) -> History {
         .into_iter()
         .map(|range| extras.ring.utilization(range, now))
         .collect();
-    let label = if extras.node_usage.is_some() {
-        METRICS_SERVER
-    } else {
-        NO_METRICS
-    };
     let source = UtilizationSource::Local {
         since: extras.ring.since().map(|at| since_label(at, zone)),
         last: extras.ring.last_at().map(|at| since_label(at, zone)),
         metrics_server: extras.metrics_server(),
     };
-    (label.to_owned(), source, ranges)
+    (source, ranges)
 }
 
 #[cfg(test)]
@@ -382,23 +369,21 @@ mod tests {
         extras.ring.push(parse("2026-10-16T08:49:00Z")?, sample);
         extras.ring.push(parse("2026-10-19T12:28:00Z")?, sample);
         let now = parse("2026-10-20T08:45:00Z")?;
-        let (label, source, ranges) = local_history(&extras, now, &TimeZone::UTC);
-        assert_eq!(label, NO_METRICS);
+        let (source, ranges) = local_history(&extras, now, &TimeZone::UTC);
         assert!(ranges.iter().any(|range| range.cpu.is_empty()));
         assert_eq!(
             source.empty_reason(),
             "This cluster has no Prometheus. Flock records usage only while it's open and is waiting for metrics-server. Last sample: Oct 19, 12:28."
         );
         extras.record(&[], None);
-        let (_, source, _) = local_history(&extras, now, &TimeZone::UTC);
+        let (source, _) = local_history(&extras, now, &TimeZone::UTC);
         assert!(
             source
                 .empty_reason()
                 .contains("metrics-server isn't answering")
         );
         extras.record(&[], Some(Vec::new()));
-        let (label, source, _) = local_history(&extras, now, &TimeZone::UTC);
-        assert_eq!(label, METRICS_SERVER);
+        let (source, _) = local_history(&extras, now, &TimeZone::UTC);
         assert!(matches!(
             source,
             UtilizationSource::Local {
