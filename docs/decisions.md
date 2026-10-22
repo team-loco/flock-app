@@ -164,7 +164,8 @@ Settled; change only with a new entry that says why.
     relaunches with `open -n` and quits; the next launch removes both leftovers. A copy that is not
     a bundle (`cargo run`) or sits in a folder Flock cannot write (App Translocation, a read-only
     volume) links to the release page instead. Releases are arm64 only, assets
-    `Flock-<version>-arm64.zip` with `.sha256` and `.sig`.
+    `Flock-<version>-arm64.zip` and `Flock-<version>-loco-arm64.zip` (`--features loco`), each with
+    `.sha256` and `.sig`; a build updates only from its own variant.
 27. **Tabs persist per window** (product owner): every window's panes and tabs (their locations,
     not their history) are saved as `tabs.json` in the Flock data dir with the same set-aside
     handling as `settings.json` (`flock_kube::tab_store::TabStore`, a toast names the kept file).

@@ -22,7 +22,11 @@ else
 fi
 
 install_dir="${FLOCK_INSTALL_DIR:-/Applications}"
-zip="Flock-$version-arm64.zip"
+case "${FLOCK_LOCO:-0}" in
+  1) zip="Flock-$version-loco-arm64.zip" ;;
+  0) zip="Flock-$version-arm64.zip" ;;
+  *) die "FLOCK_LOCO must be 0 or 1" ;;
+esac
 base="https://github.com/$REPO/releases/download/v$version"
 
 work="$(mktemp -d)"

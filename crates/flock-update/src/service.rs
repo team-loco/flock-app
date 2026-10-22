@@ -198,7 +198,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::release::Asset;
+    use crate::release::{Asset, Variant, zip_name};
     use crate::signature::{Keypair, checksum_line, generate, sign};
     use crate::testing::{BUNDLE, ID, bundle_version, fake_bundle, temp, zip};
 
@@ -239,14 +239,18 @@ mod tests {
         }
     }
 
+    fn update_zip() -> String {
+        zip_name(&Version::new(0, 2, 0), Variant::CURRENT)
+    }
+
     fn release_of(
         zip: &[u8],
         signature: &str,
         checksum: &str,
     ) -> (Release, BTreeMap<String, Vec<u8>>) {
-        let name = "Flock-0.2.0-arm64.zip";
+        let name = update_zip();
         let files = [
-            (name.to_owned(), zip.to_vec()),
+            (name.clone(), zip.to_vec()),
             (format!("{name}.sig"), signature.as_bytes().to_vec()),
             (format!("{name}.sha256"), checksum.as_bytes().to_vec()),
         ];
@@ -313,7 +317,7 @@ mod tests {
         let update = fake_bundle(&dir.join("build"), ID, "0.2.0");
         let bytes = zip(&update);
         let signature = sign(&bytes, &keys.private).unwrap_or_default();
-        let checksum = checksum_line(&bytes, "Flock-0.2.0-arm64.zip");
+        let checksum = checksum_line(&bytes, &update_zip());
         let (release, files) = release_of(&bytes, &signature, &checksum);
         Fake {
             releases: Some(vec![release]),

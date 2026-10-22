@@ -1,21 +1,29 @@
 #!/usr/bin/env bash
-#MISE description="Build dist/Flock.app for Apple silicon and zip it as dist/Flock-<version>-arm64.zip"
+#MISE description="Build dist/Flock.app for Apple silicon and zip it as dist/Flock-<version>[-loco]-arm64.zip"
+#USAGE flag "--loco" help="build with Loco support"
 set -euo pipefail
 
 asset_prefix="Flock"
 arch="arm64"
+loco_variant="loco"
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
 if [ "$(uname -m)" != "$arch" ]; then
   echo "releases are built on Apple silicon ($arch), not $(uname -m)" >&2
   exit 1
 fi
-mise-tasks/bundle "$@"
+variant=""
+bundle=(mise-tasks/bundle)
+if [ "${usage_loco:-false}" = "true" ]; then
+  variant="-$loco_variant"
+  bundle+=(--features "$loco_variant")
+fi
+"${bundle[@]}"
 cargo build --release --package flock-update --bin flock-sign
 app="$root/dist/Flock.app"
 lipo "$app/Contents/MacOS/flock" -verify_arch "$arch"
 version="$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")"
-zip="$root/dist/$asset_prefix-$version-$arch.zip"
+zip="$root/dist/$asset_prefix-$version$variant-$arch.zip"
 rm -f "$zip" "$zip.sha256" "$zip.sig"
 ditto -c -k --keepParent "$app" "$zip"
 echo "$zip"

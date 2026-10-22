@@ -8,6 +8,20 @@ use crate::{Error, Result};
 const ASSET_PREFIX: &str = "Flock";
 const ARCH: &str = "arm64";
 const ZIP_EXTENSION: &str = "zip";
+const LOCO_VARIANT: &str = "loco";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Variant {
+    Plain,
+    Loco,
+}
+
+impl Variant {
+    #[cfg(not(feature = "loco"))]
+    pub const CURRENT: Self = Self::Plain;
+    #[cfg(feature = "loco")]
+    pub const CURRENT: Self = Self::Loco;
+}
 
 #[derive(Debug, Deserialize)]
 struct RawRelease {
@@ -77,11 +91,14 @@ pub fn newest(releases: Vec<Release>, current: &Version, prereleases: bool) -> O
         .max_by(|a, b| a.version.cmp(&b.version))
 }
 
-impl Release {
-    pub fn zip_name(&self) -> String {
-        format!("{ASSET_PREFIX}-{}-{ARCH}.{ZIP_EXTENSION}", self.version)
+pub fn zip_name(version: &Version, variant: Variant) -> String {
+    match variant {
+        Variant::Plain => format!("{ASSET_PREFIX}-{version}-{ARCH}.{ZIP_EXTENSION}"),
+        Variant::Loco => format!("{ASSET_PREFIX}-{version}-{LOCO_VARIANT}-{ARCH}.{ZIP_EXTENSION}"),
     }
+}
 
+impl Release {
     fn asset(&self, name: &str) -> Result<Asset> {
         self.assets
             .iter()
@@ -94,7 +111,11 @@ impl Release {
     }
 
     pub fn artifacts(&self) -> Result<Artifacts> {
-        let zip = self.zip_name();
+        self.artifacts_for(Variant::CURRENT)
+    }
+
+    fn artifacts_for(&self, variant: Variant) -> Result<Artifacts> {
+        let zip = zip_name(&self.version, variant);
         Ok(Artifacts {
             zip: self.asset(&zip)?,
             checksum: self.asset(&format!("{zip}.{CHECKSUM_EXTENSION}"))?,
@@ -114,6 +135,62 @@ mod tests {
         Version::new(0, 1, 0)
     }
 
+    fn latest() -> Release {
+        let releases = parse_latest(LATEST).unwrap_or_default();
+        let [release] = releases.as_slice() else {
+            panic!("expected one release, got {releases:?}");
+        };
+        release.clone()
+    }
+
+    fn zip_url(release: &Release, variant: Variant) -> String {
+        release.artifacts_for(variant).map_or_else(
+            |error| panic!("artifacts: {error}"),
+            |artifacts| artifacts.zip.url,
+        )
+    }
+
+    #[test]
+    fn each_variant_picks_only_its_own_zip() {
+        let release = latest();
+        assert!(zip_url(&release, Variant::Plain).ends_with("/Flock-0.2.0-arm64.zip"));
+        assert!(zip_url(&release, Variant::Loco).ends_with("/Flock-0.2.0-loco-arm64.zip"));
+    }
+
+    #[test]
+    fn the_running_build_picks_its_own_variant() {
+        let release = latest();
+        let current = release
+            .artifacts()
+            .unwrap_or_else(|error| panic!("artifacts: {error}"));
+        assert_eq!(current.zip.url, zip_url(&release, Variant::CURRENT));
+        assert_eq!(Variant::CURRENT == Variant::Loco, cfg!(feature = "loco"));
+    }
+
+    #[test]
+    fn a_release_without_the_loco_zip_has_no_loco_artifacts() {
+        let mut release = latest();
+        release
+            .assets
+            .retain(|asset| !asset.name.contains("-loco-"));
+        assert!(release.artifacts_for(Variant::Plain).is_ok());
+        assert!(matches!(
+            release.artifacts_for(Variant::Loco),
+            Err(Error::MissingAsset { .. })
+        ));
+    }
+
+    #[test]
+    fn a_release_without_the_plain_zip_has_no_plain_artifacts() {
+        let mut release = latest();
+        release.assets.retain(|asset| asset.name.contains("-loco-"));
+        assert!(release.artifacts_for(Variant::Loco).is_ok());
+        assert!(matches!(
+            release.artifacts_for(Variant::Plain),
+            Err(Error::MissingAsset { .. })
+        ));
+    }
+
     #[test]
     fn the_latest_release_parses_with_its_three_artifacts() {
         let releases = parse_latest(LATEST).unwrap_or_default();
@@ -126,7 +203,7 @@ mod tests {
             "https://github.com/team-loco/flock-app/releases/tag/v0.2.0"
         );
         let artifacts = release
-            .artifacts()
+            .artifacts_for(Variant::Plain)
             .unwrap_or_else(|error| panic!("artifacts: {error}"));
         assert_eq!(artifacts.zip.name, "Flock-0.2.0-arm64.zip");
         assert_eq!(artifacts.zip.size, 41_234_567);
@@ -150,7 +227,7 @@ mod tests {
         let stable = releases
             .iter()
             .find(|release| release.version == Version::new(0, 2, 0));
-        let missing = stable.map(Release::artifacts);
+        let missing = stable.map(|release| release.artifacts_for(Variant::Plain));
         assert!(matches!(missing, Some(Err(Error::MissingAsset { .. }))));
     }
 

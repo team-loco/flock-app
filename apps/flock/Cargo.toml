@@ -23,7 +23,7 @@ name = "flock"
 path = "src/main.rs"
 
 [features]
-loco = ["dep:flock-loco", "flock-core/loco", "flock-demo/loco", "flock-kube/loco", "flock-ui/loco"]
+loco = ["dep:flock-loco", "flock-core/loco", "flock-demo/loco", "flock-kube/loco", "flock-ui/loco", "flock-update/loco"]
 
 [dependencies]
 anyhow.workspace = true
