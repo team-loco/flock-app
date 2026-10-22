@@ -844,7 +844,7 @@ mod tests {
         assert_eq!(web.restarts_label(), "1 restart");
         assert_eq!(
             web.requests.label().as_deref(),
-            Some("cpu <0.01 cores · mem 16Mi")
+            Some("cpu 0.00 cores · mem 16Mi")
         );
         assert_eq!(web.requests.written().as_deref(), Some("cpu 1m · mem 16Mi"));
         assert_eq!(web.limits.label().as_deref(), Some("cpu 2.00 cores"));
@@ -990,6 +990,16 @@ mod tests {
             ),
             ("1.50 cores".into(), "2048 MiB".into())
         );
+        let idle = Usage {
+            cpu_millis: 4,
+            memory_mib: 22,
+        };
+        assert_eq!(idle.cpu_label().labelled(), "0.00 cores");
+        let half = Usage {
+            cpu_millis: 500,
+            memory_mib: 22,
+        };
+        assert_eq!(half.cpu_label().labelled(), "0.50 cores");
     }
 
     #[test]

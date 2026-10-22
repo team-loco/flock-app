@@ -164,7 +164,7 @@ const PODS: [Pod; 4] = [
         phase: "CrashLoopBackOff",
         restarts: 14,
         node: "ip-10-4-12-87",
-        cpu: "<0.01 cores",
+        cpu: "0.00 cores",
         mem: "38 MiB",
         age: "3h",
     },

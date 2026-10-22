@@ -239,7 +239,6 @@ fn commit(
         rollout,
         views: vec![Rendering {
             kind: ViewKind::Source,
-            truncated: commit.truncated,
             files: commit.files.clone(),
         }],
     })

@@ -108,7 +108,6 @@ fn added_file(path: &str, lines: &[&str]) -> FilePatch {
 fn source(files: Vec<FilePatch>) -> Rendering {
     Rendering {
         kind: ViewKind::Source,
-        truncated: false,
         files,
     }
 }
@@ -116,7 +115,6 @@ fn source(files: Vec<FilePatch>) -> Rendering {
 fn rendered(cluster: &str, files: Vec<FilePatch>) -> Rendering {
     Rendering {
         kind: ViewKind::Rendered(ClusterId::new(cluster)),
-        truncated: false,
         files,
     }
 }
