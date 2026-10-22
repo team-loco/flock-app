@@ -30,6 +30,8 @@ pub enum Error {
     MetricsHistory(&'static str),
     #[error("Prometheus: {0}")]
     Prometheus(String),
+    #[error("background task: {0}")]
+    Task(#[from] tokio::task::JoinError),
     #[error("timed out after {0:?}")]
     Timeout(std::time::Duration),
     #[error("svc/{service} has no port {port}")]

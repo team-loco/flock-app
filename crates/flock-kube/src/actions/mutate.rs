@@ -1,10 +1,10 @@
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use flock_core::flux::{FluxAction, FluxKey};
+use flock_core::flux::{FluxAction, FluxKey, FluxKind};
 use flock_core::{ResourceRef, Seen, Uid};
 use flock_flux::{GitOpsObject, ObjectKind, actions};
-use kube::api::PropagationPolicy;
+use kube::api::{DynamicObject, PropagationPolicy};
 use serde_json::{Value, json};
 
 use super::failure::{ActionFailureKind, action_failure, is_transient};
@@ -22,6 +22,8 @@ const DELETE_POLL: Duration = Duration::from_millis(500);
 const DELETE_WAIT: Duration = Duration::from_secs(60);
 const PATCH_ATTEMPTS: usize = 3;
 const PATCH_RETRY_DELAY: Duration = Duration::from_millis(500);
+const FORCE_POLL: Duration = Duration::from_secs(1);
+const FORCE_WAIT: Duration = Duration::from_mins(5);
 const BUILTIN: [(&str, &str); 16] = [
     ("Pod", "v1"),
     ("Service", "v1"),
@@ -114,7 +116,7 @@ pub(crate) fn known(uid: &Uid) -> Result<&Uid> {
     Ok(uid)
 }
 
-fn uid_of(object: &kube::api::DynamicObject) -> Option<&str> {
+fn uid_of(object: &DynamicObject) -> Option<&str> {
     object.metadata.uid.as_deref()
 }
 
@@ -145,12 +147,12 @@ async fn guarded_patch(
     object: &ObjectRef,
     uid: &Uid,
     body: PatchBody,
-) -> Result<()> {
+) -> Result<DynamicObject> {
     let body = body.guarded(uid);
     let mut attempt = 1;
     loop {
         match handle.patch(object, body.clone()).await {
-            Ok(_) => return Ok(()),
+            Ok(patched) => return Ok(patched),
             Err(error) if attempt < PATCH_ATTEMPTS && is_transient(&error) => {
                 attempt += 1;
                 tokio::time::sleep(PATCH_RETRY_DELAY).await;
@@ -163,7 +165,8 @@ async fn guarded_patch(
 async fn patch(handle: &ClusterHandle, seen: &Seen, body: PatchBody) -> Result<()> {
     let uid = known(&seen.uid)?;
     let object = crate::crd::object_ref(handle, &seen.target)?;
-    guarded_patch(handle, &object, uid, body).await
+    guarded_patch(handle, &object, uid, body).await?;
+    Ok(())
 }
 
 pub async fn cordon(handle: &ClusterHandle, seen: &Seen, cordoned: bool) -> Result<()> {
@@ -230,11 +233,12 @@ pub async fn delete(handle: &ClusterHandle, seen: &Seen) -> Result<()> {
     Ok(())
 }
 
-fn flux_patch(action: FluxAction, at: DateTime<Utc>) -> Value {
+fn flux_patch(kind: FluxKind, action: FluxAction, at: DateTime<Utc>) -> Value {
     match action {
         FluxAction::Reconcile => actions::reconcile(at),
         FluxAction::ReconcileWithSource => actions::reconcile(at),
-        FluxAction::Force => actions::force(at),
+        FluxAction::Force if kind == FluxKind::Kustomization => actions::force_apply(at),
+        FluxAction::Force => actions::force_upgrade(at),
         FluxAction::Suspend => actions::suspend(),
         FluxAction::Resume => actions::resume(),
     }
@@ -268,15 +272,11 @@ pub async fn flux(
     })?;
     let target = flux_ref(kind, &key.namespace, &key.name);
     let at = now();
+    if action == FluxAction::Force && key.kind == FluxKind::Kustomization {
+        return force_apply(handle, &target, uid, at).await;
+    }
     if action == FluxAction::ReconcileWithSource {
-        let object = handle.get(&target).await?;
-        if uid_of(&object) != Some(uid.as_str()) {
-            return Err(Error::Replaced {
-                kind: target.kind,
-                name: target.name,
-            });
-        }
-        let parsed = GitOpsObject::from_json(&serde_json::to_value(&object)?)?;
+        let parsed = confirmed(handle, &target, uid).await?;
         let source = parsed
             .source_ref
             .and_then(|source| Some((flux_kind(&source.kind)?, source)));
@@ -287,8 +287,67 @@ pub async fn flux(
                 .await?;
         }
     }
-    let body = PatchBody::Merge(flux_patch(action, at));
-    guarded_patch(handle, &target, uid, body).await
+    let body = PatchBody::Merge(flux_patch(key.kind, action, at));
+    guarded_patch(handle, &target, uid, body).await?;
+    Ok(())
+}
+
+async fn confirmed(handle: &ClusterHandle, target: &ObjectRef, uid: &Uid) -> Result<GitOpsObject> {
+    let object = handle.get(target).await?;
+    if uid_of(&object) != Some(uid.as_str()) {
+        return Err(Error::Replaced {
+            kind: target.kind.clone(),
+            name: target.name.clone(),
+        });
+    }
+    gitops_object(&object)
+}
+
+fn gitops_object(object: &DynamicObject) -> Result<GitOpsObject> {
+    let value = serde_json::to_value(object)?;
+    Ok(GitOpsObject::from_json(&value)?)
+}
+
+async fn force_apply(
+    handle: &ClusterHandle,
+    target: &ObjectRef,
+    uid: &Uid,
+    at: DateTime<Utc>,
+) -> Result<()> {
+    let original = actions::force_setting(&confirmed(handle, target, uid).await?);
+    let body = PatchBody::Merge(flux_patch(FluxKind::Kustomization, FluxAction::Force, at));
+    let patched = guarded_patch(handle, target, uid, body).await?;
+    let generation = patched
+        .metadata
+        .generation
+        .ok_or(Error::MissingField("metadata.generation"))?;
+    let handle = handle.clone();
+    let target = target.clone();
+    let uid = uid.clone();
+    let finish = tokio::spawn(async move {
+        let handled = await_handled(&handle, &target, at, generation).await;
+        let restore = PatchBody::Merge(actions::restore_force(original));
+        let restored = guarded_patch(&handle, &target, &uid, restore).await;
+        handled.and(restored.map(drop))
+    });
+    finish.await?
+}
+
+async fn await_handled(
+    handle: &ClusterHandle,
+    target: &ObjectRef,
+    at: DateTime<Utc>,
+    generation: i64,
+) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + FORCE_WAIT;
+    while tokio::time::Instant::now() < deadline {
+        let object = gitops_object(&handle.get(target).await?)?;
+        if actions::handled(&object, at, generation) {
+            return Ok(());
+        }
+        tokio::time::sleep(FORCE_POLL).await;
+    }
+    Err(Error::Timeout(FORCE_WAIT))
 }
 
 #[cfg(test)]
@@ -471,11 +530,33 @@ mod tests {
     fn flux_actions_patch_annotations_or_suspend() {
         let at = DateTime::from_timestamp(0, 0).unwrap_or_default();
         assert_eq!(
-            flux_patch(FluxAction::Suspend, at),
+            flux_patch(FluxKind::Kustomization, FluxAction::Suspend, at),
             json!({"spec": {"suspend": true}})
         );
-        let reconcile = flux_patch(FluxAction::Reconcile, at);
+        let reconcile = flux_patch(FluxKind::Kustomization, FluxAction::Reconcile, at);
         assert!(reconcile["metadata"]["annotations"][actions::REQUESTED_AT].is_string());
+    }
+
+    #[test]
+    fn force_sets_spec_force_on_a_kustomization_and_force_at_on_a_helm_release() {
+        let at = DateTime::from_timestamp(0, 0).unwrap_or_default();
+        let token = at.to_rfc3339();
+        assert_eq!(
+            flux_patch(FluxKind::Kustomization, FluxAction::Force, at),
+            json!({
+                "metadata": {"annotations": {actions::REQUESTED_AT: token}},
+                "spec": {"force": true}
+            })
+        );
+        assert_eq!(
+            flux_patch(FluxKind::HelmRelease, FluxAction::Force, at),
+            json!({
+                "metadata": {"annotations": {
+                    actions::REQUESTED_AT: token,
+                    actions::FORCE_AT: token
+                }}
+            })
+        );
     }
 
     #[test]
