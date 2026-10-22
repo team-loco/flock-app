@@ -4033,13 +4033,23 @@ fn a_node_inspector_links_its_biggest_pods_by_request() -> anyhow::Result<()> {
         "node-inspector-pane",
         gpui::point(gpui::px(0.), gpui::px(-1200.)),
     )?;
+    let state = ui.state();
+    let biggest = state
+        .snapshot
+        .detail(&ClusterId::new("prod-us-east"))
+        .and_then(|detail| {
+            detail
+                .nodes
+                .iter()
+                .find(|node| node.name == "ip-10-4-12-87")
+        })
+        .and_then(|node| node.top_pods.first())
+        .map(|pod| pod.name.clone());
+    assert!(biggest.is_some());
     ui.click("node-pod-0")?;
     let location = ui.state().location().clone();
     assert_eq!(location.page, Page::Pods);
-    assert_eq!(
-        location.resource.map(|target| target.name),
-        Some("search-indexer-0".to_owned())
-    );
+    assert_eq!(location.resource.map(|target| target.name), biggest);
     ui.click("pane-0-back")?;
     assert_eq!(ui.state().location().page, Page::Nodes);
     Ok(())
@@ -4068,6 +4078,13 @@ fn a_node_inspector_opens_the_pods_list_filtered_to_its_node() -> anyhow::Result
         .filter(|pod| pod.node.as_deref() == Some(NODE))
         .count();
     assert!(on_node > 0 && on_node < in_cluster.len());
+    let inspected = location
+        .cluster
+        .as_ref()
+        .and_then(|cluster| state.snapshot.detail(cluster))
+        .and_then(|detail| detail.nodes.iter().find(|node| node.name == NODE))
+        .map(|node| node.pods as usize);
+    assert_eq!(inspected, Some(on_node));
     let text = ui.read(|shell, cx| shell.filter_bar(cx).map(|bar| bar.read(cx).text(cx)));
     assert_eq!(text, Some(format!("node:{NODE}")));
     assert!(ui.bounds("pod-filter-token-0").is_some());

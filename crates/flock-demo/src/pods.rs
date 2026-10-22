@@ -599,11 +599,7 @@ pub fn pods() -> Vec<Pod> {
             (187, 288),
         ),
     ];
-    let nodes: Vec<String> = crate::detail::nodes()
-        .into_iter()
-        .filter(|node| node.schedulable)
-        .map(|node| node.name)
-        .collect();
+    let nodes = crate::detail::schedulable_node_names();
     checkout
         .into_iter()
         .chain(workload_seeds())
