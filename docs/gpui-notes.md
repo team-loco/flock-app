@@ -115,7 +115,8 @@ launch the GUI or synthesize system input for automated verification.
 
 - `element.with_animation(id, Animation::new(dur).with_easing(ease_out_quint()), |el, t| el.w(...))`.
   The animation restarts when the id changes, so the shell bumps a generation counter per toggle and
-  uses `ElementId::NamedInteger("sidebar", generation)`; generation 0 renders without animation.
+  uses `ElementId::NamedInteger("sidebar", generation)`; generation 0 renders without animation, and a
+  sidebar edge drag resets it to 0 so the width follows the pointer.
   Content inside an animated width uses a fixed width and `overflow_hidden` so it clips instead of
   reflowing.
 

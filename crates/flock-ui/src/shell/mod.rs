@@ -53,6 +53,7 @@ pub struct Shell {
     announce: bool,
     saved: Option<flock_core::tabs::SavedWindow>,
     sidebar_generation: usize,
+    sidebar_drag: Option<sidebar::SidebarDrag>,
     focus: FocusHandle,
     palette: Entity<CommandPalette>,
     panes: Vec<PaneScreens>,
@@ -105,7 +106,8 @@ impl Shell {
         let (palette, palette_events) = Self::new_palette(window, cx);
         let (switcher, switcher_events) = Self::new_switcher(window, cx);
         let tab_menu = cx.new(|cx| crate::kit::ActionMenu::context(tabs::TAB_MENU, cx));
-        let state = AppState::default();
+        let mut state = AppState::default();
+        state.sidebar_open = !crate::settings::current(cx).sidebar_closed;
         let first = PaneScreens::new(state.panes().focused().id(), commands.clone(), window, cx);
         Self {
             state,
@@ -117,6 +119,7 @@ impl Shell {
             announce: false,
             saved: None,
             sidebar_generation: 0,
+            sidebar_drag: None,
             focus,
             palette,
             panes: vec![first],
@@ -527,7 +530,7 @@ impl Shell {
         match command {
             Command::ForWindow(_, _) => {}
             Command::WindowClosed(_) => {}
-            Command::ToggleSidebar => self.sidebar_generation += 1,
+            Command::ToggleSidebar => self.toggle_sidebar(cx),
             Command::SelectCluster(_) => {}
             Command::SelectPage(_) => {}
             Command::OpenResource(_) => {}
@@ -910,11 +913,14 @@ impl Render for Shell {
             .text_size(TEXT_UI)
             .child(
                 div()
+                    .relative()
                     .flex()
                     .flex_1()
                     .min_h_0()
                     .child(self.sidebar(window, cx))
-                    .child(div().flex().flex_1().min_w_0().child(panes)),
+                    .child(div().flex().flex_1().min_w_0().child(panes))
+                    .children(self.sidebar_reopen(cx))
+                    .child(Self::sidebar_drag_tracker(cx)),
             )
             .child(self.status_bar(cx))
             .child(self.palette.clone())
@@ -1070,6 +1076,23 @@ mod tests {
         assert!(received.is_empty());
         assert!(shell.read_with(cx, |shell, cx| shell.palette.read(cx).is_open()));
         assert!(shell.read_with(cx, |shell, _| shell.state.sidebar_open));
+    }
+
+    #[gpui::test]
+    fn a_new_window_opens_the_sidebar_as_last_saved(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(None, cx).unwrap_or_else(|error| panic!("UI init: {error}"));
+        });
+        let (_, updates) = async_channel::unbounded();
+        let (commands, _received) = async_channel::unbounded();
+        let store = cx.new(|cx| Store::new(updates, commands, cx));
+        let (first, _) = cx.update(|cx| open_window(&store, Vec::new(), cx));
+        assert!(first.read_with(cx, |shell, _| shell.state.sidebar_open));
+        first.update(cx, |shell, cx| shell.dispatch(Command::ToggleSidebar, cx));
+        let closed = cx.update(|cx| crate::settings::current(cx).sidebar_closed);
+        assert!(closed);
+        let (second, _) = cx.update(|cx| open_window(&store, Vec::new(), cx));
+        assert!(!second.read_with(cx, |shell, _| shell.state.sidebar_open));
     }
 
     fn scope_of(sent: &[Command], wanted: &Command) -> Option<u64> {
