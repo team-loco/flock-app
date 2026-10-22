@@ -14,8 +14,8 @@ use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
 use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
     ActiveTheme, COLLAPSE, FONT_MONO, ICON, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, ROW_NAV,
-    RULE, SIDEBAR, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_LABEL, TEXT_UI, TITLE_ROW,
-    TRAFFIC_LIGHTS_INSET,
+    RULE, SIDEBAR, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_LABEL, TEXT_UI,
+    TITLE_ROW, TRAFFIC_LIGHTS_INSET,
 };
 
 const COLLAPSE_TOOLTIP: &str = "Collapse sidebar  ⌘B";
@@ -217,6 +217,7 @@ fn section_rows(
         .map(|&page| {
             let selected = page == highlight;
             let selector = format!("nav-{}", page.label().to_lowercase());
+            let label_selector = format!("{selector}-label");
             let badges = counts
                 .get(&page)
                 .map(|c| badges(c, &selector, palette))
@@ -225,7 +226,13 @@ fn section_rows(
             nav_row(key, ROW_NAV, selected, palette)
                 .debug_selector(move || selector.clone())
                 .when(!selected, |row| row.text_color(palette.fg2))
-                .child(div().flex_1().truncate().child(page.label()))
+                .child(
+                    div()
+                        .debug_selector(move || label_selector)
+                        .flex_1()
+                        .truncate()
+                        .child(page.label()),
+                )
                 .children(badges)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.dispatch(Command::SelectPage(page), cx);
@@ -256,7 +263,7 @@ fn badge(selector: String, text: String, color: Hsla) -> AnyElement {
     div()
         .debug_selector(move || selector)
         .flex_none()
-        .ml(SPACE_3)
+        .ml(SPACE_1)
         .whitespace_nowrap()
         .font_family(FONT_MONO)
         .text_size(TEXT_LABEL)
