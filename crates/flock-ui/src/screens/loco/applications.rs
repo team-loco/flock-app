@@ -85,7 +85,7 @@ impl ApplicationsScreen {
         let screen = cx.weak_entity();
         let list = cx.new(|cx| {
             Table::new("loco-apps", app_columns(), cx)
-                .row_actions(move |row: &AppRow| match row {
+                .row_actions(move |row: &AppRow, _: &[&AppRow]| match row {
                     AppRow::App(app) => Self::menu_items(app, &screen),
                     AppRow::Group(_) => Vec::new(),
                 })
