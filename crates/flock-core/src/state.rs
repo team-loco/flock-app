@@ -64,6 +64,8 @@ pub enum Command {
     },
     WatchFolder(PathBuf),
     RemoveCluster(ClusterId),
+    RenameCluster(ClusterId, String),
+    SwitchContext(ClusterId, ContextRef),
     WatchWorkload {
         target: ResourceRef,
         sink: Sink<Workload>,

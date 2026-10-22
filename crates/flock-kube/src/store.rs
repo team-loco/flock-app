@@ -26,6 +26,8 @@ pub struct SavedCluster {
     pub file: PathBuf,
     pub context: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     #[serde(default)]
     pub preferences: SavedPreferences,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -153,6 +155,10 @@ impl SavedCluster {
     pub fn id(&self) -> ClusterId {
         ClusterId::new(&self.name)
     }
+
+    pub fn label(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.name)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,6 +253,7 @@ impl ClusterStore {
                 file: cluster.context.file.clone(),
                 context: cluster.context.context.clone(),
                 name: cluster.name.clone(),
+                display_name: None,
                 preferences: SavedPreferences::default(),
                 pin: None,
             });
@@ -272,6 +279,33 @@ impl ClusterStore {
             return Ok(false);
         };
         saved.preferences = SavedPreferences::from(preferences);
+        self.save()?;
+        Ok(true)
+    }
+
+    pub fn rename(&mut self, id: &ClusterId, input: &str) -> Result<bool> {
+        let Some(saved) = self.clusters.iter_mut().find(|c| &c.id() == id) else {
+            return Ok(false);
+        };
+        let display_name = flock_core::rename::display_name(input);
+        if saved.display_name == display_name {
+            return Ok(false);
+        }
+        saved.display_name = display_name;
+        self.save()?;
+        Ok(true)
+    }
+
+    pub fn rebind(&mut self, id: &ClusterId, to: &ContextRef) -> Result<bool> {
+        if self.contains(to) {
+            return Ok(false);
+        }
+        let Some(saved) = self.clusters.iter_mut().find(|c| &c.id() == id) else {
+            return Ok(false);
+        };
+        saved.file.clone_from(&to.file);
+        saved.context.clone_from(&to.context);
+        saved.pin = None;
         self.save()?;
         Ok(true)
     }
@@ -369,6 +403,52 @@ mod tests {
             },
             name: name.to_owned(),
         }
+    }
+
+    #[test]
+    fn renaming_sets_a_display_name_and_blank_input_resets_it() {
+        let Ok(dir) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let mut store = ClusterStore::empty(dir.path());
+        let id = ClusterId::new("fleet-a");
+        assert!(store.add(&[new_cluster("kind-fleet-a", "fleet-a")]).is_ok());
+        assert_eq!(store.rename(&id, " Prod A ").ok(), Some(true));
+        assert_eq!(store.get(&id).map(SavedCluster::label), Some("Prod A"));
+        assert_eq!(store.rename(&id, "Prod A").ok(), Some(false));
+        assert_eq!(store.rename(&id, "  ").ok(), Some(true));
+        assert_eq!(store.get(&id).map(SavedCluster::label), Some("fleet-a"));
+        assert_eq!(store.rename(&ClusterId::new("gone"), "x").ok(), Some(false));
+    }
+
+    #[test]
+    fn rebinding_keeps_the_entry_and_refuses_contexts_already_added() {
+        let Ok(dir) = tempfile::tempdir() else {
+            panic!("tempdir");
+        };
+        let mut store = ClusterStore::empty(dir.path());
+        let id = ClusterId::new("fleet-a");
+        let added = [
+            new_cluster("kind-fleet-a", "fleet-a"),
+            new_cluster("kind-fleet-b", "fleet-b"),
+        ];
+        assert!(store.add(&added).is_ok());
+        assert_eq!(store.rename(&id, "Prod A").ok(), Some(true));
+        let pin = Pin {
+            server: None,
+            trust: Fingerprint::default(),
+        };
+        assert_eq!(store.pin(&id, pin).ok(), Some(true));
+        let taken = new_cluster("kind-fleet-b", "x").context;
+        assert_eq!(store.rebind(&id, &taken).ok(), Some(false));
+        let free = new_cluster("kind-other", "x").context;
+        assert_eq!(store.rebind(&id, &free).ok(), Some(true));
+        let Some(saved) = store.get(&id) else {
+            panic!("entry kept");
+        };
+        assert_eq!(saved.context_ref(), free);
+        assert_eq!(saved.label(), "Prod A");
+        assert_eq!(saved.pin, None);
     }
 
     #[test]

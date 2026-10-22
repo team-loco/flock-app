@@ -1,6 +1,7 @@
 pub mod add_cluster;
 pub mod app_settings;
 pub mod changes;
+pub mod cluster_edit;
 mod cluster_problems;
 pub mod command;
 pub mod compare;
