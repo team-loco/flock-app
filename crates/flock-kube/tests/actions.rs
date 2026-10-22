@@ -39,6 +39,7 @@ const PODINFO_PORT: u16 = 9898;
 const DEBUG_POD: &str = "flock-actions-e2e";
 const DEBUG_IMAGE: &str = "busybox:1.37";
 const NODE_SHELL_NAMESPACE: &str = "default";
+const STALE_SHELL_AGE_SECONDS: i64 = 3_600;
 const ECHO_MARKER: &str = "flock-e2e-exec";
 const OTHER_CONTEXT: &str = "kind-fleet-b";
 const SCRATCH_DEPLOYMENT: &str = "flock-compare-e2e";
@@ -1352,6 +1353,32 @@ async fn force_apply_recreates_an_immutable_change_then_restores_spec_force() {
     .await;
 }
 
+async fn foreign_shell_pod(pods: &Api<Pod>, name: &str, heartbeat: i64) {
+    let body = json!({
+        "metadata": {
+            "name": name,
+            "labels": {"flock.dev/node-shell": "foreign-run"},
+            "annotations": {"flock.dev/heartbeat": heartbeat.to_string()},
+        },
+        "spec": {
+            "terminationGracePeriodSeconds": 0,
+            "containers": [{"name": "shell", "image": DEBUG_IMAGE, "command": ["sleep", "3600"]}],
+        },
+    });
+    let Ok(pod) = serde_json::from_value::<Pod>(body) else {
+        panic!("foreign pod");
+    };
+    let created = pods.create(&PostParams::default(), &pod).await;
+    assert!(created.is_ok(), "{created:?}");
+}
+
+fn unix_now() -> i64 {
+    let elapsed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    elapsed.map_or(0, |elapsed| {
+        i64::try_from(elapsed.as_secs()).unwrap_or_default()
+    })
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn node_shell_runs_on_the_node_and_deletes_its_pod() {
     let Some(harness) = Harness::start().await else {
@@ -1364,6 +1391,11 @@ async fn node_shell_runs_on_the_node_and_deletes_its_pod() {
     let Some(node) = listed.items.first().map(ResourceExt::name_any) else {
         panic!("no node");
     };
+    let pods: Api<Pod> = Api::namespaced(harness.client.clone(), NODE_SHELL_NAMESPACE);
+    let fresh = "node-shell-foreign-fresh";
+    let stale = "node-shell-foreign-stale";
+    foreign_shell_pod(&pods, fresh, unix_now()).await;
+    foreign_shell_pod(&pods, stale, unix_now() - STALE_SHELL_AGE_SECONDS).await;
     let (input, source) = Source::channel();
     let (_resize, sizes) = Source::channel();
     let (output, events) = Sink::channel();
@@ -1383,8 +1415,14 @@ async fn node_shell_runs_on_the_node_and_deletes_its_pod() {
     let Some(pod) = note.rsplit('/').next().map(str::to_owned) else {
         panic!("{note}");
     };
-    let pods: Api<Pod> = Api::namespaced(harness.client.clone(), NODE_SHELL_NAMESPACE);
     assert!(pods.get_opt(&pod).await.ok().flatten().is_some(), "{pod}");
+    eventually(
+        "stale foreign shell deleted",
+        || async { pods.get_opt(stale).await.ok().flatten() },
+        Option::is_none,
+    )
+    .await;
+    assert!(pods.get_opt(fresh).await.ok().flatten().is_some());
     assert!(input.send(b"hostname\r".to_vec()).await.is_ok());
     let output = shell_output_until(&events, &format!("{node}\r\n")).await;
     assert!(output.contains(&node), "{output}");
@@ -1400,4 +1438,6 @@ async fn node_shell_runs_on_the_node_and_deletes_its_pod() {
         Option::is_none,
     )
     .await;
+    let removed = pods.delete(fresh, &DeleteParams::default()).await;
+    assert!(removed.is_ok(), "{removed:?}");
 }
