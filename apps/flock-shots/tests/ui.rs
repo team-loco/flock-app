@@ -6,8 +6,8 @@ use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
 use flock_ui::theme::{
-    FONT_MONO, FONT_STATUS, ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SPACE_3, SPACE_5, TAB_ENTER,
-    TAB_LEAVE, TEXT_MONO, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
+    FONT_MONO, FONT_SANS, FONT_STATUS, ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SPACE_3, SPACE_5,
+    TAB_ENTER, TAB_LEAVE, TEXT_MONO, TEXT_UI, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
 };
 use gpui::{Pixels, SharedString, TextRun, font, rgb};
 
@@ -4619,5 +4619,45 @@ fn filter_placeholder_stays_left_of_the_shortcut_hint_and_leaves_when_typing() -
     ui.press("/")?;
     ui.type_text("a")?;
     assert!(ui.bounds("node-filter-placeholder").is_none());
+    Ok(())
+}
+
+#[test]
+fn a_nav_row_with_three_badges_keeps_its_full_label() -> anyhow::Result<()> {
+    let (mut ui, updates) = Ui::scripted(Screen::Cluster)?;
+    let mut snapshot = flock_demo::snapshot();
+    let counts = flock_core::Counts::total(3)
+        .with_err(1)
+        .with_warn(1)
+        .with_sus(1);
+    for cluster in &mut snapshot.clusters {
+        cluster.nav.insert(Page::HelmReleases, counts);
+    }
+    updates.try_send(flock_core::Update::Snapshot(Box::new(snapshot)))?;
+    ui.settle()?;
+    let label = Page::HelmReleases.label();
+    let runs = [TextRun {
+        len: label.len(),
+        font: font(FONT_SANS),
+        color: rgb(0).into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }];
+    let text_width = ui.read_in_window(|_, window, _| {
+        window
+            .text_system()
+            .shape_line(SharedString::from(label), TEXT_UI, &runs, None)
+            .width
+    });
+    let shown = width(&mut ui, "nav-helmreleases-label").context("the label is drawn")?;
+    assert!(
+        shown >= text_width,
+        "{shown:?} clips {label} at {text_width:?}"
+    );
+    for badge in ["err", "warn", "suspended"] {
+        let selector: &'static str = format!("nav-helmreleases-{badge}").leak();
+        assert!(ui.bounds(selector).is_some(), "{selector} is missing");
+    }
     Ok(())
 }
