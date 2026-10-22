@@ -4,7 +4,7 @@
 
 <h1 align="center">Flock</h1>
 
-<p align="center">A native macOS app for watching many Kubernetes clusters at once, with Flux built in.</p>
+<p align="center">Multi-cluster Kubernetes UI for macOS, built in Rust.</p>
 
 <p align="center">
   <img src="docs/screenshots/overview.png" alt="Cluster overview" width="900">
@@ -35,8 +35,6 @@ For Apple Silicon only.
 </p>
 
 ## Build from source
-
-[mise](https://mise.jdx.dev) pins the toolchain; every command is a mise task.
 
 ```sh
 mise run demo      # run on sample data
