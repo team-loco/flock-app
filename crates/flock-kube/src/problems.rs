@@ -29,7 +29,6 @@ const PHASE_RUNNING: &str = "Running";
 const PHASE_SUCCEEDED: &str = "Succeeded";
 const PHASE_FAILED: &str = "Failed";
 const NOT_READY_GRACE: Duration = Duration::from_secs(120);
-const FAILED_SCHEDULING: &str = "FailedScheduling";
 const SCHEDULING_DISABLED: &str = "SchedulingDisabled";
 const CORDONED_SPEC: &str = "spec.unschedulable: true";
 const UNAUTHORIZED: &str = "Unauthorized";
@@ -269,9 +268,8 @@ fn raw(pod: &Pod, issue: &Issue) -> (Diagnosis, String) {
             let raw = Diagnosis::new(reason.clone(), message.clone());
             (raw, condition_line(pod, READY_CONDITION))
         }
-        Issue::Unschedulable { message } => {
-            let raw = Diagnosis::new(FAILED_SCHEDULING, message.clone());
-            (raw, condition_line(pod, SCHEDULED_CONDITION))
+        Issue::Unschedulable { .. } => {
+            (issue.diagnosis(), condition_line(pod, SCHEDULED_CONDITION))
         }
         Issue::NotReady { .. } => {
             let ready = condition(pod, READY_CONDITION);
@@ -657,7 +655,7 @@ pub(crate) mod tests {
         assert_eq!(problem.target.kind, "Pod");
         assert_eq!(
             (problem.reason.as_str(), problem.condition.as_str()),
-            ("FailedScheduling", "PodScheduled=False")
+            ("Unschedulable", "PodScheduled=False")
         );
         assert_eq!(
             problem.message,

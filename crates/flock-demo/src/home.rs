@@ -189,7 +189,7 @@ fn problems() -> Vec<Problem> {
             Status::Warn,
             ("Pod", "ml/ml-batch-5c7f-9kq2d"),
             (
-                "FailedScheduling",
+                "Unschedulable",
                 "0/14 nodes are available: 4 Insufficient nvidia.com/gpu, 10 node(s) didn't match Pod's node affinity/selector.",
                 "PodScheduled=False",
             ),
