@@ -252,8 +252,11 @@ fn unready_services() -> Vec<Problem> {
             namespace: Some("payments".into()),
             name: "checkout-api".into(),
         },
+        reason: "EndpointsNotReady".into(),
         message: "1 of 3 endpoints not ready".into(),
+        condition: String::new(),
         age: Duration::from_secs(3 * HOUR),
+        events: Vec::new(),
     };
     vec![service]
 }

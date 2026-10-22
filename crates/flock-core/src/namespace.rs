@@ -235,7 +235,12 @@ impl NamespaceIssue {
         let object = named(&target.kind, &target.name, Some(problem.age));
         let issue = match diagnosis {
             Some(diagnosis) => Issue::from_diagnosis(problem.status, diagnosis, object),
-            None => Issue::new(problem.status, problem.message.clone(), "", object),
+            None => Issue::new(
+                problem.status,
+                problem.reason.clone(),
+                problem.message.clone(),
+                object,
+            ),
         };
         Self {
             target: target.clone(),
@@ -586,8 +591,11 @@ mod tests {
                 namespace: Some(namespace.into()),
                 name: "checkout-api".into(),
             },
-            message: "2/3 ready".into(),
+            reason: "ProgressDeadlineExceeded".into(),
+            message: "ReplicaSet \"checkout-api-7f9c6d\" has timed out progressing.".into(),
+            condition: String::new(),
             age: Duration::from_hours(3),
+            events: Vec::new(),
         }
     }
 
@@ -691,6 +699,7 @@ mod tests {
         detail.resources.insert(ResourceKind::Deployment, vec![row]);
         let mut service = problem(NS, Status::Warn);
         service.target.kind = "Service".into();
+        service.reason = "EndpointsNotReady".into();
         service.message = "1 of 3 endpoints not ready".into();
         let problems = [problem(NS, Status::Err), service];
         let page = NamespacePage::build(&target(), Some(&detail), &problems);
@@ -714,8 +723,8 @@ mod tests {
                     "Deployment checkout-api · 3h"
                 ),
                 (
+                    "EndpointsNotReady",
                     "1 of 3 endpoints not ready",
-                    "",
                     "Service checkout-api · 3h"
                 ),
             ]

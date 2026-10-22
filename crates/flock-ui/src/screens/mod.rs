@@ -11,6 +11,7 @@ pub mod edit;
 mod event_inspector;
 mod events;
 pub mod flock;
+pub mod flock_problems;
 mod flux_drift;
 mod flux_events;
 mod flux_graph;

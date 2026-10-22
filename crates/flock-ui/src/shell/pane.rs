@@ -13,6 +13,7 @@ use crate::screens::compare::CompareScreen;
 use crate::screens::detail::DetailScreen;
 use crate::screens::edit::EditScreen;
 use crate::screens::flock::FlockScreen;
+use crate::screens::flock_problems::FleetProblemsScreen;
 use crate::screens::flux_object::FluxObjectPage;
 use crate::screens::gitops::GitOpsScreen;
 use crate::screens::logs::LogsScreen;
@@ -67,6 +68,7 @@ pub(super) struct PaneScreens {
     pub(super) navigation: Entity<crate::kit::HeaderNavigation>,
     pub(super) scope: Scope,
     pub(super) flock: Entity<FlockScreen>,
+    pub(super) problems: Entity<FleetProblemsScreen>,
     pub(super) changes: Entity<ChangesScreen>,
     pub(super) gitops: Entity<GitOpsScreen>,
     pub(super) flux_events: Entity<crate::screens::FluxEventsScreen>,
@@ -100,6 +102,7 @@ impl PaneScreens {
         cx: &mut Context<Shell>,
     ) -> Self {
         let flock = cx.new(FlockScreen::new);
+        let problems = cx.new(|cx| FleetProblemsScreen::new(window, cx));
         let changes = cx.new(|cx| ChangesScreen::new(window, cx));
         let gitops = cx.new(|cx| GitOpsScreen::new(window, cx));
         let flux_events = cx.new(|cx| crate::screens::FluxEventsScreen::new(window, cx));
@@ -139,6 +142,7 @@ impl PaneScreens {
                 },
             ),
             forward(pane, &flock, cx),
+            forward(pane, &problems, cx),
             forward(pane, &gitops, cx),
             forward(pane, &flux_events, cx),
             forward(pane, &compare, cx),
@@ -155,6 +159,7 @@ impl PaneScreens {
             navigation,
             scope: Scope::new(commands),
             flock,
+            problems,
             changes,
             gitops,
             flux_events,
@@ -184,6 +189,8 @@ impl PaneScreens {
     pub(super) fn set_snapshot(&self, snapshot: &Snapshot, cx: &mut Context<Shell>) {
         self.flock
             .update(cx, |flock, cx| flock.set_snapshot(snapshot, cx));
+        self.problems
+            .update(cx, |problems, cx| problems.set_snapshot(snapshot, cx));
         self.changes
             .update(cx, |changes, cx| changes.set_snapshot(snapshot, cx));
         self.gitops

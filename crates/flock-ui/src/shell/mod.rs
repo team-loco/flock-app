@@ -634,9 +634,6 @@ impl Shell {
         let screens = self.screens(ix);
         let snapshot = &self.state.snapshot;
         let page = location.page;
-        screens
-            .flock
-            .update(cx, |flock, cx| flock.set_page(page, cx));
         let cluster = self.cluster_of(location);
         let confirm_destructive = cluster
             .and_then(|c| snapshot.catalog.get(&c.id))
@@ -776,6 +773,7 @@ impl Shell {
         }
         match location.page {
             Page::Pods => Some(screens.pods.read(cx).filter_bar().clone()),
+            Page::Problems => Some(screens.problems.read(cx).filter_bar().clone()),
             Page::Changes => Some(screens.changes.read(cx).filter_bar().clone()),
             Page::GitOps => Some(screens.gitops.read(cx).filter_bar().clone()),
             Page::FluxEvents => Some(screens.flux_events.read(cx).filter_bar().clone()),
@@ -1013,8 +1011,11 @@ mod tests {
                 name: "unavailable".into(),
             },
             status: Status::Err,
+            reason: "Unavailable".into(),
             message: "unavailable".into(),
+            condition: String::new(),
             age: std::time::Duration::ZERO,
+            events: Vec::new(),
         });
         assert!(
             backend

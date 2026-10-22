@@ -155,6 +155,7 @@ impl Preset {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum Screen {
     Flock,
+    FleetProblems,
     Cluster,
     Collapsed,
     Switcher,
@@ -214,6 +215,7 @@ impl Screen {
         let sample = Command::SelectCluster(Some(cluster.clone()));
         match self {
             Self::Flock => vec![Command::SelectPage(Page::Overview)],
+            Self::FleetProblems => vec![Command::SelectPage(Page::Problems)],
             Self::Cluster => vec![sample],
             Self::Collapsed => vec![sample, Command::ToggleSidebar],
             Self::Switcher => vec![sample, Command::OpenResource(preset.deployment())],
@@ -453,6 +455,7 @@ pub fn root_view(
             .new(|cx| Gallery::new(GalleryPage::Panes, window, cx))
             .into(),
         Screen::Flock => shell_view(store, screen, preset, window, cx),
+        Screen::FleetProblems => shell_view(store, screen, preset, window, cx),
         Screen::Cluster => shell_view(store, screen, preset, window, cx),
         Screen::Collapsed => shell_view(store, screen, preset, window, cx),
         Screen::Switcher => shell_view(store, screen, preset, window, cx),

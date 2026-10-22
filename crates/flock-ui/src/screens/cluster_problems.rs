@@ -23,14 +23,13 @@ use crate::theme::{
 };
 
 const NOTHING: &str = "Nothing needs attention in this cluster.";
-const OCCURRENCES: &str = "New occurrences · 6h";
-const SHARED: &str = "What the affected objects share";
-const AFFECTED: &str = "Affected";
+const OCCURRENCES: &str = "Occurrences · 6h";
+const SHARED: &str = "Attributes";
+const PODS: &str = "Pods";
+const OBJECTS: &str = "Objects";
 const NONE: &str = "—";
 const MARK: &str = "┆";
 const AXIS: [&str; 4] = ["6h ago", "4h ago", "2h ago", "now"];
-const OBJECT_ONE: &str = "object";
-const OBJECT_MANY: &str = "objects";
 const CAUSES_ID: &str = "problem-causes";
 
 pub struct ClusterProblemsScreen {
@@ -86,7 +85,7 @@ impl ClusterProblemsScreen {
     }
 
     pub fn header_note(&self) -> String {
-        plural(self.causes.len(), "cause", "causes")
+        plural(self.causes.len(), "issue", "issues")
     }
 
     pub fn set(&mut self, cluster: &ClusterSummary, snapshot: &Snapshot, cx: &mut Context<Self>) {
@@ -190,11 +189,7 @@ impl ClusterProblemsScreen {
     }
 
     fn affected(&self, cause: &Cause, palette: &Palette) -> AnyElement {
-        let noun = if cause.is_pods() {
-            plural(cause.count(), "pod", "pods")
-        } else {
-            plural(cause.count(), OBJECT_ONE, OBJECT_MANY)
-        };
+        let label = if cause.is_pods() { PODS } else { OBJECTS };
         div()
             .flex_1()
             .min_h_0()
@@ -208,13 +203,13 @@ impl ClusterProblemsScreen {
                     .px(SPACE_8)
                     .pt(SPACE_7)
                     .pb(SPACE_3)
-                    .child(SectionLabel::new(AFFECTED))
+                    .child(SectionLabel::new(label))
                     .child(
                         div()
                             .font_family(FONT_MONO)
                             .text_size(TEXT_SMALL)
                             .text_color(palette.mute)
-                            .child(noun),
+                            .child(cause.count().to_string()),
                     ),
             )
             .child(self.filter.clone())

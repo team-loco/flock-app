@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use flock_core::home::{ClusterMetrics, Problem, Revision};
+use flock_core::pods::PodEvent;
 use flock_core::{ClusterId, Counts, FlockHome, ResourceRef, Status};
 
 const MINUTE: u64 = 60;
@@ -104,99 +105,163 @@ fn target(cluster: &str, kind: &str, object: &str) -> ResourceRef {
 fn problem(
     cluster: &str,
     status: Status,
-    kind: &str,
-    object: &str,
-    message: &str,
+    (kind, object): (&str, &str),
+    (reason, message, condition): (&str, &str, &str),
     age_secs: u64,
 ) -> Problem {
     Problem {
         status,
         target: target(cluster, kind, object),
+        reason: reason.into(),
         message: message.into(),
+        condition: condition.into(),
+        age: Duration::from_secs(age_secs),
+        events: Vec::new(),
+    }
+}
+
+fn event(status: Status, reason: &str, message: &str, age_secs: u64) -> PodEvent {
+    PodEvent {
+        status,
+        reason: reason.into(),
+        message: message.into(),
+        count: 1,
         age: Duration::from_secs(age_secs),
     }
 }
 
-fn problems() -> Vec<Problem> {
-    vec![
-        problem(
-            "prod-us-east",
-            Status::Err,
-            "Kustomization",
-            "flux-system/apps-payments",
-            "Health check failed after 5m: Deployment/payments/checkout-api not ready",
-            4 * MINUTE,
-        ),
-        problem(
-            "prod-us-east",
-            Status::Err,
-            "Deployment",
-            "payments/checkout-api",
-            "2/3 ready · pod …x2lqp CrashLoopBackOff, 14 restarts, exit 1",
+fn payments_kustomization() -> Problem {
+    let health_check = "Health check failed after 5m0s: timeout waiting for: [Deployment/payments/checkout-api status: 'InProgress']";
+    let mut kustomization = problem(
+        "prod-us-east",
+        Status::Err,
+        ("Kustomization", "flux-system/apps-payments"),
+        ("HealthCheckFailed", health_check, "Ready=False"),
+        4 * MINUTE,
+    );
+    kustomization.events = vec![
+        event(Status::Err, "HealthCheckFailed", health_check, 4 * MINUTE),
+        event(
+            Status::Ok,
+            "ReconciliationSucceeded",
+            "Reconciliation finished in 1.2s, next run in 10m0s",
             3 * HOUR,
         ),
+    ];
+    kustomization
+}
+
+fn checkout_deployment() -> Problem {
+    let mut deployment = problem(
+        "prod-us-east",
+        Status::Err,
+        ("Deployment", "payments/checkout-api"),
+        (
+            "ProgressDeadlineExceeded",
+            "ReplicaSet \"checkout-api-7f9c6d\" has timed out progressing.",
+            "Progressing=False",
+        ),
+        3 * HOUR,
+    );
+    deployment.events = vec![
+        event(
+            Status::Err,
+            "BackOff",
+            "Back-off restarting failed container api in pod checkout-api-7f9c6d-x2lqp",
+            2 * MINUTE,
+        ),
+        event(
+            Status::Ok,
+            "ScalingReplicaSet",
+            "Scaled up replica set checkout-api-7f9c6d to 3 from 2",
+            3 * HOUR,
+        ),
+    ];
+    deployment
+}
+
+fn problems() -> Vec<Problem> {
+    vec![
+        payments_kustomization(),
+        checkout_deployment(),
         problem(
             "prod-us-east",
             Status::Warn,
-            "Pod",
-            "ml/ml-batch-5c7f-9kq2d",
-            "FailedScheduling: 0/14 nodes available, insufficient nvidia.com/gpu",
+            ("Pod", "ml/ml-batch-5c7f-9kq2d"),
+            (
+                "FailedScheduling",
+                "0/14 nodes are available: 4 Insufficient nvidia.com/gpu, 10 node(s) didn't match Pod's node affinity/selector.",
+                "PodScheduled=False",
+            ),
             6 * MINUTE,
         ),
         problem(
             "prod-us-east",
             Status::Warn,
-            "Pod",
-            "monitoring/grafana-6b8d9-tw4mn",
-            "FailedMount: configmap \"dashboards\" not found",
+            ("Pod", "monitoring/grafana-6b8d9-tw4mn"),
+            (
+                "FailedMount",
+                "MountVolume.SetUp failed for volume \"dashboards\" : configmap \"dashboards\" not found",
+                "ContainersReady=False",
+            ),
             18 * MINUTE,
         ),
         problem(
             "prod-us-east",
             Status::Warn,
-            "Node",
-            "ip-10-4-31-12",
-            "Cordoned (SchedulingDisabled)",
+            ("Node", "ip-10-4-31-12"),
+            ("SchedulingDisabled", "spec.unschedulable: true", ""),
             42 * MINUTE,
         ),
         problem(
             "prod-eu-west",
             Status::Suspended,
-            "Kustomization",
-            "flux-system/apps-payments",
-            "Suspended · 2 commits behind fleet-infra/main",
+            ("Kustomization", "flux-system/apps-payments"),
+            ("Suspended", "spec.suspend: true", ""),
             2 * DAY,
         ),
         problem(
             "prod-eu-west",
             Status::Warn,
-            "HPA",
-            "web/web-frontend",
-            "At max replicas (12/12) for 25m",
+            ("HorizontalPodAutoscaler", "web/web-frontend"),
+            (
+                "TooManyReplicas",
+                "the desired replica count is more than the maximum replica count",
+                "ScalingLimited=True",
+            ),
             25 * MINUTE,
         ),
         problem(
             "staging",
             Status::Warn,
-            "HelmRelease",
-            "monitoring/kube-prometheus-stack",
-            "Upgrade to 62.7.0 retrying (2/3): context deadline exceeded",
+            ("HelmRelease", "monitoring/kube-prometheus-stack"),
+            (
+                "UpgradeFailed",
+                "Helm upgrade failed for release monitoring/kube-prometheus-stack with chart kube-prometheus-stack@62.7.0: context deadline exceeded",
+                "Ready=False",
+            ),
             9 * MINUTE,
         ),
         problem(
             "staging",
             Status::Warn,
-            "Pod",
-            "search/search-indexer-0",
-            "Readiness probe failed: HTTP 503",
+            ("Pod", "search/search-indexer-0"),
+            (
+                "Unhealthy",
+                "Readiness probe failed: HTTP probe failed with statuscode: 503",
+                "Ready=False",
+            ),
             11 * MINUTE,
         ),
         problem(
             "qa-gke",
             Status::Err,
-            "Cluster",
-            "qa-gke",
-            "Credentials expired (gke-gcloud-auth-plugin) · run gcloud auth login",
+            ("Cluster", "qa-gke"),
+            (
+                "Unauthorized",
+                "getting credentials: exec: executable gke-gcloud-auth-plugin failed with exit code 1",
+                "connection",
+            ),
             DAY,
         ),
     ]

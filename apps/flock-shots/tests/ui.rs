@@ -861,6 +861,26 @@ fn two_pane_splits_resize_from_their_divider_and_remember_the_width() -> anyhow:
 }
 
 #[test]
+fn fleet_problems_filter_by_severity_and_open_the_inspected_object() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::FleetProblems)?;
+    assert_eq!(ui.state().location().page, Page::Problems);
+    assert!(ui.bounds("fleet-problem-pane").is_some());
+    assert!(ui.bounds("error-block-0").is_some());
+    let idle = ui.bounds("fleet-problem-filter-field");
+    ui.click("fleet-problem-filter-chips-3")?;
+    assert_eq!(ui.bounds("fleet-problem-filter-field"), idle);
+    assert!(ui.bounds("fleet-problems-row-2").is_none());
+    ui.click("fleet-problems-row-1")?;
+    ui.click("fleet-problem-open")?;
+    let location = ui.state().location().clone();
+    assert_eq!(
+        location.flux_object.map(|key| key.name),
+        Some("apps-payments".to_owned())
+    );
+    Ok(())
+}
+
+#[test]
 fn events_namespace_choice_is_kept_per_cluster_in_preferences() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Events)?;
     let cluster = ui
@@ -2878,7 +2898,6 @@ fn the_cluster_overview_title_carries_no_status_badge() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     assert_eq!(ui.state().location().page, Page::ClusterOverview);
     assert!(ui.bounds("overview-settings").is_some());
-    assert!(ui.bounds("page-cluster-state").is_none());
     assert!(ui.bounds("page-note").is_none());
     Ok(())
 }

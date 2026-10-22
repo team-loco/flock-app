@@ -200,8 +200,8 @@ impl Shell {
         }
         let page = self.state.location().page;
         match page {
-            Page::Overview => Some(screens.flock.read(cx).list_focus(page, cx)),
-            Page::Problems => Some(screens.flock.read(cx).list_focus(page, cx)),
+            Page::Overview => Some(screens.flock.read(cx).list_focus(cx)),
+            Page::Problems => Some(screens.problems.read(cx).list_focus(cx)),
             Page::Changes => Some(screens.changes.read(cx).list_focus(cx)),
             Page::FluxEvents => Some(screens.flux_events.read(cx).list_focus(cx)),
             Page::ClusterSettings => Some(screens.settings.read(cx).list_focus(cx)),

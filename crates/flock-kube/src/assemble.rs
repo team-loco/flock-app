@@ -110,9 +110,10 @@ pub fn cluster(
     let pods = handle.objects::<Pod>();
     let nodes = handle.objects::<Node>();
     let objects = flux.unwrap_or_default();
-    let mut problems = pod_problems(id, &pods, now);
-    problems.extend(node_problems(id, &nodes, now));
-    problems.extend(flux::problems(id, objects));
+    let events = handle.objects::<Event>();
+    let mut problems = pod_problems(id, &pods, &events, now);
+    problems.extend(node_problems(id, &nodes, &events, now));
+    problems.extend(flux::problems(id, objects, &events, now));
     problems.extend(connection_problem(id, &connection));
     let flux_counts = flux.map(flux::counts).unwrap_or_default();
     let percents = extras.ring.latest().map(|s| s.percents());
@@ -125,7 +126,6 @@ pub fn cluster(
         revision: flux::revision(objects),
     });
     let index = PodIndex::build(&pods, now);
-    let events = handle.objects::<Event>();
     let facts = Facts {
         problems: problem_counts(&problems),
         metrics,

@@ -64,7 +64,7 @@ pub use changes::ChangesLog;
 pub use cluster::ClusterDetail;
 pub use compare::Comparison;
 pub use diagnosis::{Condition, Diagnosis};
-pub use flock::{ClusterSummary, Snapshot};
+pub use flock::{ClusterSummary, Connection, Snapshot};
 pub use flux::{FluxAction, FluxKey, FluxKind, FluxObject, FluxPage};
 pub use gitops::GitOps;
 pub use home::FlockHome;

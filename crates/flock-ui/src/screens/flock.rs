@@ -1,6 +1,9 @@
 use flock_core::changes::{ChangesLog, Commit, Lane, outcome_label};
+use flock_core::filter::TextFilter;
 use flock_core::home::{Problem, Severity, group_problems, problem_counts};
-use flock_core::{ClusterId, ClusterSummary, Command, Counts, FlockHome, Page, Snapshot, Status};
+use flock_core::{
+    ClusterId, ClusterSummary, Command, Connection, Counts, FlockHome, Page, Snapshot, Status,
+};
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement,
     ParentElement, Pixels, Render, SharedString, Styled, Subscription, Window, div,
@@ -9,8 +12,8 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    Column, EmptyState, Link, RawMessage, SectionHeader, Segmented, Skeleton, StatusGlyph,
-    StatusText, Table, TableEvent,
+    Column, EmptyState, Link, RawMessage, SectionHeader, Segmented, Skeleton, StatusGlyph, Table,
+    TableEvent,
 };
 use crate::screens::new_tab_item;
 use crate::shell::switcher::{Run, cluster_items};
@@ -73,7 +76,6 @@ pub struct FlockScreen {
     clusters: Vec<ClusterSummary>,
     lanes: Vec<Lane>,
     severity: Severity,
-    problems_only: bool,
     cluster_table: Entity<Table<ClusterSummary>>,
     problem_table: Entity<Table<ProblemRow>>,
     commit_table: Entity<Table<Commit>>,
@@ -83,11 +85,8 @@ pub struct FlockScreen {
 impl EventEmitter<Command> for FlockScreen {}
 
 impl FlockScreen {
-    pub fn list_focus(&self, page: Page, cx: &gpui::App) -> gpui::FocusHandle {
-        match page {
-            Page::Problems => gpui::Focusable::focus_handle(&self.problem_table, cx),
-            _ => gpui::Focusable::focus_handle(&self.cluster_table, cx),
-        }
+    pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+        gpui::Focusable::focus_handle(&self.cluster_table, cx)
     }
 
     pub fn new(cx: &mut Context<Self>) -> Self {
@@ -140,7 +139,6 @@ impl FlockScreen {
             clusters: Vec::new(),
             lanes: Vec::new(),
             severity: Severity::All,
-            problems_only: false,
             cluster_table,
             problem_table,
             commit_table,
@@ -167,11 +165,6 @@ impl FlockScreen {
         self.refresh_problems(cx);
     }
 
-    pub fn set_page(&mut self, page: Page, cx: &mut Context<Self>) {
-        self.problems_only = page == Page::Problems;
-        cx.notify();
-    }
-
     fn set_severity(&mut self, severity: Severity, cx: &mut Context<Self>) {
         self.severity = severity;
         self.refresh_problems(cx);
@@ -194,16 +187,16 @@ impl FlockScreen {
 
     fn problems_section(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         let totals = problem_counts(&self.home.problems);
-        let selected = Severity::ALL
+        let selected = Severity::OVERVIEW
             .iter()
             .position(|s| *s == self.severity)
             .unwrap_or_default();
-        let filter = Severity::ALL
+        let filter = Severity::OVERVIEW
             .iter()
             .fold(Segmented::new("severity"), |seg, s| seg.option(s.label()))
             .selected(selected)
             .on_select(cx.listener(|this, ix: &usize, _, cx| {
-                let severity = Severity::ALL.get(*ix).copied().unwrap_or_default();
+                let severity = Severity::OVERVIEW.get(*ix).copied().unwrap_or_default();
                 this.set_severity(severity, cx);
             }));
         div()
@@ -260,9 +253,6 @@ impl Render for FlockScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
         let problems = self.problems_section(&palette, cx).into_any_element();
-        if self.problems_only {
-            return div().flex().flex_col().child(problems);
-        }
         let clusters = self.clusters_section().into_any_element();
         let changes = self.changes_section(&palette, cx);
         div()
@@ -321,7 +311,7 @@ fn problem_rows(
     severity: Severity,
     clusters: &[ClusterSummary],
 ) -> Vec<ProblemRow> {
-    group_problems(problems, severity)
+    group_problems(problems, severity, &TextFilter::default())
         .into_iter()
         .flat_map(|group| {
             let name = clusters
@@ -422,10 +412,19 @@ fn cluster_columns() -> Vec<Column<ClusterSummary>> {
                 .into_any_element()
         })
         .flex(CLUSTER_NAME_WEIGHT, CLUSTER_NAME_MIN),
-        Column::new("State", |c: &ClusterSummary, _| {
-            StatusText::new(c.status, c.state.clone()).into_any_element()
+        Column::new("Connection", |c: &ClusterSummary, palette| {
+            let connection = c.connection();
+            let color = if connection == Connection::AuthExpired {
+                palette.err
+            } else {
+                palette.mute
+            };
+            text(connection.label(), color)
         })
-        .fit_status_by(|c: &ClusterSummary| c.state.clone().into())
+        .fit_by(
+            |c: &ClusterSummary| c.connection().label().into(),
+            Pixels::ZERO,
+        )
         .auto(CLUSTER_STATE_MIN, CLUSTER_STATE_MAX),
         Column::new("Version", |c: &ClusterSummary, palette| {
             text(version_label(c), palette.fg2)
@@ -692,8 +691,11 @@ mod tests {
                 namespace: Some("search".into()),
                 name: "search-indexer-0".into(),
             },
+            reason: String::new(),
             message: String::new(),
+            condition: String::new(),
             age: std::time::Duration::ZERO,
+            events: Vec::new(),
         };
         let rows = problem_rows(&[problem.clone(), problem], Severity::All, &[]);
         let shape: Vec<bool> = rows
