@@ -158,6 +158,7 @@ fn schedule(input: &mpsc::Sender<Input>, next: Input) {
 }
 
 pub fn snapshot() -> Snapshot {
+    let prod_pods = pods::pods();
     let home = home::flock_home();
     let flock_nav = BTreeMap::from([
         (Page::Problems, problems_badge(&home.problems)),
@@ -212,7 +213,10 @@ pub fn snapshot() -> Snapshot {
         home,
         resources: resources::resources(),
         changes: changes::log(),
-        details: BTreeMap::from([(ClusterId::new(PROD_US_EAST), detail::prod_us_east())]),
+        details: BTreeMap::from([(
+            ClusterId::new(PROD_US_EAST),
+            detail::prod_us_east(&prod_pods),
+        )]),
         pages: BTreeMap::new(),
         gitops: gitops::gitops(),
         flux: flux::objects(),
@@ -221,7 +225,7 @@ pub fn snapshot() -> Snapshot {
         loco: loco::clusters(),
         comparisons: compare::comparisons(),
         catalog: settings::catalog(),
-        pods: pods::pods(),
+        pods: prod_pods,
         forwards: Vec::new(),
         crds: BTreeMap::from([(ClusterId::new(PROD_US_EAST), crds::definitions())]),
         custom: crds::objects(&ClusterId::new(PROD_US_EAST)),
@@ -360,7 +364,7 @@ fn prod_us_east() -> ClusterSummary {
         (Page::HelmReleases, Counts::total(9)),
         (Page::Sources, Counts::total(4)),
     ]);
-    summary.nav.extend(detail::prod_us_east().nav());
+    summary.nav.extend(detail::prod_us_east(&[]).nav());
     summary
 }
 
@@ -471,7 +475,7 @@ mod tests {
     fn prod_us_east_keeps_the_design_data() {
         let snapshot = snapshot();
         let prod = ClusterId::new(PROD_US_EAST);
-        let mut expected = detail::prod_us_east();
+        let mut expected = detail::prod_us_east(&pods::pods());
         expected.overview.tops = flock_core::pod_tops::PodTops::of(&pods::pods());
         assert_eq!(snapshot.detail(&prod), Some(&expected));
         let mut summary = snapshot.cluster(&prod).cloned();

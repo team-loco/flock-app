@@ -10,9 +10,12 @@ use flock_core::control_plane::{
 use flock_core::events::Event;
 use flock_core::expiry::{Expiring, SupportEnd};
 use flock_core::home::Problem;
-use flock_core::nodes::{CONDITION_TRUE, Node, NodePod, READY_CONDITION, Usage, state_label};
+use flock_core::nodes::{
+    CONDITION_TRUE, Node, NodePod, READY_CONDITION, TOP_PODS, Usage, state_label,
+};
 use flock_core::overview::{Commitment, NetworkFacts, Overview, PodPhases, TimeRange, Utilization};
 use flock_core::pod_tops::PodTops;
+use flock_core::pods::Pod;
 use flock_core::{ClusterDetail, ClusterId, Counts, ResourceRef, Status, Uid};
 
 use crate::lists;
@@ -25,21 +28,12 @@ const NODE_CPU: f32 = 8.;
 const GENERAL_MEMORY: f32 = 36.;
 const GPU_MEMORY: f32 = 40.;
 const POD_CAPACITY: u32 = 110;
+const MILLIS_PER_CORE: f32 = 1000.;
+const MIB_PER_GIB: f32 = 1024.;
 const KUBELET: &str = "v1.31.2-eks-7f9249a";
 const GPU_KUBELET: &str = "v1.30.4-eks-a737599";
 const CPU_LIMIT_RATIO: f32 = 1.4;
 const MEMORY_LIMIT_RATIO: f32 = 1.2;
-const GENERAL_PODS: [(&str, &str, f32, f32); 5] = [
-    ("search-indexer-0", "search", 2., 4.),
-    ("prometheus-k8s-0", "monitoring", 1.5, 8.),
-    ("payments-db-0", "payments", 1., 4.),
-    ("payments-worker-5d8b-7hx2c", "payments", 0.5, 0.5),
-    ("coredns-5d78c9869d-8hjvq", "kube-system", 0.1, 0.07),
-];
-const GPU_PODS: [(&str, &str, f32, f32); 2] = [
-    ("ml-batch-5c7f-9kq2d", "ml", 6., 24.),
-    ("aws-node-7kx2p", "kube-system", 0.03, 0.03),
-];
 const OS_IMAGE: &str = "Amazon Linux 2023.5.20240916";
 const EVENT_FIRST_AGE: Duration = Duration::from_secs(3600);
 const BAR_SEED: u64 = 11;
@@ -70,11 +64,11 @@ pub fn days(n: u64) -> Duration {
     Duration::from_secs(n * DAY)
 }
 
-pub fn prod_us_east() -> ClusterDetail {
+pub fn prod_us_east(pods: &[Pod]) -> ClusterDetail {
     let resources = lists::prod_us_east();
     ClusterDetail {
         overview: overview(),
-        nodes: nodes(),
+        nodes: nodes(pods),
         namespaces: namespaces(),
         events: events(),
         resources,
@@ -414,7 +408,6 @@ struct NodeSeed {
     gpu: bool,
     cpu: f32,
     memory: f32,
-    pods: u32,
     age_days: u64,
     requests: (f32, f32),
 }
@@ -426,7 +419,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 5.2,
         memory: 23.,
-        pods: 34,
         age_days: 34,
         requests: (0.74, 0.66),
     },
@@ -436,7 +428,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 6.1,
         memory: 26.,
-        pods: 38,
         age_days: 34,
         requests: (0.94, 0.81),
     },
@@ -446,7 +437,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 4.8,
         memory: 21.,
-        pods: 31,
         age_days: 34,
         requests: (0.7, 0.62),
     },
@@ -456,7 +446,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 5.9,
         memory: 25.,
-        pods: 36,
         age_days: 34,
         requests: (0.86, 0.7),
     },
@@ -466,7 +455,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 4.4,
         memory: 20.,
-        pods: 30,
         age_days: 34,
         requests: (0.68, 0.6),
     },
@@ -476,7 +464,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 5.0,
         memory: 22.,
-        pods: 33,
         age_days: 34,
         requests: (0.72, 0.64),
     },
@@ -486,7 +473,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 5.6,
         memory: 24.,
-        pods: 35,
         age_days: 34,
         requests: (0.83, 0.66),
     },
@@ -496,7 +482,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 4.9,
         memory: 21.,
-        pods: 30,
         age_days: 12,
         requests: (0.66, 0.58),
     },
@@ -506,7 +491,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 6.3,
         memory: 28.,
-        pods: 37,
         age_days: 34,
         requests: (0.97, 0.77),
     },
@@ -516,7 +500,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 1.2,
         memory: 8.,
-        pods: 6,
         age_days: 34,
         requests: (0.22, 0.18),
     },
@@ -526,7 +509,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 5.4,
         memory: 23.,
-        pods: 32,
         age_days: 34,
         requests: (0.75, 0.67),
     },
@@ -536,7 +518,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: false,
         cpu: 4.7,
         memory: 21.,
-        pods: 30,
         age_days: 12,
         requests: (0.69, 0.61),
     },
@@ -546,7 +527,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: true,
         cpu: 4.5,
         memory: 25.,
-        pods: 20,
         age_days: 9,
         requests: (0.96, 0.71),
     },
@@ -556,7 +536,6 @@ const NODES: [NodeSeed; 14] = [
         gpu: true,
         cpu: 4.4,
         memory: 25.,
-        pods: 20,
         age_days: 9,
         requests: (0.96, 0.71),
     },
@@ -568,11 +547,55 @@ const DISK_PER_POD: f32 = 0.85;
 const DISK_UNAVAILABLE: &str = "ip-10-4-41-66";
 const CORDONED: &str = "ip-10-4-31-12";
 
-pub fn nodes() -> Vec<Node> {
-    NODES.iter().map(node).collect()
+pub fn schedulable_node_names() -> Vec<String> {
+    NODES
+        .iter()
+        .filter(|seed| seed.name != CORDONED)
+        .map(|seed| seed.name.to_owned())
+        .collect()
 }
 
-fn node(seed: &NodeSeed) -> Node {
+pub fn nodes(pods: &[Pod]) -> Vec<Node> {
+    NODES.iter().map(|seed| node(seed, pods)).collect()
+}
+
+fn node_pods<'a>(pods: &'a [Pod], name: &str) -> Vec<&'a Pod> {
+    pods.iter()
+        .filter(|pod| pod.node.as_deref() == Some(name))
+        .collect()
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn scaled(value: u32, per_unit: f32) -> f32 {
+    value as f32 / per_unit
+}
+
+fn top_pods(on_node: &[&Pod]) -> Vec<NodePod> {
+    let mut top: Vec<NodePod> = on_node
+        .iter()
+        .map(|pod| {
+            let usage = pod.usage.unwrap_or_default();
+            NodePod {
+                name: pod.name.clone(),
+                namespace: pod.namespace.clone(),
+                cpu: scaled(usage.cpu_millis, MILLIS_PER_CORE),
+                memory: scaled(usage.memory_mib, MIB_PER_GIB),
+            }
+        })
+        .collect();
+    top.sort_by(|a, b| {
+        b.cpu
+            .total_cmp(&a.cpu)
+            .then(b.memory.total_cmp(&a.memory))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    top.truncate(TOP_PODS);
+    top
+}
+
+fn node(seed: &NodeSeed, pods: &[Pod]) -> Node {
+    let on_node = node_pods(pods, seed.name);
+    let pod_count = u32::try_from(on_node.len()).unwrap_or(u32::MAX);
     let schedulable = seed.name != CORDONED;
     let (instance, memory, group, kubelet) = if seed.gpu {
         (GPU, GPU_MEMORY, "gpu", GPU_KUBELET)
@@ -588,16 +611,7 @@ fn node(seed: &NodeSeed) -> Node {
         requests: memory_request,
         limits: memory_request * MEMORY_LIMIT_RATIO,
     };
-    let top: &[(&str, &str, f32, f32)] = if seed.gpu { &GPU_PODS } else { &GENERAL_PODS };
-    let top_pods = top
-        .iter()
-        .map(|&(name, namespace, cpu, memory)| NodePod {
-            name: name.into(),
-            namespace: namespace.into(),
-            cpu,
-            memory,
-        })
-        .collect();
+    let top_pods = top_pods(&on_node);
     let mut taints = Vec::new();
     if seed.gpu {
         taints.push(GPU_TAINT.to_owned());
@@ -609,7 +623,7 @@ fn node(seed: &NodeSeed) -> Node {
         Status::Warn
     };
     let disk = (seed.name != DISK_UNAVAILABLE).then(|| Usage {
-        used: DISK_BASE + f32::from(u16::try_from(seed.pods).unwrap_or_default()) * DISK_PER_POD,
+        used: DISK_BASE + f32::from(u16::try_from(pod_count).unwrap_or_default()) * DISK_PER_POD,
         allocatable: NODE_DISK,
     });
     let internal_ip = seed.name.trim_start_matches("ip-").replace('-', ".");
@@ -636,7 +650,7 @@ fn node(seed: &NodeSeed) -> Node {
         disk,
         cpu_commitment,
         memory_commitment,
-        pods: seed.pods,
+        pods: pod_count,
         pod_capacity: POD_CAPACITY,
         age: days(seed.age_days),
         conditions: conditions(),
@@ -1143,8 +1157,34 @@ mod tests {
     }
 
     #[test]
+    fn every_node_pod_count_is_the_number_of_demo_pods_on_it() {
+        let pods = crate::pods::pods();
+        let nodes = nodes(&pods);
+        assert!(nodes.iter().any(|node| node.pods > 0));
+        for node in &nodes {
+            let on_node = pods
+                .iter()
+                .filter(|pod| pod.node.as_deref() == Some(node.name.as_str()))
+                .count();
+            assert_eq!(node.pods as usize, on_node, "{}", node.name);
+            assert!(node.top_pods.len() <= TOP_PODS);
+            for top in &node.top_pods {
+                assert!(
+                    pods.iter()
+                        .any(|pod| pod.node.as_deref() == Some(node.name.as_str())
+                            && pod.name == top.name
+                            && pod.namespace == top.namespace),
+                    "{} on {}",
+                    top.name,
+                    node.name
+                );
+            }
+        }
+    }
+
+    #[test]
     fn prod_us_east_matches_design_overview() {
-        let detail = prod_us_east();
+        let detail = prod_us_east(&crate::pods::pods());
         assert_eq!(detail.cpu().amount().labelled(), "68.40 / 112.00 cores");
         assert_eq!(percent(detail.cpu().fraction()), "61%");
         assert_eq!(detail.memory().amount().labelled(), "312.00 / 512.00 GiB");
@@ -1153,8 +1193,6 @@ mod tests {
         assert_eq!((nodes.total, nodes.ready, nodes.cordoned), (14, 13, 1));
         assert_eq!(nodes.pod_capacity, 1540);
         assert_eq!(detail.overview.pods.total(), 412);
-        let node_pods: u32 = detail.nodes.iter().map(|n| n.pods).sum();
-        assert_eq!(node_pods, 412);
         let namespace_pods: u32 = detail.namespaces.iter().map(|n| n.pods).sum();
         assert_eq!(namespace_pods, 412);
         assert_eq!(detail.namespaces.len(), 23);
