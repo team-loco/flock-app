@@ -81,9 +81,15 @@ pub(crate) fn count(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
 }
 
+pub fn is_counted(pod: &Pod) -> bool {
+    let phase = pod.status.as_ref().and_then(|s| s.phase.as_deref());
+    phase != Some(POD_SUCCEEDED)
+}
+
 pub fn pod_counts(pods: &[Arc<Pod>]) -> Counts {
-    let mut counts = Counts::total(count(pods.len()));
-    for pod in pods {
+    let counted = || pods.iter().filter(|pod| is_counted(pod));
+    let mut counts = Counts::total(count(counted().count()));
+    for pod in counted() {
         match pod_health(pod) {
             PodHealth::Failing => counts.err += 1,
             PodHealth::Warning => counts.warn += 1,
@@ -280,7 +286,7 @@ mod tests {
         assert_eq!(pod_health(&done), PodHealth::Healthy);
         assert_eq!(pod_health(&pod(&ready())), PodHealth::Healthy);
         let counts = pod_counts(&[crash, pending, done, failed, pod(&ready())]);
-        assert_eq!(counts, Counts::total(5).with_err(2).with_warn(1));
+        assert_eq!(counts, Counts::total(4).with_err(2).with_warn(1));
     }
 
     #[test]
