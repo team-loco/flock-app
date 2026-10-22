@@ -81,6 +81,7 @@ pub const SIDEBAR: Pixels = px(200.);
 pub const SWITCHER_WIDTH: Pixels = px(290.);
 pub const SWITCHER_GEAR: Pixels = px(26.);
 pub const SWITCHER_LIST: Pixels = px(420.);
+pub const SWITCHER_MENU: Pixels = px(190.);
 pub const PAGE_HEADER: Pixels = px(44.);
 pub const TAB_CLOSE: Pixels = px(14.);
 pub const SPLIT_BUTTON: Pixels = px(32.);

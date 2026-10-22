@@ -50,7 +50,7 @@ k8s-openapi = { version = "0.28.0", features = ["v1_36"] }
 kube = { version = "4.2.0", features = ["runtime", "derive", "ws", "jsonpatch"] }
 notify = "8.2.0"
 objc2 = "0.6.5"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSMenu", "NSMenuItem", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSImage", "NSCell", "NSColor", "NSFont", "NSFontDescriptor", "NSParagraphStyle", "NSText", "NSAttributedString", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSAccessibilityProtocols", "NSMenu", "NSMenuItem", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSView", "NSResponder", "NSImage", "NSCell", "NSColor", "NSFont", "NSFontDescriptor", "NSParagraphStyle", "NSText", "NSAttributedString", "objc2-core-foundation"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSObject", "NSString", "NSArray", "NSAttributedString", "NSData", "NSDictionary", "NSGeometry", "NSRange"] }
 semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }

@@ -14,8 +14,8 @@ use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
 use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
     ActiveTheme, COLLAPSE, FONT_MONO, ICON, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, ROW_NAV,
-    RULE, SIDEBAR, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_UI,
-    TITLE_ROW, TRAFFIC_LIGHTS_INSET,
+    RULE, SIDEBAR, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_LABEL, TEXT_UI, TITLE_ROW,
+    TRAFFIC_LIGHTS_INSET,
 };
 
 const COLLAPSE_TOOLTIP: &str = "Collapse sidebar  ⌘B";
@@ -241,23 +241,25 @@ fn section_rows(
 }
 
 fn badges(counts: &Counts, row: &str, palette: &Palette) -> Vec<AnyElement> {
-    let flagged = counts.badges().into_iter().map(|(status, n)| {
-        let selector = format!("{row}-{status:?}").to_lowercase();
-        let text = format!("{} {n}", status.glyph());
-        badge(selector, text, palette.status(status))
-    });
-    let total = counts
-        .total
-        .map(|n| badge(format!("{row}-total"), n.to_string(), palette.mute));
-    flagged.chain(total).collect()
+    counts
+        .badges()
+        .into_iter()
+        .map(|(status, n)| {
+            let selector = format!("{row}-{status:?}").to_lowercase();
+            let text = format!("{} {n}", status.glyph());
+            badge(selector, text, palette.status(status))
+        })
+        .collect()
 }
 
 fn badge(selector: String, text: String, color: Hsla) -> AnyElement {
     div()
         .debug_selector(move || selector)
-        .ml(SPACE_4)
+        .flex_none()
+        .ml(SPACE_3)
+        .whitespace_nowrap()
         .font_family(FONT_MONO)
-        .text_size(TEXT_SMALL)
+        .text_size(TEXT_LABEL)
         .text_color(color)
         .child(status_symbols(text))
         .into_any_element()

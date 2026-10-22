@@ -1,46 +1,46 @@
-use crate::{ClusterId, ClusterSummary, Counts, Snapshot, Status};
+use crate::overview::plural;
+use crate::{ClusterId, ClusterSummary, Snapshot};
 
 const PAUSE: &str = "Pause notifications";
 const RESUME: &str = "Resume notifications";
+const BRAND: &str = "Flock";
+const LABEL_ONE: &str = "cluster connected";
+const LABEL_MANY: &str = "clusters connected";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClusterItem {
     pub id: ClusterId,
     pub name: String,
-    pub status: Status,
-    pub meta: String,
-    pub meta_status: Status,
     pub available: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuBar {
-    pub badge: String,
-    pub dimmed: bool,
+    pub connected: usize,
     pub clusters: Vec<ClusterItem>,
     pub paused: bool,
 }
 
 impl MenuBar {
     pub fn new(snapshot: &Snapshot, paused: bool) -> Self {
-        let clusters = &snapshot.clusters;
-        let counts = clusters
-            .iter()
-            .map(cluster_counts)
-            .fold(Counts::default(), |sum, c| sum + c);
-        let badge = if counts.err > 0 {
-            counts.err.to_string()
-        } else if counts.warn > 0 {
-            counts.warn.to_string()
-        } else {
-            String::new()
-        };
         Self {
-            badge,
-            dimmed: !clusters.iter().any(ClusterSummary::is_connected),
-            clusters: clusters.iter().map(item).collect(),
+            connected: snapshot.connected(),
+            clusters: snapshot.clusters.iter().map(item).collect(),
             paused,
         }
+    }
+
+    pub fn badge(&self) -> String {
+        self.connected.to_string()
+    }
+
+    pub const fn dimmed(&self) -> bool {
+        self.connected == 0
+    }
+
+    pub fn accessibility_label(&self) -> String {
+        let connected = plural(self.connected, LABEL_ONE, LABEL_MANY);
+        format!("{BRAND}, {connected}")
     }
 
     pub const fn pause_title(&self) -> &'static str {
@@ -48,31 +48,10 @@ impl MenuBar {
     }
 }
 
-fn cluster_counts(cluster: &ClusterSummary) -> Counts {
-    let problems = cluster.problems;
-    let err = match cluster.status {
-        Status::Err => problems.err.max(1),
-        _ => problems.err,
-    };
-    let warn = match cluster.status {
-        Status::Warn => problems.warn.max(1),
-        _ => problems.warn,
-    };
-    Counts::default().with_err(err).with_warn(warn)
-}
-
 fn item(cluster: &ClusterSummary) -> ClusterItem {
-    let badges = cluster.problems.badges();
-    let parts: Vec<String> = badges
-        .iter()
-        .map(|(status, n)| format!("{}{n}", status.glyph()))
-        .collect();
     ClusterItem {
         id: cluster.id.clone(),
         name: cluster.name.clone(),
-        status: cluster.status,
-        meta: parts.join(" "),
-        meta_status: cluster.problems.status(),
         available: cluster.is_connected(),
     }
 }
@@ -80,14 +59,15 @@ fn item(cluster: &ClusterSummary) -> ClusterItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Counts, Status};
     use std::collections::BTreeMap;
 
-    fn cluster(name: &str, status: Status, state: &str, problems: Counts) -> ClusterSummary {
+    fn cluster(name: &str, status: Status, problems: Counts) -> ClusterSummary {
         ClusterSummary {
             id: ClusterId::new(name),
             name: name.into(),
             status,
-            state: state.into(),
+            state: String::new(),
             distro: String::new(),
             region: String::new(),
             version: None,
@@ -102,83 +82,60 @@ mod tests {
         let none = Counts::default();
         Snapshot {
             clusters: vec![
-                cluster(
-                    "prod-us-east",
-                    Status::Err,
-                    "Errors",
-                    none.with_err(2).with_warn(3),
-                ),
-                cluster("prod-eu-west", Status::Ok, "Healthy", none),
-                cluster("staging", Status::Warn, "Warnings", none.with_warn(2)),
-                cluster("qa-gke", Status::Err, "Auth expired", none),
-                cluster("edge-k3s", Status::Offline, "Offline", none),
+                cluster("prod-us-east", Status::Err, none.with_err(2).with_warn(3)),
+                cluster("prod-eu-west", Status::Ok, none),
+                cluster("staging", Status::Warn, none.with_warn(2)),
+                cluster("edge-k3s", Status::Offline, none),
             ],
             ..Snapshot::default()
         }
     }
 
-    fn metas(menu: &MenuBar) -> Vec<(&str, &str, bool)> {
-        menu.clusters
-            .iter()
-            .map(|c| (c.name.as_str(), c.meta.as_str(), c.available))
-            .collect()
-    }
-
     #[test]
-    fn clusters_list_in_order_with_problem_counts_and_no_state_text() {
+    fn rows_carry_only_the_name_and_whether_it_is_connected() {
         let menu = MenuBar::new(&design_fleet(), false);
+        let rows: Vec<(&str, bool)> = menu
+            .clusters
+            .iter()
+            .map(|c| (c.name.as_str(), c.available))
+            .collect();
         assert_eq!(
-            metas(&menu),
+            rows,
             vec![
-                ("prod-us-east", "✕2 ▲3", true),
-                ("prod-eu-west", "", true),
-                ("staging", "▲2", true),
-                ("qa-gke", "", true),
-                ("edge-k3s", "", false),
+                ("prod-us-east", true),
+                ("prod-eu-west", true),
+                ("staging", true),
+                ("edge-k3s", false),
             ]
         );
-        assert_eq!(menu.clusters[0].meta_status, Status::Err);
-        assert_eq!(menu.clusters[2].meta_status, Status::Warn);
-        assert_eq!(menu.clusters[4].status, Status::Offline);
         assert_eq!(menu.clusters[0].id, ClusterId::new("prod-us-east"));
     }
 
     #[test]
-    fn badge_counts_errors_first_and_a_failing_cluster_counts_once() {
-        let mut snapshot = design_fleet();
-        assert_eq!(MenuBar::new(&snapshot, false).badge, "3");
-        snapshot.clusters.retain(|c| c.status != Status::Err);
-        assert_eq!(MenuBar::new(&snapshot, false).badge, "2");
-        snapshot.clusters.retain(|c| c.status != Status::Warn);
-        let calm = MenuBar::new(&snapshot, false);
-        assert_eq!(calm.badge, "");
-        assert!(!calm.dimmed);
+    fn badge_counts_connected_clusters_whatever_their_health() {
+        let menu = MenuBar::new(&design_fleet(), false);
+        assert_eq!(menu.badge(), "3");
+        assert!(!menu.dimmed());
+        assert_eq!(menu.accessibility_label(), "Flock, 3 clusters connected");
     }
 
     #[test]
-    fn a_cluster_missing_from_kubeconfig_is_unavailable_without_state_text() {
-        let missing = cluster(
-            "kind-loco-cluster-local",
-            Status::Offline,
-            "Not in kubeconfig",
-            Counts::default(),
-        );
-        let snapshot = Snapshot {
-            clusters: vec![missing],
-            ..Snapshot::default()
-        };
-        let menu = MenuBar::new(&snapshot, false);
-        assert_eq!(metas(&menu), vec![("kind-loco-cluster-local", "", false)]);
-    }
-
-    #[test]
-    fn icon_dims_when_no_cluster_is_reachable() {
+    fn badge_reads_zero_and_dims_when_nothing_is_connected() {
         let mut snapshot = design_fleet();
         snapshot.clusters.retain(|c| c.status == Status::Offline);
         let menu = MenuBar::new(&snapshot, false);
-        assert!(menu.dimmed);
-        assert_eq!(menu.badge, "");
-        assert!(MenuBar::new(&Snapshot::default(), false).dimmed);
+        assert_eq!(menu.badge(), "0");
+        assert!(menu.dimmed());
+        assert_eq!(menu.accessibility_label(), "Flock, 0 clusters connected");
+        assert!(MenuBar::new(&Snapshot::default(), false).dimmed());
+    }
+
+    #[test]
+    fn one_connected_cluster_reads_singular() {
+        let mut snapshot = design_fleet();
+        snapshot.clusters.truncate(1);
+        let menu = MenuBar::new(&snapshot, false);
+        assert_eq!(menu.accessibility_label(), "Flock, 1 cluster connected");
     }
 
     #[test]
