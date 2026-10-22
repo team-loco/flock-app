@@ -3450,6 +3450,8 @@ fn the_workload_menu_and_dock_follow_all_pods() -> anyhow::Result<()> {
     Ok(())
 }
 
+const FIT_FRAMES: usize = 3;
+const FIT_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
 const POD_LOGS_FOR_ITEM: &str = "pods-row-menu-item-3";
 const POD_MENU_ITEMS: [&str; 8] = [
     "pods-row-menu-item-0",
@@ -3506,7 +3508,9 @@ fn a_scrolling_pod_menu_never_cuts_an_item_at_its_bottom_edge() -> anyhow::Resul
     ui.click("pods-row-0")?;
     ui.shift_click("pods-row-1")?;
     ui.right_click("pods-row-1")?;
-    ui.settle()?;
+    for _ in 0..FIT_FRAMES {
+        ui.advance_clock(FIT_FRAME)?;
+    }
     let surface = ui
         .bounds("pods-row-menu-surface")
         .ok_or_else(|| anyhow::anyhow!("menu surface"))?;
