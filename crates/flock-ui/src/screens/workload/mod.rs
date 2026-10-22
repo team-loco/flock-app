@@ -98,6 +98,7 @@ const MAIN_ID: &str = "workload-main";
 pub struct WorkloadScreen {
     pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     target: ResourceRef,
+    cluster_name: String,
     workload: Option<Workload>,
     unavailable: bool,
     pods: Entity<Table<Pod>>,
@@ -181,6 +182,7 @@ impl WorkloadScreen {
         window.focus(&focus, cx);
         Self {
             navigation: None,
+            cluster_name: target.cluster.to_string(),
             target,
             workload: None,
             unavailable: false,
@@ -212,6 +214,13 @@ impl WorkloadScreen {
         &self.target
     }
 
+    pub fn set_cluster_name(&mut self, name: &str, cx: &mut Context<Self>) {
+        if self.cluster_name != name {
+            name.clone_into(&mut self.cluster_name);
+            cx.notify();
+        }
+    }
+
     pub fn set_compact(&mut self, compact: Option<FullView>, cx: &mut Context<Self>) {
         if self.compact.is_some() != compact.is_some() {
             cx.notify();
@@ -229,7 +238,7 @@ impl WorkloadScreen {
         let cluster = div()
             .text_size(TEXT_SMALL)
             .text_color(palette.mute)
-            .child(workload.target.cluster.to_string());
+            .child(self.cluster_name.clone());
         let header = PageHeader::new(workload.target.name.clone())
             .leading(self.navigation.clone())
             .mono()

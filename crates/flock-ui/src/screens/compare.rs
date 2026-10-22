@@ -2,6 +2,8 @@ use flock_core::changes::LineChange;
 use flock_core::compare::{Cell, Comparison, Field, SpecDiff};
 use flock_core::overview::plural;
 use flock_core::{ClusterId, Command, Page, ResourceRef, Snapshot, Status};
+use std::collections::BTreeMap;
+
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, FontWeight, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement as _,
@@ -31,6 +33,7 @@ const VERSUS: &str = " vs ";
 pub struct CompareScreen {
     pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
     resource: Option<ResourceRef>,
+    names: BTreeMap<ClusterId, String>,
     comparison: Option<Comparison>,
     confirm_on_target: bool,
     differences_only: bool,
@@ -43,6 +46,7 @@ impl CompareScreen {
         Self {
             navigation: None,
             resource: None,
+            names: BTreeMap::new(),
             comparison: None,
             confirm_on_target: true,
             differences_only: true,
@@ -56,6 +60,11 @@ impl CompareScreen {
         cx: &mut Context<Self>,
     ) {
         self.resource = resource.cloned();
+        self.names = snapshot
+            .clusters
+            .iter()
+            .map(|cluster| (cluster.id.clone(), cluster.name.clone()))
+            .collect();
         self.comparison = resource.and_then(|r| snapshot.comparison(r)).cloned();
         let target = self
             .comparison
@@ -128,7 +137,7 @@ impl CompareScreen {
             }
         };
         let needs_confirm = self.confirm_on_target;
-        let dialog = confirm_copy(spec, &target, send.clone());
+        let dialog = confirm_copy(spec, &target, &self.names, send.clone());
         Button::new("compare-apply", spec.apply_label())
             .primary()
             .on_click(move |_, window, cx| {
@@ -174,7 +183,7 @@ impl CompareScreen {
         let clusters = plural(comparison.clusters.len(), "cluster", "clusters");
         let meta = format!("{clusters}{SEPARATOR}{LIVE_NOTE}");
         let fields = comparison.visible(self.differences_only);
-        let heads = cluster_row(comparison, self.resource.as_ref(), palette, cx);
+        let heads = cluster_row(comparison, &self.names, self.resource.as_ref(), palette, cx);
         let spec = comparison
             .spec
             .as_ref()
@@ -206,7 +215,9 @@ impl CompareScreen {
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let pair = format!("{}{VERSUS}{}", spec.base, spec.other);
+        let base = cluster_label(&self.names, &spec.base);
+        let other = cluster_label(&self.names, &spec.other);
+        let pair = format!("{base}{VERSUS}{other}");
         let header = SectionHeader::new(spec.path.clone()).count(pair);
         let header = if spec.has_changes() {
             header.end(self.apply(spec, comparison, cx))
@@ -223,10 +234,7 @@ impl CompareScreen {
             div()
                 .text_size(TEXT_CONTROL)
                 .text_color(palette.mute)
-                .child(format!(
-                    "{} is identical on {} and {}.",
-                    spec.path, spec.base, spec.other
-                ))
+                .child(format!("{} is identical on {base} and {other}.", spec.path))
         });
         div().flex().flex_col().child(header).child(
             div()
@@ -236,10 +244,7 @@ impl CompareScreen {
                 .px(SPACE_8)
                 .pb(SPACE_7)
                 .children(note)
-                .child(
-                    DiffView::new("compare-diff", vec![file])
-                        .sides(spec.base.to_string(), spec.other.to_string()),
-                ),
+                .child(DiffView::new("compare-diff", vec![file]).sides(base, other)),
         )
     }
 }
@@ -247,12 +252,15 @@ impl CompareScreen {
 fn confirm_copy(
     spec: &SpecDiff,
     target: &ResourceRef,
+    names: &BTreeMap<ClusterId, String>,
     send: impl Fn(&mut gpui::App) + 'static,
 ) -> ConfirmDialog {
-    let title = format!("Apply {} value to {}", spec.other, spec.base);
+    let base = cluster_label(names, &spec.base);
+    let other = cluster_label(names, &spec.other);
+    let title = format!("Apply {other} value to {base}");
     let body = format!(
-        "{}'s {} is patched to match {}. The {} rolls out a new revision now; Flux may revert the change on its next reconcile.",
-        spec.base, spec.path, spec.other, target.kind
+        "{base}'s {} is patched to match {other}. The {} rolls out a new revision now; Flux may revert the change on its next reconcile.",
+        spec.path, target.kind
     );
     let changed: Vec<&str> = spec
         .lines
@@ -260,7 +268,7 @@ fn confirm_copy(
         .filter(|l| l.change == LineChange::Added)
         .map(|l| l.text.trim())
         .collect();
-    let detail = format!("{}{SEPARATOR}{target}", spec.base);
+    let detail = format!("{base}{SEPARATOR}{target}");
     changed.into_iter().fold(
         ConfirmDialog::new(title, body, APPLY, move |_, cx| send(cx)).detail(detail),
         ConfirmDialog::detail,
@@ -322,8 +330,13 @@ pub fn pick(comparison: &Comparison, base: &ResourceRef, cluster: &ClusterId) ->
     })
 }
 
+fn cluster_label(names: &BTreeMap<ClusterId, String>, id: &ClusterId) -> String {
+    names.get(id).cloned().unwrap_or_else(|| id.to_string())
+}
+
 fn cluster_row(
     comparison: &Comparison,
+    names: &BTreeMap<ClusterId, String>,
     base: Option<&ResourceRef>,
     palette: &Palette,
     cx: &mut Context<CompareScreen>,
@@ -349,7 +362,7 @@ fn cluster_row(
                         .gap(SPACE_4)
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(StatusGlyph::new(c.status))
-                        .child(div().truncate().child(c.cluster.to_string())),
+                        .child(div().truncate().child(cluster_label(names, &c.cluster))),
                 )
                 .child(
                     div()
@@ -480,6 +493,16 @@ mod tests {
                 other: ClusterId::new("c"),
             })
         );
+    }
+
+    #[test]
+    fn cluster_labels_read_the_display_name_and_fall_back_to_the_id() {
+        let names = BTreeMap::from([(ClusterId::new("c-7f3a"), "prod-us-east".to_owned())]);
+        assert_eq!(
+            cluster_label(&names, &ClusterId::new("c-7f3a")),
+            "prod-us-east"
+        );
+        assert_eq!(cluster_label(&names, &ClusterId::new("c-9")), "c-9");
     }
 
     #[test]

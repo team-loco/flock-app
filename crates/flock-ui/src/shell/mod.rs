@@ -813,7 +813,9 @@ impl Shell {
         let related = snapshot
             .detail(&target.cluster)
             .and_then(|detail| detail.related(&target));
+        let name = flock_core::tabs::cluster_name(&target.cluster, snapshot);
         screen.update(cx, |screen, cx| {
+            screen.set_cluster_name(&name, cx);
             screen.set_yaml(yaml, cx);
             screen.set_related(related, cx);
         });
