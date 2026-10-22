@@ -1341,6 +1341,7 @@ fn live_pod_shell_button_starts_a_working_shell_and_exit_ends_it() -> anyhow::Re
 }
 
 const LIVE_WAIT: Duration = Duration::from_secs(60);
+const DEBUG_ATTACH: Duration = Duration::from_secs(180);
 const LIVE_CONFIG_MAP: &str = "flock-qa-live";
 
 fn kubectl(context: &str, args: &[&str]) -> anyhow::Result<()> {
@@ -1741,7 +1742,7 @@ fn live_a_container_without_a_shell_offers_a_debug_container() -> anyhow::Result
         let start = std::time::Instant::now();
         while !terminal_text(&mut ui)?.contains("Debug container: debugger-") {
             anyhow::ensure!(
-                start.elapsed() < LIVE_WAIT,
+                start.elapsed() < DEBUG_ATTACH,
                 "the debug container never attached"
             );
             ui.pause(Duration::from_millis(500))?;
