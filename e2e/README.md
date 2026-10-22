@@ -66,13 +66,16 @@ Upstream charts, Git branch, container tags, and metrics-server's release URL
 follow their published defaults; an upstream change can alter the fixtures.
 The verification script catches changes that break the expected states.
 
-`mise run e2e:up` is safe to repeat on existing clusters. It deletes `Pod/apps/unschedulable` first
-when its node selector predates the scenario (pod specs are immutable), then reapplies everything.
+`mise run e2e:up` is safe to repeat on existing clusters. It sets up the three clusters in parallel,
+each logging to its own file and printing that log's tail if it fails, then runs `e2e/verify` once.
+Each cluster ends with `e2e/reset`, which deletes `Pod/apps/unschedulable` first when its node
+selector predates the scenario (pod specs are immutable), reapplies the scenario manifests, uncordons
+the control-plane node, reinstalls Loco on `flock-loco` and requests a Flux reconcile of every
+Kustomization and HelmRelease.
 
-`mise run e2e:test` is the one-command proof. It runs `e2e:up` (reusing existing
-clusters), then, with or without `--skip-up`, reapplies the scenario manifests, uncordons the
-control-plane nodes, requests a Flux reconcile of every Kustomization and HelmRelease and waits for
-`e2e/verify` (which includes `web/podinfo`) so a leftover mutation cannot fail a test. Then it runs every `FLOCK_E2E` test with and without
+`mise run e2e:test` is the one-command proof. It compiles both test builds in the background, runs
+`e2e:up` (reusing existing clusters), or with `--skip-up` runs `e2e/reset` on each cluster and then
+`e2e/verify` (which includes `web/podinfo`), so a leftover mutation cannot fail a test. Then it runs every `FLOCK_E2E` test with and without
 Loco enabled, against a temporary kubeconfig that holds only
 `kind-fleet-a`, `kind-fleet-b` and `kind-flock-loco`. Linux excludes the macOS app, headless renderer
 and UI crates; the live backend harness runs in `flock-kube` on both platforms.
