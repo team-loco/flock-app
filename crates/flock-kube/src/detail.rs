@@ -12,7 +12,7 @@ use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 
 use crate::clock::{age, between};
 use crate::conditions::conditions;
-use crate::metrics::{NodeUsage, PodUsage, Usage, cpu_millicores, parse_quantity};
+use crate::metrics::{NodeDisk, NodeUsage, PodUsage, Usage, cpu_millicores, parse_quantity};
 use crate::problems::{OwnerKey, is_active, owner_of, pod_issue};
 use crate::snapshot::{PodHealth, is_counted, node_ready, pod_health, schedulable};
 use crate::usage::{Allocatable, allocatable, cores, gib, narrow};
@@ -263,7 +263,13 @@ fn pod_capacity(node: &Node) -> u32 {
         .unwrap_or_default()
 }
 
-pub fn node(node: &Node, pods: u32, usage: Option<&Usage>, now: Timestamp) -> nodes::Node {
+pub fn node(
+    node: &Node,
+    pods: u32,
+    usage: Option<&Usage>,
+    disk: Option<&NodeDisk>,
+    now: Timestamp,
+) -> nodes::Node {
     let labels = node.metadata.labels.as_ref();
     let status = node.status.as_ref();
     let info = status.and_then(|s| s.node_info.as_ref());
@@ -316,6 +322,10 @@ pub fn node(node: &Node, pods: u32, usage: Option<&Usage>, now: Timestamp) -> no
             used: usage.map_or(0., |u| gib(u.memory_bytes)),
             allocatable: gib(capacity.memory_bytes),
         },
+        disk: disk.map(|d| nodes::Usage {
+            used: gib(d.used_bytes),
+            allocatable: gib(d.capacity_bytes),
+        }),
         cpu_commitment: Commitment::default(),
         memory_commitment: Commitment::default(),
         pods,
@@ -336,15 +346,23 @@ pub fn nodes(
     nodes: &[Arc<Node>],
     index: &PodIndex,
     usage: &[NodeUsage],
+    disks: &[NodeDisk],
     now: Timestamp,
 ) -> Vec<nodes::Node> {
     let used: HashMap<&str, &Usage> = usage.iter().map(|u| (u.name.as_str(), &u.usage)).collect();
+    let disk: HashMap<&str, &NodeDisk> = disks.iter().map(|d| (d.name.as_str(), d)).collect();
     let mut rows: Vec<nodes::Node> = nodes
         .iter()
         .map(|n| {
             let name = n.metadata.name.as_deref().unwrap_or_default();
             let pods = index.per_node.get(name).copied().unwrap_or_default();
-            let mut row = node(n, pods, used.get(name).copied(), now);
+            let mut row = node(
+                n,
+                pods,
+                used.get(name).copied(),
+                disk.get(name).copied(),
+                now,
+            );
             let (requests, limits) = index.node_resources.get(name).copied().unwrap_or_default();
             let (cpu, memory) = commitments(requests, limits, allocatable(n));
             row.cpu_commitment = cpu;
@@ -613,7 +631,7 @@ mod tests {
         ];
         let index = PodIndex::build(&pods, now());
         let workers = [worker("w1"), worker("w2"), worker("w3")];
-        let rows = nodes(&workers, &index, &[], now());
+        let rows = nodes(&workers, &index, &[], &[], now());
         assert_eq!(
             rows[0].cpu_commitment,
             Commitment {
@@ -647,7 +665,7 @@ mod tests {
             .collect();
         pods.push(pod_with_resources("elsewhere", "w2", "4", "1Gi"));
         let index = PodIndex::build(&pods, now());
-        let rows = nodes(&[worker("w1")], &index, &[], now());
+        let rows = nodes(&[worker("w1")], &index, &[], &[], now());
         let top: Vec<(&str, f32)> = rows[0]
             .top_pods
             .iter()
@@ -755,7 +773,7 @@ mod tests {
                 memory_bytes: 2. * 1_073_741_824.,
             },
         }];
-        let rows = nodes(&[worker("w1")], &index, &usage, now());
+        let rows = nodes(&[worker("w1")], &index, &usage, &[], now());
         let row = &rows[0];
         assert_eq!((row.status, row.state.as_str()), (Status::Ok, "Ready"));
         assert_eq!(row.instance_type, "linux/arm64");
@@ -769,6 +787,20 @@ mod tests {
         assert_eq!(row.age, Duration::from_secs(3600));
         assert!(row.conditions.iter().all(flock_core::Condition::is_healthy));
         assert!(row.is_ready());
+    }
+
+    #[test]
+    fn node_disk_is_measured_only_when_the_kubelet_summary_answered() {
+        let index = PodIndex::default();
+        let disks = [NodeDisk {
+            name: "w1".into(),
+            used_bytes: 10. * 1_073_741_824.,
+            capacity_bytes: 50. * 1_073_741_824.,
+        }];
+        let rows = nodes(&[worker("w1"), worker("w2")], &index, &[], &disks, now());
+        let disk = rows[0].disk.map(|d| (d.used, d.allocatable));
+        assert_eq!(disk, Some((10., 50.)));
+        assert_eq!(rows[1].disk, None);
     }
 
     #[test]

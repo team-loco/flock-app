@@ -562,6 +562,10 @@ const NODES: [NodeSeed; 14] = [
     },
 ];
 
+const NODE_DISK: f32 = 50.;
+const DISK_BASE: f32 = 12.;
+const DISK_PER_POD: f32 = 0.85;
+const DISK_UNAVAILABLE: &str = "ip-10-4-41-66";
 const CORDONED: &str = "ip-10-4-31-12";
 
 pub fn nodes() -> Vec<Node> {
@@ -604,6 +608,10 @@ fn node(seed: &NodeSeed) -> Node {
         taints.push(UNSCHEDULABLE_TAINT.to_owned());
         Status::Warn
     };
+    let disk = (seed.name != DISK_UNAVAILABLE).then(|| Usage {
+        used: DISK_BASE + f32::from(u16::try_from(seed.pods).unwrap_or_default()) * DISK_PER_POD,
+        allocatable: NODE_DISK,
+    });
     let internal_ip = seed.name.trim_start_matches("ip-").replace('-', ".");
     Node {
         uid: Uid::default(),
@@ -625,6 +633,7 @@ fn node(seed: &NodeSeed) -> Node {
             used: seed.memory,
             allocatable: memory,
         },
+        disk,
         cpu_commitment,
         memory_commitment,
         pods: seed.pods,

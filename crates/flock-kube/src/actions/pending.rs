@@ -229,6 +229,7 @@ mod tests {
             runtime: String::new(),
             cpu: Usage::default(),
             memory: Usage::default(),
+            disk: None,
             pods: 0,
             pod_capacity: 0,
             age: std::time::Duration::ZERO,
