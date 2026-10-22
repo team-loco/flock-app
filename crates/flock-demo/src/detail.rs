@@ -20,6 +20,7 @@ use flock_core::{ClusterDetail, ClusterId, Counts, ResourceRef, Status, Uid};
 
 use crate::lists;
 
+const NAMESPACE_NAME_LABEL: &str = "kubernetes.io/metadata.name";
 const MINUTE: u64 = 60;
 const HOUR: u64 = 60 * MINUTE;
 const DAY: u64 = 24 * HOUR;
@@ -945,7 +946,7 @@ fn namespaces() -> Vec<Namespace> {
     NAMESPACES
         .iter()
         .map(|seed| Namespace {
-            labels: BTreeMap::new(),
+            labels: BTreeMap::from([(NAMESPACE_NAME_LABEL.into(), seed.name.into())]),
             name: seed.name.into(),
             status: seed.problems.status(),
             phase: "Active".into(),

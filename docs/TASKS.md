@@ -138,3 +138,4 @@ Spec column points at `design/`.
 | SIDEW | Resizable sidebar: drag the edge between 160 and 360px, drag below 80px to close, drag the window's left edge to reopen; collapse chevron removed; width and closed state saved in app settings | claude | sidebar-resize | done |
 | NODEPODS | Node inspector Pods section "All →" opens Pods filtered by `node:<name>`; `ScreenEvent::Filter` presets any list's filter; demo pods use their nodes' names (#391) | claude | fix-391-node-pods-link | done |
 | V5F | Design v5 inspectors: Namespace and Flux object restore inspector problem cards (no Needs attention table, no condition line), Labels open, Loco application card shows the raw message | claude | v5-f | done |
+| V5G | Design v5 Workload inspector: Conditions, Related and Events sections (counts only in summaries); Related moves from the page into the inspector; demo namespaces carry the kubernetes.io/metadata.name label | claude | v5-g | done |

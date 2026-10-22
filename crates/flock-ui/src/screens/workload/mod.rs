@@ -9,7 +9,7 @@ use flock_core::palette::COMPARE_KEY;
 use flock_core::related::Related;
 use flock_core::watch::WATCH_SYNC_TIMEOUT;
 use flock_core::workload::{ContainerSpec, EnvVar, Pod, Revision, short_image, short_pod_name};
-use flock_core::{Command, LogTarget, ResourceRef, Seen, Sink, Status, Workload};
+use flock_core::{Command, Condition, LogTarget, ResourceRef, Seen, Sink, Status, Workload};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
@@ -19,14 +19,14 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    ActionMenu, Button, CodeView, Column, ConfirmDialog, DockState, EmptyState, Entrance,
-    ErrorBlocks, ErrorState, FILTER_PLACEHOLDER, InspectorPane, KeyValue, Link, LogView, MenuItem,
-    PageHeader, PanelSection, Rule, SectionHeader, SectionLabel, Segmented, SelectableWords,
-    Skeleton, Table, TableEvent, Terminal, TextFieldState, Toast, Width, confirm, issue_stack,
-    min_row_width, slide_in, toast,
+    ActionMenu, Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, DockState,
+    EVENTS, EmptyState, Entrance, ErrorBlocks, ErrorState, EventList, FILTER_PLACEHOLDER,
+    InspectorPane, KeyValue, Link, LogView, MenuItem, PageHeader, PanelSection, Rule,
+    SectionHeader, SectionLabel, Segmented, SelectableWords, Skeleton, Table, TableEvent, Terminal,
+    TextFieldState, Toast, Width, confirm, issue_stack, min_row_width, slide_in, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
-use crate::screens::related::{OnPick, Pick, page_sections};
+use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
 use crate::screens::{EDIT_YAML, FullView, edit_item, full_view_link};
 use crate::theme::{
     ActiveTheme, FIELD_LABEL, FONT_MONO, Palette, ROW_TABLE, RULE, SECTION_HEADER, SPACE_1,
@@ -279,26 +279,20 @@ impl WorkloadScreen {
         }
     }
 
-    fn related(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let Some(related) = &self.related else {
-            return Vec::new();
-        };
-        let shown = Related {
-            target: related.target.clone(),
-            groups: related
-                .groups
-                .iter()
-                .filter(|group| group.title != PODS)
-                .cloned()
-                .collect(),
-        };
+    fn related_section(&self, cx: &mut Context<Self>) -> PanelSection {
         let screen = cx.weak_entity();
         let pick: OnPick = Rc::new(move |pick, _, cx| {
             if let Pick::Object(target) = pick {
                 let _ = screen.update(cx, |_, cx| cx.emit(Command::OpenResource(target)));
             }
         });
-        page_sections(&shown, &pick, cx)
+        let body = inspector_section(self.related.as_ref(), &pick, cx);
+        let section = PanelSection::new(INSPECTOR_ID, RELATED);
+        let section = match &self.related {
+            Some(related) => section.count(related_count(related).to_string()),
+            None => section,
+        };
+        section.child(body)
     }
 
     fn toggle_yaml(&mut self, cx: &mut Context<Self>) {
@@ -670,6 +664,10 @@ impl WorkloadScreen {
         let env = self
             .selected_container()
             .map(|spec| env_section(&spec.env, &palette));
+        let related = self.related_section(cx);
+        let events = PanelSection::new(INSPECTOR_ID, EVENTS)
+            .count(workload.events.len().to_string())
+            .child(EventList::new(workload.events.clone()));
         let content = div()
             .id("inspector")
             .flex()
@@ -683,9 +681,12 @@ impl WorkloadScreen {
             .bg(palette.panel)
             .text_size(TEXT_BODY)
             .child(ErrorBlocks::new(workload.issues()))
+            .child(conditions_section(&workload.conditions, &palette))
             .child(header)
             .children(spec)
-            .children(env);
+            .children(env)
+            .child(related)
+            .child(events);
         InspectorPane::new(INSPECTOR_ID, content).width(INSPECTOR_WIDTH)
     }
 
@@ -760,6 +761,24 @@ fn fixed(width: Pixels) -> gpui::Div {
         .flex_none()
         .overflow_hidden()
         .whitespace_nowrap()
+}
+
+fn conditions_section(conditions: &[Condition], palette: &Palette) -> PanelSection {
+    let failing = conditions
+        .iter()
+        .find(|condition| !condition.is_healthy())
+        .map(Condition::status);
+    let section = PanelSection::new(INSPECTOR_ID, CONDITIONS)
+        .count(conditions.len().to_string())
+        .child(ConditionTable::new(conditions));
+    match failing {
+        Some(status) => section.count_color(palette.status(status)),
+        None => section,
+    }
+}
+
+fn related_count(related: &Related) -> usize {
+    related.groups.iter().map(|group| group.total).sum()
 }
 
 fn env_section(env: &[EnvVar], palette: &Palette) -> PanelSection {
@@ -1099,8 +1118,7 @@ impl Render for WorkloadScreen {
             .overflow_y_scroll()
             .child(self.header(&workload, cx))
             .child(self.pods_section(&workload))
-            .child(Self::history(&workload, cx))
-            .children(self.related(cx));
+            .child(Self::history(&workload, cx));
         let shown = if self.showing_yaml {
             YAML_LABEL
         } else {
