@@ -81,6 +81,17 @@ download the new version by hand, since installed copies will reject it.
 ## First install and Gatekeeper
 
 The bundle is ad-hoc signed, not notarized. A zip downloaded with a browser carries the quarantine
-attribute, so the first launch is blocked: open it from System Settings → Privacy & Security →
-Open Anyway, or run `xattr -dr com.apple.quarantine /Applications/Flock.app`. Updates that Flock
-downloads itself are not quarantined and launch without a prompt.
+attribute, so the first launch is blocked.
+
+The no-prompt route is the install script, which downloads with curl (no quarantine), verifies the
+`.sha256`, installs `/Applications/Flock.app` and clears the attribute anyway:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/team-loco/flock-app/main/install.sh | sh
+```
+
+`FLOCK_VERSION` pins a version and `FLOCK_INSTALL_DIR` changes the target directory.
+
+For a browser download, open Flock from System Settings → Privacy & Security → Open Anyway, or run
+`xattr -dr com.apple.quarantine /Applications/Flock.app`. Updates that Flock downloads itself are
+not quarantined and launch without a prompt.
