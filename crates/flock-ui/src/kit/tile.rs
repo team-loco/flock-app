@@ -120,12 +120,18 @@ fn notes(parts: Vec<TileNote>, mute: Hsla) -> Div {
     let last = parts.len().saturating_sub(1);
     let spans = parts.into_iter().enumerate().flat_map(|(ix, note)| {
         let span = div().text_color(note.color).child(note.text);
+        let span = if ix == last {
+            span.min_w_0().truncate()
+        } else {
+            span.flex_none()
+        };
         let span = match note.drill {
             Some((id, activate)) => problem_link(id, span, activate).into_any_element(),
             None => span.into_any_element(),
         };
         let separator = (ix < last).then(|| {
             div()
+                .flex_none()
                 .text_color(note.color)
                 .child(SEPARATOR)
                 .into_any_element()
