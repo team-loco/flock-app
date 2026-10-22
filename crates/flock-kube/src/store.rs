@@ -10,7 +10,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::discovery::{ContextRef, Fingerprint, KubeContext};
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 pub(crate) const APP_SUPPORT: &str = "Library/Application Support";
 pub(crate) const CACHES: &str = "Library/Caches";
@@ -164,15 +164,12 @@ impl SavedCluster {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct StoreFile {
     clusters: Vec<SavedCluster>,
-    #[serde(default)]
-    folders: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClusterStore {
     path: PathBuf,
     clusters: Vec<SavedCluster>,
-    folders: Vec<PathBuf>,
     set_aside: Option<PathBuf>,
 }
 
@@ -190,7 +187,6 @@ impl ClusterStore {
         let file = loaded.value.unwrap_or_default();
         Ok(Self {
             clusters: file.clusters,
-            folders: file.folders,
             set_aside: loaded.set_aside,
             ..Self::empty(dir)
         })
@@ -200,7 +196,6 @@ impl ClusterStore {
         Self {
             path: dir.join(CLUSTERS_FILE),
             clusters: Vec::new(),
-            folders: Vec::new(),
             set_aside: None,
         }
     }
@@ -212,22 +207,6 @@ impl ClusterStore {
     pub fn kubeconfigs_dir(&self) -> PathBuf {
         let dir = self.path.parent().unwrap_or(Path::new(""));
         dir.join(KUBECONFIGS_DIR)
-    }
-
-    pub fn folders(&self) -> &[PathBuf] {
-        &self.folders
-    }
-
-    pub fn add_folder(&mut self, folder: &Path) -> Result<bool> {
-        if !folder.is_dir() {
-            return Err(Error::NotAFolder(folder.to_path_buf()));
-        }
-        if self.folders.iter().any(|known| known == folder) {
-            return Ok(false);
-        }
-        self.folders.push(folder.to_path_buf());
-        self.save()?;
-        Ok(true)
     }
 
     pub fn path(&self) -> &Path {
@@ -325,7 +304,6 @@ impl ClusterStore {
     fn save(&self) -> Result<()> {
         let body = StoreFile {
             clusters: self.clusters.clone(),
-            folders: self.folders.clone(),
         };
         write(&self.path, &body)
     }
@@ -575,27 +553,5 @@ mod tests {
         };
         assert_eq!(reopened.clusters().len(), 1);
         assert_eq!(reopened.set_aside(), None);
-    }
-
-    #[test]
-    fn watched_folders_survive_a_reopen_and_must_exist() {
-        let Ok(dir) = tempfile::tempdir() else {
-            panic!("tempdir");
-        };
-        let folder = dir.path().join("team");
-        assert!(fs::create_dir_all(&folder).is_ok());
-        let support = dir.path().join("support");
-        let mut store = ClusterStore::empty(&support);
-
-        assert!(matches!(store.add_folder(&folder), Ok(true)));
-        assert!(matches!(store.add_folder(&folder), Ok(false)));
-        let missing = store.add_folder(&dir.path().join("nope"));
-        assert!(matches!(missing, Err(Error::NotAFolder(_))), "{missing:?}");
-
-        let Ok(reopened) = ClusterStore::open_at(&support, now()) else {
-            panic!("reopen");
-        };
-        assert_eq!(reopened.folders(), [folder]);
-        assert_eq!(reopened.kubeconfigs_dir(), support.join(KUBECONFIGS_DIR));
     }
 }

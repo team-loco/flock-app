@@ -1064,7 +1064,6 @@ impl Live {
             Command::Delete(_) => self.act(command),
             Command::OpenAddCluster(_) => self.publish_contexts(),
             Command::SaveKubeconfig { name, yaml } => self.save_kubeconfig(name, yaml),
-            Command::WatchFolder(folder) => self.watch_folder(folder),
             Command::CheckContexts(ids) => self.check(ids),
             Command::AddClusters(added) => return self.add(added),
             Command::RemoveCluster(id) => return self.remove(id),
@@ -1139,16 +1138,6 @@ impl Live {
         let dir = self.store.kubeconfigs_dir();
         match paste::save(&dir, name, yaml) {
             Ok(_) => self.sources_changed = true,
-            Err(error) => self.publish(Update::KubeconfigRejected(error.to_string())),
-        }
-    }
-
-    fn watch_folder(&mut self, folder: &Path) {
-        match self.store.add_folder(folder) {
-            Ok(_) => {
-                self.sources.folders = scan_folders(&self.store);
-                self.sources_changed = true;
-            }
             Err(error) => self.publish(Update::KubeconfigRejected(error.to_string())),
         }
     }
@@ -1643,10 +1632,7 @@ pub fn cluster_settings(
 }
 
 fn scan_folders(store: &ClusterStore) -> Vec<PathBuf> {
-    let managed = store.kubeconfigs_dir();
-    std::iter::once(managed)
-        .chain(store.folders().iter().cloned())
-        .collect()
+    vec![store.kubeconfigs_dir()]
 }
 
 fn watch_kubeconfigs(

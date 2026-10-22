@@ -56,8 +56,6 @@ pub enum Error {
     InvalidKubeconfigName,
     #[error("A pasted kubeconfig named {0} already exists.")]
     KubeconfigExists(String),
-    #[error("{0} is not a folder.")]
-    NotAFolder(PathBuf),
     #[error(
         "{kind}/{name} was replaced after you confirmed, so nothing was changed. Review the new one and try again."
     )]

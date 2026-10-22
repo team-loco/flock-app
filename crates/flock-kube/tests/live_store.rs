@@ -114,7 +114,6 @@ fn connects_only_to_added_clusters_and_remembers_them() {
 }
 
 const PASTED_NAME: &str = "lab";
-const FOLDER_CONTEXT: &str = "folder-context";
 
 fn start(
     home: &std::path::Path,
@@ -197,40 +196,4 @@ fn pasted_kubeconfig_is_saved_and_discovered() {
         .map(|c| &c.id.file)
         .collect();
     assert_eq!(files_ids, vec![&saved]);
-}
-
-#[test]
-fn watched_folder_is_discovered_remembered_and_watched() {
-    let Ok(home) = tempfile::tempdir() else {
-        panic!("tempdir");
-    };
-    let folder = home.path().join("team");
-    assert!(std::fs::create_dir_all(&folder).is_ok());
-    let (commands, updates) = start(home.path());
-    let deadline = Instant::now() + WAIT;
-
-    let missing = Command::WatchFolder(home.path().join("nope"));
-    assert!(commands.send_blocking(missing).is_ok());
-    assert!(matches!(
-        contexts_named(&updates, deadline, FOLDER_CONTEXT),
-        Update::KubeconfigRejected(_)
-    ));
-
-    assert!(
-        std::fs::write(
-            folder.join("a.yaml"),
-            KUBECONFIG.replace(CONTEXT, FOLDER_CONTEXT)
-        )
-        .is_ok()
-    );
-    assert!(
-        commands
-            .send_blocking(Command::WatchFolder(folder.clone()))
-            .is_ok()
-    );
-    contexts_named(&updates, deadline, FOLDER_CONTEXT);
-    let Ok(store) = ClusterStore::open(&home.path().join(SUPPORT_DIR)) else {
-        panic!("store readable");
-    };
-    assert_eq!(store.folders(), [folder]);
 }

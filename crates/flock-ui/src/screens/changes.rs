@@ -222,7 +222,7 @@ impl ChangesScreen {
                     .children(commit.rollout.iter().map(|r| rollout_row(r, palette))),
             )
             .child(diff_header(commit, view, cx))
-            .children(view.map(|v| diff_body(v, palette)))
+            .children(view.map(|v| diff_body(commit, v, palette)))
             .into_any_element()
     }
 }
@@ -452,7 +452,7 @@ fn rollout_row(rollout: &Rollout, palette: &Palette) -> impl IntoElement {
         )
 }
 
-fn diff_body(view: &Rendering, palette: &Palette) -> impl IntoElement {
+fn diff_body(commit: &Commit, view: &Rendering, palette: &Palette) -> impl IntoElement {
     let files = view.files.iter().map(diff_file).collect();
     div()
         .flex()
@@ -464,7 +464,7 @@ fn diff_body(view: &Rendering, palette: &Palette) -> impl IntoElement {
             div()
                 .text_size(TEXT_CONTROL)
                 .text_color(palette.mute)
-                .child(view.note.clone()),
+                .child(commit.view_label(view)),
         )
         .child(DiffView::new("changes-diff", files))
 }
