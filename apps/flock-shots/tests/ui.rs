@@ -5044,3 +5044,82 @@ fn a_nav_row_with_three_badges_keeps_its_full_label() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+const WORKLOAD_SECTIONS: [(&str, &str); 3] = [
+    (
+        "workload-inspector-conditions",
+        "workload-inspector-conditions-body",
+    ),
+    (
+        "workload-inspector-related",
+        "workload-inspector-related-body",
+    ),
+    (
+        "workload-inspector-events",
+        "workload-inspector-events-body",
+    ),
+];
+
+fn scroll_workload_inspector_down(ui: &mut Ui) -> anyhow::Result<()> {
+    use gpui::{point, px};
+    ui.scroll("workload-inspector-pane", point(px(0.), px(-4000.)))
+}
+
+#[test]
+fn the_workload_inspector_orders_conditions_spec_related_and_events() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    let problems = bounds_of(&mut ui, "error-blocks")?;
+    let conditions = bounds_of(&mut ui, "workload-inspector-conditions")?;
+    let spec = bounds_of(&mut ui, "workload-inspector-spec")?;
+    let related = bounds_of(&mut ui, "workload-inspector-related")?;
+    let events = bounds_of(&mut ui, "workload-inspector-events")?;
+    assert!(problems.origin.y < conditions.origin.y);
+    assert!(conditions.origin.y < spec.origin.y);
+    assert!(spec.origin.y < related.origin.y);
+    assert!(related.origin.y < events.origin.y);
+    for (section, body) in WORKLOAD_SECTIONS {
+        assert!(ui.bounds(body).is_some(), "{section} starts closed");
+    }
+    Ok(())
+}
+
+#[test]
+fn workload_inspector_sections_collapse_only_when_clicked_and_leave_sections_above_in_place()
+-> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    ui.click("workload-inspector-conditions-toggle")?;
+    assert!(ui.bounds("workload-inspector-conditions-body").is_none());
+    ui.click("workload-inspector-conditions-toggle")?;
+    assert!(ui.bounds("workload-inspector-conditions-body").is_some());
+    scroll_workload_inspector_down(&mut ui)?;
+    let related = bounds_of(&mut ui, "workload-inspector-related")?;
+    ui.click("workload-inspector-events-toggle")?;
+    assert!(ui.bounds("workload-inspector-events-body").is_none());
+    assert_eq!(
+        bounds_of(&mut ui, "workload-inspector-related")?.size,
+        related.size
+    );
+    ui.click("workload-inspector-events-toggle")?;
+    assert!(ui.bounds("workload-inspector-events-body").is_some());
+    Ok(())
+}
+
+#[test]
+fn the_workload_inspector_lists_events_and_links_related_objects() -> anyhow::Result<()> {
+    use gpui::{point, px};
+    let mut ui = Ui::open(Screen::Workload)?;
+    assert!(ui.bounds("object-events").is_some());
+    let link = bounds_of(&mut ui, "related-Services-checkout-api")?;
+    let pane = bounds_of(&mut ui, "workload-inspector-pane")?;
+    let delta = point(px(0.), pane.center().y - link.center().y);
+    ui.scroll("workload-inspector-pane", delta)?;
+    ui.click("related-Services-checkout-api")?;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, Page::Services);
+    let opened = location.resource.map(|target| (target.kind, target.name));
+    assert_eq!(
+        opened,
+        Some(("Service".to_owned(), "checkout-api".to_owned()))
+    );
+    Ok(())
+}
