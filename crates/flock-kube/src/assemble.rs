@@ -20,7 +20,7 @@ use crate::expiry::{self, Found};
 use crate::flux::{self, FluxHealth};
 use crate::lists::{self, watched_lists};
 use crate::manager::{ClusterHandle, ConnectionStatus};
-use crate::metrics::{NodeUsage, PodUsage};
+use crate::metrics::{NodeDisk, NodeUsage, PodUsage};
 use crate::network;
 use crate::pod_tops::pod_tops;
 use crate::probe::PrometheusTarget;
@@ -46,6 +46,7 @@ pub struct Prometheus {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Extras {
     pub node_usage: Option<Vec<NodeUsage>>,
+    pub node_disk: Vec<NodeDisk>,
     pub pod_usage: Option<Vec<PodUsage>>,
     pub ring: UsageRing,
     pub polled: bool,
@@ -276,7 +277,7 @@ fn cluster_detail(
         slices.as_deref(),
         &handle.objects::<PersistentVolumeClaim>(),
     );
-    let nodes = detail::nodes(nodes, index, usage, now);
+    let nodes = detail::nodes(nodes, index, usage, &extras.node_disk, now);
     let scope = related::Scope {
         cluster: id,
         nodes: &nodes,

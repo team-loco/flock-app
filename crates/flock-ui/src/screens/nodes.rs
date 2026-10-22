@@ -6,7 +6,7 @@ use flock_core::nodes::{Node, NodeFilter, NodePod, NodeSummary, Usage, pool_coun
 use flock_core::overview::{Commitment, percent};
 use flock_core::pods::{POD_KIND, PodEvent};
 use flock_core::time::age;
-use flock_core::units::{Amount, CPU_UNIT, MEMORY_UNIT, amount, figure};
+use flock_core::units::{Amount, CPU_UNIT, MEMORY_UNIT, NOT_MEASURED, amount, figure};
 use flock_core::{
     ClusterDetail, ClusterId, ClusterSummary, Command, Page, ResourceRef, Seen, Status,
 };
@@ -41,6 +41,7 @@ const REQUEST_FIGURE: Pixels = px(32.);
 const VERSION_WIDTH: Pixels = px(64.);
 const AGE_WIDTH: Pixels = px(40.);
 const INSPECTOR_LABEL: Pixels = px(72.);
+const DISK_LABEL: &str = "Disk";
 const USAGE_LABEL: Pixels = px(64.);
 const POD_FIGURE: Pixels = px(56.);
 const INSPECTOR_ID: &str = "node-inspector";
@@ -666,46 +667,56 @@ fn node_usage(node: &Node, palette: &Palette) -> AnyElement {
         .child(usage_row(
             "CPU",
             amount(node.cpu.used, node.cpu.allocatable, CPU_UNIT).labelled(),
-            node.cpu,
+            Some(node.cpu),
             Some(node.cpu_commitment),
             palette,
         ))
         .child(usage_row(
             "Memory",
             amount(node.memory.used, node.memory.allocatable, MEMORY_UNIT).labelled(),
-            node.memory,
+            Some(node.memory),
             Some(node.memory_commitment),
             palette,
         ))
+        .child(disk_row(node.disk, palette))
         .child(usage_row(
             "Pods",
             format!("{} / {}", node.pods, node.pod_capacity),
-            pods,
+            Some(pods),
             None,
             palette,
         ))
         .into_any_element()
 }
 
+fn disk_row(disk: Option<Usage>, palette: &Palette) -> impl IntoElement {
+    let figures = disk.map_or_else(
+        || NOT_MEASURED.to_owned(),
+        |disk| amount(disk.used, disk.allocatable, MEMORY_UNIT).labelled(),
+    );
+    usage_row(DISK_LABEL, figures, disk, None, palette)
+}
+
 fn usage_row(
     label: &'static str,
     figures: String,
-    usage: Usage,
+    usage: Option<Usage>,
     commitment: Option<Commitment>,
     palette: &Palette,
 ) -> impl IntoElement {
-    let fraction = usage.fraction();
+    let fraction = usage.map_or(0., |usage| usage.fraction());
     let warning = pressure_color(fraction, palette);
-    let share = match commitment {
-        Some(_) => format!("{} {USED}", percent(fraction)),
-        None => percent(fraction),
+    let share = match (usage, commitment) {
+        (None, _) => NOT_MEASURED.to_owned(),
+        (Some(_), Some(_)) => format!("{} {USED}", percent(fraction)),
+        (Some(_), None) => percent(fraction),
     };
     let meter = Meter::new(fraction).color(warning.unwrap_or(palette.acc));
     let meter = match commitment {
         Some(commitment) => meter.request(commitment.requests),
         None => meter,
     };
-    let sub = commitment.map(|commitment| {
+    let sub = commitment.zip(usage).map(|(commitment, usage)| {
         div()
             .font_family(FONT_MONO)
             .text_size(TEXT_LABEL)

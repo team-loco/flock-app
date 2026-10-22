@@ -14,6 +14,7 @@ const METRICS_GROUP: &str = "metrics.k8s.io";
 const METRICS_VERSION: &str = "v1beta1";
 const NODE_METRICS_KIND: &str = "NodeMetrics";
 const NODE_METRICS_PLURAL: &str = "nodes";
+const NODE_SUMMARY_SUFFIX: &str = "proxy/stats/summary";
 const POD_METRICS_KIND: &str = "PodMetrics";
 const POD_METRICS_PLURAL: &str = "pods";
 const CPU: &str = "cpu";
@@ -90,6 +91,41 @@ pub struct Usage {
 pub struct NodeUsage {
     pub name: String,
     pub usage: Usage,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NodeDisk {
+    pub name: String,
+    pub used_bytes: f64,
+    pub capacity_bytes: f64,
+}
+
+#[derive(Deserialize)]
+struct Summary {
+    node: SummaryNode,
+}
+
+#[derive(Deserialize)]
+struct SummaryNode {
+    fs: SummaryFs,
+}
+
+#[derive(Deserialize)]
+struct SummaryFs {
+    #[serde(rename = "usedBytes")]
+    used_bytes: f64,
+    #[serde(rename = "capacityBytes")]
+    capacity_bytes: f64,
+}
+
+pub fn parse_node_disk(name: &str, body: &str) -> Option<NodeDisk> {
+    let summary: Summary = serde_json::from_str(body).ok()?;
+    let fs = summary.node.fs;
+    Some(NodeDisk {
+        name: name.to_owned(),
+        used_bytes: fs.used_bytes,
+        capacity_bytes: fs.capacity_bytes,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -253,6 +289,26 @@ impl ClusterHandle {
         Ok(list.items.iter().filter_map(node_usage_of).collect())
     }
 
+    pub async fn node_disk(&self, names: &[String]) -> Vec<NodeDisk> {
+        let Ok(client) = self.client() else {
+            return Vec::new();
+        };
+        let fetches = names.iter().map(|name| {
+            let client = client.clone();
+            async move {
+                let path = format!("/api/v1/nodes/{name}/{NODE_SUMMARY_SUFFIX}");
+                let request = http::Request::get(path).body(Vec::new()).ok()?;
+                let body = client.request_text(request).await.ok()?;
+                parse_node_disk(name, &body)
+            }
+        });
+        futures::future::join_all(fetches)
+            .await
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
     pub async fn pod_usage(&self, namespace: Option<&str>) -> Result<Vec<PodUsage>> {
         let client = self.client()?;
         let resource = metrics_resource(POD_METRICS_KIND, POD_METRICS_PLURAL);
@@ -316,6 +372,22 @@ mod tests {
         };
         assert_eq!(usage.usage.cpu_millicores, 150.0);
         assert_eq!(usage.usage.memory_bytes, 134_217_728.0);
+    }
+
+    #[test]
+    fn node_disk_from_kubelet_summary() {
+        let body = r#"{"node":{"nodeName":"w1","fs":{"availableBytes":1,"capacityBytes":53687091200,"usedBytes":49505374208,"inodes":5}}}"#;
+        let disk = parse_node_disk("w1", body);
+        assert_eq!(
+            disk,
+            Some(NodeDisk {
+                name: "w1".to_owned(),
+                used_bytes: 49_505_374_208.0,
+                capacity_bytes: 53_687_091_200.0,
+            })
+        );
+        assert_eq!(parse_node_disk("w1", r#"{"node":{}}"#), None);
+        assert_eq!(parse_node_disk("w1", "Forbidden"), None);
     }
 
     #[test]

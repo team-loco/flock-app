@@ -35,7 +35,7 @@ use crate::discovery::{
 use crate::gitops::GitOpsState;
 use crate::inspect;
 use crate::manager::{ClusterEvent, ClusterHandle, ClusterManager, ConnectionStatus, Subscription};
-use crate::metrics::{NodeUsage, PodUsage};
+use crate::metrics::{NodeDisk, NodeUsage, PodUsage};
 use crate::metrics_history;
 use crate::paste;
 use crate::pods::Clock;
@@ -104,6 +104,7 @@ impl Backend for LiveBackend {
 
 enum Fetched {
     NodeUsage(ContextRef, Option<Vec<NodeUsage>>),
+    NodeDisk(ContextRef, Vec<NodeDisk>),
     PodUsage(ContextRef, Option<Vec<PodUsage>>),
     Prometheus(ContextRef, Option<Prometheus>),
     ControlPlane(ContextRef, Box<Sampled>),
@@ -525,10 +526,18 @@ impl Live {
             let handle = cluster.handle.clone();
             let fetched = self.fetched.clone();
             let key = key.clone();
+            let names: Vec<String> = handle
+                .objects::<Node>()
+                .iter()
+                .filter_map(|node| node.metadata.name.clone())
+                .collect();
             cluster.usage_task = Some(TaskGuard::spawn(async move {
                 let usage = tokio::time::timeout(timeout, handle.node_usage()).await;
                 let usage = usage.ok().and_then(Result::ok);
-                let _ = fetched.send(Fetched::NodeUsage(key, usage)).await;
+                let _ = fetched.send(Fetched::NodeUsage(key.clone(), usage)).await;
+                let disks = tokio::time::timeout(timeout, handle.node_disk(&names)).await;
+                let disks = disks.unwrap_or_default();
+                let _ = fetched.send(Fetched::NodeDisk(key, disks)).await;
             }));
         }
         self.for_each_window(|live| {
@@ -688,6 +697,11 @@ impl Live {
                 if let Some(cluster) = self.clusters.get_mut(&key) {
                     let nodes = cluster.handle.objects::<Node>();
                     cluster.extras.record(&nodes, usage);
+                }
+            }
+            Fetched::NodeDisk(key, disks) => {
+                if let Some(cluster) = self.clusters.get_mut(&key) {
+                    cluster.extras.node_disk = disks;
                 }
             }
             Fetched::PodUsage(key, usage) => {

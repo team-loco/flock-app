@@ -1474,8 +1474,10 @@ fn node_inspector_leads_with_usage_and_keeps_labels_and_conditions_collapsed() -
     let mut ui = Ui::open(Screen::Nodes)?;
     ui.click("nodes-row-0")?;
     let usage = top(&mut ui, "node-usage-CPU")?;
-    assert!(ui.bounds("node-usage-Memory").is_some());
-    assert!(ui.bounds("node-usage-Pods").is_some());
+    let memory = top(&mut ui, "node-usage-Memory")?;
+    let disk = top(&mut ui, "node-usage-Disk")?;
+    let pods = top(&mut ui, "node-usage-Pods")?;
+    assert!(usage < memory && memory < disk && disk < pods);
     let details = top(&mut ui, "node-inspector-details")?;
     assert!(usage < details);
     assert!(ui.bounds("node-inspector-labels-body").is_none());
@@ -1483,6 +1485,19 @@ fn node_inspector_leads_with_usage_and_keeps_labels_and_conditions_collapsed() -
     assert!(ui.bounds("node-inspector-pods-body").is_some());
     ui.click("node-inspector-conditions-toggle")?;
     assert!(ui.bounds("condition-table").is_some());
+    Ok(())
+}
+
+#[test]
+fn node_inspector_keeps_the_disk_row_when_the_kubelet_summary_is_unavailable() -> anyhow::Result<()>
+{
+    let mut ui = Ui::open(Screen::Nodes)?;
+    ui.click("nodes-row-0")?;
+    let measured = ui.bounds("node-usage-Disk").map(|b| b.size);
+    ui.click("nodes-row-13")?;
+    let unavailable = ui.bounds("node-usage-Disk").map(|b| b.size);
+    assert!(measured.is_some());
+    assert_eq!(measured, unavailable);
     Ok(())
 }
 
