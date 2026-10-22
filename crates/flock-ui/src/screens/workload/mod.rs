@@ -22,8 +22,8 @@ use crate::kit::{
     ActionMenu, Button, CodeView, Column, ConfirmDialog, DockState, EmptyState, Entrance,
     ErrorBlocks, ErrorState, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link, LogView,
     MenuItem, PageHeader, PanelSection, Rule, SectionHeader, SectionLabel, Segmented,
-    SelectableWords, Skeleton, StatusText, Table, TableEvent, Terminal, TextFieldState, Toast,
-    Width, confirm, issue_stack, min_row_width, slide_in, toast,
+    SelectableWords, Skeleton, Table, TableEvent, Terminal, TextFieldState, Toast, Width, confirm,
+    issue_stack, min_row_width, slide_in, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::related::{OnPick, Pick, page_sections};
@@ -38,7 +38,6 @@ pub const KEY_CONTEXT: &str = "Workload";
 gpui::actions!(workload, [ToggleActions, ShowLogs, ShowTerminal, ViewYaml]);
 
 const PODS: &str = "Pods";
-const PODS_HINT: &str = "click to follow logs";
 const ROLLOUT_HISTORY: &str = "Rollout history";
 const NO_HISTORY: &str = "No rollouts recorded for this workload.";
 const CONTAINER: &str = "Container";
@@ -83,8 +82,6 @@ const SCALE_TITLE: &str = "Scale";
 const SCALE_BODY: &str = "Set the number of replicas. Flux sets it back on the next reconcile if the manifest in git pins replicas.";
 const SCALE_CONFIRM: &str = "Scale";
 const SCALE_INVALID: &str = "Replicas must be a whole number";
-const ROLLBACK_DESCRIPTION: &str = "Flux re-applies git on the next reconcile unless";
-const ROLLBACK_SUFFIX: &str = "is suspended.";
 const LOGS_ITEM: &str = "Logs";
 const ALL_LOGS_ITEM: &str = "Logs for all pods";
 const ALL_LOGS_DESCRIPTION: &str = "Merge every pod's output, colour-coded, in a new tab.";
@@ -450,15 +447,10 @@ impl WorkloadScreen {
         }
         if let Some(revision) = workload.rollback_target() {
             let label = format!("Roll back to revision {}", revision.number);
-            let description = workload
-                .managed_by
-                .as_ref()
-                .map(|owner| format!("{ROLLBACK_DESCRIPTION} {} {ROLLBACK_SUFFIX}", owner.name));
-            let item = MenuItem::new(label, rollback_handler(this, workload, revision));
-            items.push(match description {
-                Some(text) => item.description(text),
-                None => item,
-            });
+            items.push(MenuItem::new(
+                label,
+                rollback_handler(this, workload, revision),
+            ));
         }
         items
     }
@@ -495,7 +487,7 @@ impl WorkloadScreen {
     }
 
     fn pods_section(&self, workload: &Workload) -> impl IntoElement {
-        let count = format!("{} · {PODS_HINT}", workload.pods.len());
+        let count = workload.pods.len().to_string();
         div()
             .flex()
             .flex_col()
@@ -869,11 +861,13 @@ fn compact_pod_columns() -> Vec<Column<Pod>> {
         Column::text("Name", |p: &Pod| p.name.clone().into())
             .mono()
             .flex(NAME_WEIGHT, NAME_MIN),
-        Column::new("Status", |p: &Pod, _| {
-            StatusText::new(p.status, p.phase.clone()).into_any_element()
-        })
+        Column::colored_text(
+            "Status",
+            |p: &Pod| p.phase.clone().into(),
+            |p, palette| palette.status(p.status),
+        )
         .mono()
-        .fit_status_by(|p: &Pod| p.phase.clone().into())
+        .fit_by(|p: &Pod| p.phase.clone().into(), Pixels::ZERO)
         .auto(STATUS_MIN, STATUS_MAX),
         Column::colored_text(
             "Restarts",
@@ -898,11 +892,13 @@ fn pod_columns() -> Vec<Column<Pod>> {
         )
         .mono()
         .fixed(READY_WIDTH),
-        Column::new("Status", |p: &Pod, _| {
-            StatusText::new(p.status, p.phase.clone()).into_any_element()
-        })
+        Column::colored_text(
+            "Status",
+            |p: &Pod| p.phase.clone().into(),
+            |p, palette| palette.status(p.status),
+        )
         .mono()
-        .fit_status_by(|p: &Pod| p.phase.clone().into())
+        .fit_by(|p: &Pod| p.phase.clone().into(), Pixels::ZERO)
         .auto(STATUS_MIN, STATUS_MAX),
         Column::colored_text(
             "Restarts",

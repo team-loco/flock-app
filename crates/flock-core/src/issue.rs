@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::Status;
-use crate::diagnosis::{Condition, Diagnosis, needs_diagnosis};
+use crate::diagnosis::{Condition, Diagnosis, READY, needs_diagnosis};
 use crate::time::age;
 
 const SEPARATOR: &str = " · ";
@@ -81,6 +81,12 @@ pub fn failing_condition(conditions: &[Condition]) -> Option<&Condition> {
         .min_by_key(|condition| (rank(condition.status()), order(&condition.kind)))
 }
 
+pub fn headline_condition(conditions: &[Condition]) -> Option<&Condition> {
+    failing_condition(conditions)
+        .or_else(|| conditions.iter().find(|condition| condition.kind == READY))
+        .or_else(|| conditions.first())
+}
+
 fn rank(status: Status) -> u8 {
     u8::from(status != Status::Err)
 }
@@ -105,6 +111,22 @@ mod tests {
             .reason("ProgressDeadlineExceeded")
             .message("ReplicaSet \"checkout-api-7f9c6d\" has timed out progressing.")
             .age(Some(Duration::from_hours(3)))
+    }
+
+    #[test]
+    fn the_headline_is_the_failing_condition_then_ready_then_the_first() {
+        let reconciling = Condition::new("Reconciling", "True").reason("Progressing");
+        let ready = Condition::new("Ready", "True").reason("ReconciliationSucceeded");
+        let failed = Condition::new("Ready", "False").reason("HealthCheckFailed");
+        let healthy = [reconciling.clone(), ready];
+        let failing = [reconciling.clone(), failed];
+        let only = [reconciling];
+        let pick =
+            |conditions: &[Condition]| headline_condition(conditions).map(|c| c.reason.clone());
+        assert_eq!(pick(&healthy).as_deref(), Some("ReconciliationSucceeded"));
+        assert_eq!(pick(&failing).as_deref(), Some("HealthCheckFailed"));
+        assert_eq!(pick(&only).as_deref(), Some("Progressing"));
+        assert_eq!(pick(&[]), None);
     }
 
     #[test]

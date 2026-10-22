@@ -1028,6 +1028,14 @@ fn overview_sections_navigate_to_their_lists() -> anyhow::Result<()> {
 }
 
 #[test]
+fn the_overview_header_has_no_live_toggle() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    assert!(ui.bounds("overview-ns-sort-0").is_some());
+    assert!(ui.bounds("overview-live").is_none());
+    Ok(())
+}
+
+#[test]
 fn overview_expiring_follows_the_horizon_and_opens_certificates() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     scroll_overview_to_the_end(&mut ui)?;
@@ -3429,7 +3437,7 @@ fn back_from_a_related_link_reopens_the_inspector_it_left() -> anyhow::Result<()
 }
 
 #[test]
-fn a_namespace_page_opens_its_error_blocks_contents_and_events() -> anyhow::Result<()> {
+fn a_namespace_page_opens_what_needs_attention_contents_and_events() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Namespace)?;
     let namespace = ui.state().location().clone();
     assert_eq!(
@@ -3444,7 +3452,11 @@ fn a_namespace_page_opens_its_error_blocks_contents_and_events() -> anyhow::Resu
         .iter()
         .find(|problem| problem.target.namespace.as_deref() == Some("payments"))
         .map(|problem| problem.target.name.clone());
-    assert!(ui.bounds("error-block-0").is_some());
+    assert!(ui.bounds("namespace-issue-row-0").is_some());
+    assert!(ui.bounds("error-blocks").is_none());
+    assert!(ui.bounds("namespace-inspector-labels-body").is_none());
+    ui.click("namespace-inspector-labels-toggle")?;
+    assert!(ui.bounds("namespace-inspector-labels-body").is_some());
     let services = ui
         .state()
         .snapshot
@@ -3456,7 +3468,7 @@ fn a_namespace_page_opens_its_error_blocks_contents_and_events() -> anyhow::Resu
         )
         .map(|detail| detail.overview.unready_services.len());
     assert_eq!(services, Some(1));
-    ui.click("error-block-0")?;
+    ui.click("namespace-issue-row-0")?;
     assert_eq!(
         ui.state().workload().map(|target| target.name.clone()),
         first
@@ -3680,14 +3692,23 @@ fn the_workload_events_tab_lists_events_as_rows_with_the_message_underneath() ->
 }
 
 #[test]
-fn workload_and_flux_pages_show_error_blocks_in_the_panel_not_under_the_name() -> anyhow::Result<()>
-{
-    for screen in [Screen::Workload, Screen::Kustomization] {
+fn workload_pages_show_error_blocks_in_the_panel_not_under_the_name() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    let block = bounds_of(&mut ui, "error-block-0")?;
+    let blocks = bounds_of(&mut ui, "error-blocks")?;
+    assert!(blocks.origin.x <= block.origin.x);
+    Ok(())
+}
+
+#[test]
+fn flux_pages_show_a_condition_line_of_one_height_and_no_error_block() -> anyhow::Result<()> {
+    let mut heights = Vec::new();
+    for screen in [Screen::Kustomization, Screen::Helmrelease, Screen::Source] {
         let mut ui = Ui::open(screen)?;
-        let block = bounds_of(&mut ui, "error-block-0")?;
-        let blocks = bounds_of(&mut ui, "error-blocks")?;
-        assert!(blocks.origin.x <= block.origin.x);
+        heights.push(bounds_of(&mut ui, "flux-condition")?.size.height);
+        assert!(ui.bounds("error-blocks").is_none());
     }
+    assert!(heights.windows(2).all(|pair| pair[0] == pair[1]));
     Ok(())
 }
 
@@ -3927,7 +3948,7 @@ fn failing_flux_list_and_page_name_the_reason() -> anyhow::Result<()> {
     let mut list = Ui::open(Screen::Kustomizations)?;
     assert!(list.bounds("reason-cell").is_some());
     let mut page = Ui::open(Screen::Kustomization)?;
-    let wrong = top(&mut page, "error-block-0")?;
+    let wrong = top(&mut page, "flux-condition")?;
     let conditions = top(&mut page, "condition-table")?;
     assert!(wrong < conditions);
     Ok(())
