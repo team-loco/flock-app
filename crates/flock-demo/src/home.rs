@@ -14,7 +14,7 @@ const ADDED_MEMORY: u8 = 38;
 const ADDED_KUSTOMIZATIONS: u32 = 8;
 
 struct MetricsSeed {
-    pods: Counts,
+    pods: Option<Counts>,
     cpu: u8,
     memory: u8,
     flux: Counts,
@@ -25,7 +25,7 @@ struct MetricsSeed {
 pub fn metrics(cluster: &str) -> Option<ClusterMetrics> {
     let seed = match cluster {
         "prod-us-east" => MetricsSeed {
-            pods: Counts::total(412).with_err(5),
+            pods: None,
             cpu: 61,
             memory: 61,
             flux: Counts::total(21).with_err(1),
@@ -33,7 +33,7 @@ pub fn metrics(cluster: &str) -> Option<ClusterMetrics> {
             held: false,
         },
         "prod-eu-west" => MetricsSeed {
-            pods: Counts::total(356),
+            pods: Some(Counts::total(356)),
             cpu: 48,
             memory: 55,
             flux: Counts::total(21).with_sus(1),
@@ -41,7 +41,7 @@ pub fn metrics(cluster: &str) -> Option<ClusterMetrics> {
             held: true,
         },
         "staging" => MetricsSeed {
-            pods: Counts::total(188).with_warn(2),
+            pods: Some(Counts::total(188).with_warn(2)),
             cpu: 35,
             memory: 40,
             flux: Counts::total(21).with_warn(1),
@@ -49,7 +49,7 @@ pub fn metrics(cluster: &str) -> Option<ClusterMetrics> {
             held: false,
         },
         "dev-kind" => MetricsSeed {
-            pods: Counts::total(64),
+            pods: Some(Counts::total(64)),
             cpu: 12,
             memory: 22,
             flux: Counts::total(12),
@@ -59,7 +59,7 @@ pub fn metrics(cluster: &str) -> Option<ClusterMetrics> {
         _ => return None,
     };
     Some(ClusterMetrics {
-        pods: seed.pods,
+        pods: seed.pods.unwrap_or_default(),
         cpu_percent: Some(seed.cpu),
         memory_percent: Some(seed.memory),
         flux: seed.flux,

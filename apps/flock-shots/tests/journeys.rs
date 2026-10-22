@@ -691,16 +691,19 @@ fn sidebar_round_trip(ui: &mut Ui, from: &str) -> anyhow::Result<()> {
         !ui.state().sidebar_open,
         "dragging the edge from {from} did not close it"
     );
-    ui.click("expand-sidebar")?;
+    ui.drag(
+        "sidebar-resize",
+        gpui::point(flock_ui::theme::SIDEBAR, gpui::px(0.)),
+    )?;
     anyhow::ensure!(
         ui.state().sidebar_open,
-        "the chevron from {from} did not expand it"
+        "dragging the edge open from {from} left it closed"
     );
     ui.press("cmd-b")?;
-    ui.click("expand-sidebar")?;
+    ui.press("cmd-b")?;
     anyhow::ensure!(
         ui.state().sidebar_open,
-        "⌘B then the chevron from {from} left it closed"
+        "⌘B twice from {from} left it closed"
     );
     ui.drag("sidebar-resize", close)?;
     ui.press("cmd-b")?;
@@ -718,7 +721,7 @@ fn all_namespaces(ui: &mut Ui, picker: &'static str) -> anyhow::Result<()> {
 }
 
 #[test]
-fn live_sidebar_toggles_with_command_b_and_the_chevron_from_every_focus() -> anyhow::Result<()> {
+fn live_sidebar_toggles_with_command_b_and_the_edge_from_every_focus() -> anyhow::Result<()> {
     let Some(make) = kind()? else {
         return Ok(());
     };

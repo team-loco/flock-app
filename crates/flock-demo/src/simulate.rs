@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use flock_core::nodes::{Node, state_label};
+use flock_core::nodes::{Node, NodePod, state_label};
 use flock_core::{
     ClusterDetail, ClusterId, Command, Counts, Forward, Page, ResourceKind, ResourceRef, Seen,
     Snapshot, Status,
@@ -45,6 +45,7 @@ pub fn apply(snapshot: &mut Snapshot, command: &Command) -> Option<Settle> {
             if crate::pods::terminate(&mut snapshot.pods, target) =>
         {
             recount_pods(snapshot, &target.cluster);
+            recount_nodes(snapshot, target);
             Some(Settle::PodReplaced(target.clone()))
         }
         Command::Delete(Seen { target, .. }) => {
@@ -109,8 +110,9 @@ pub fn settle(snapshot: &mut Snapshot, settle: &Settle) -> Option<Settle> {
         Settle::Drained(target) => {
             if let Some(node) = find_node(snapshot, target) {
                 set_schedulable(node, false);
-                node.pods = node.pods.min(DAEMON_PODS);
             }
+            evict_pods(snapshot, target);
+            recount_pods(snapshot, &target.cluster);
         }
         Settle::Deleted(target) => remove_resource(snapshot, target),
         #[cfg(feature = "loco")]
@@ -120,11 +122,13 @@ pub fn settle(snapshot: &mut Snapshot, settle: &Settle) -> Option<Settle> {
         Settle::PodReplaced(target) => {
             let next = crate::pods::replace(&mut snapshot.pods, target).map(Settle::PodStarted);
             recount_pods(snapshot, &target.cluster);
+            recount_nodes(snapshot, target);
             return next;
         }
         Settle::PodStarted(target) => {
             crate::pods::start(&mut snapshot.pods, target);
             recount_pods(snapshot, &target.cluster);
+            recount_nodes(snapshot, target);
         }
     }
     if let Settle::Cordoned(target) | Settle::Uncordoned(target) | Settle::Drained(target) = settle
@@ -132,6 +136,17 @@ pub fn settle(snapshot: &mut Snapshot, settle: &Settle) -> Option<Settle> {
         recount_nodes(snapshot, target);
     }
     None
+}
+
+fn evict_pods(snapshot: &mut Snapshot, node: &ResourceRef) {
+    let mut kept = 0;
+    snapshot.pods.retain(|pod| {
+        let here = pod.cluster == node.cluster && pod.node.as_deref() == Some(node.name.as_str());
+        if here {
+            kept += 1;
+        }
+        !here || kept <= DAEMON_PODS
+    });
 }
 
 pub fn recount_pods(snapshot: &mut Snapshot, cluster: &ClusterId) {
@@ -154,6 +169,22 @@ fn recount_nodes(snapshot: &mut Snapshot, target: &ResourceRef) {
     else {
         return;
     };
+    let loads: Vec<(u32, Vec<NodePod>)> = snapshot
+        .detail(&target.cluster)
+        .map(|detail| {
+            detail
+                .nodes
+                .iter()
+                .map(|node| crate::detail::node_load(&snapshot.pods, &node.name))
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(detail) = detail(snapshot, target) {
+        for (node, (count, top)) in detail.nodes.iter_mut().zip(loads) {
+            node.pods = count;
+            node.top_pods = top;
+        }
+    }
     let flagged = u32::try_from(summary.cordoned + summary.not_ready).unwrap_or(u32::MAX);
     let total = u32::try_from(summary.total).unwrap_or(u32::MAX);
     let cluster = snapshot
@@ -306,6 +337,73 @@ mod tests {
         assert!(!node.taints.iter().any(|t| t == UNSCHEDULABLE_TAINT));
     }
 
+    fn pod_on_a_node(snapshot: &Snapshot, owned_by: &[&str]) -> Option<(ResourceRef, String)> {
+        let cluster = ClusterId::new(CLUSTER);
+        snapshot.pods.iter().find_map(|pod| {
+            let kind = pod.owner.as_ref().map(|owner| owner.kind.as_str());
+            let wanted = owned_by.iter().any(|owner| Some(*owner) == kind);
+            let node = pod
+                .node
+                .clone()
+                .filter(|_| pod.cluster == cluster && wanted)?;
+            Some((pod.resource(), node))
+        })
+    }
+
+    fn listed_on(snapshot: &Snapshot, node: &str) -> u32 {
+        let listed = snapshot
+            .pods
+            .iter()
+            .filter(|pod| pod.node.as_deref() == Some(node))
+            .count();
+        u32::try_from(listed).unwrap_or(u32::MAX)
+    }
+
+    #[test]
+    fn deleting_a_pod_nothing_replaces_lowers_its_node_pod_count() {
+        let mut snapshot = crate::snapshot();
+        let Some((pod, node_name)) = pod_on_a_node(&snapshot, &["ReplicaSet"]) else {
+            panic!("the demo has a replica set pod on a node");
+        };
+        for listed in snapshot.pods.iter_mut().filter(|p| p.is(&pod)) {
+            listed.owner = None;
+        }
+        let before = node(&snapshot, &node_name).pods;
+        let pending = apply(&mut snapshot, &Command::Delete(seen(pod)));
+        let Some(pending) = pending else {
+            panic!("a pod delete settles");
+        };
+        settle(&mut snapshot, &pending);
+        let after = node(&snapshot, &node_name);
+        assert_eq!(after.pods, before - 1);
+        assert_eq!(after.pods, listed_on(&snapshot, &node_name));
+    }
+
+    #[test]
+    fn replacing_a_pod_keeps_its_node_count_and_names_the_new_pod() {
+        let mut snapshot = crate::snapshot();
+        let Some((pod, node_name)) = pod_on_a_node(&snapshot, &["ReplicaSet"]) else {
+            panic!("the demo has a replica set pod on a node");
+        };
+        let before = node(&snapshot, &node_name).pods;
+        let pending = apply(&mut snapshot, &Command::Delete(seen(pod.clone())));
+        let Some(pending) = pending else {
+            panic!("a pod delete settles");
+        };
+        assert_eq!(node(&snapshot, &node_name).pods, before);
+        settle(&mut snapshot, &pending);
+        let after = node(&snapshot, &node_name);
+        assert_eq!(after.pods, before);
+        assert!(after.top_pods.iter().all(|top| top.name != pod.name));
+        for top in &after.top_pods {
+            let listed = snapshot
+                .pods
+                .iter()
+                .any(|p| p.node.as_deref() == Some(node_name.as_str()) && p.name == top.name);
+            assert!(listed, "{} is not on {node_name}", top.name);
+        }
+    }
+
     #[test]
     fn drain_evicts_all_but_daemon_pods() {
         let mut snapshot = crate::snapshot();
@@ -314,6 +412,7 @@ mod tests {
         settle(&mut snapshot, &Settle::Drained(target));
         let node = node(&snapshot, "ip-10-4-30-5");
         assert_eq!(node.pods, DAEMON_PODS);
+        assert_eq!(node.pods, listed_on(&snapshot, "ip-10-4-30-5"));
         assert!(!node.schedulable);
     }
 

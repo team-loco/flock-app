@@ -233,8 +233,17 @@ pub fn snapshot() -> Snapshot {
         helm_details: helm::details(&ClusterId::new(PROD_US_EAST)),
     };
     simulate::recount_pods(&mut snapshot, &ClusterId::new(PROD_US_EAST));
+    set_listed_pod_metrics(&mut snapshot, &ClusterId::new(PROD_US_EAST));
     derive_clusters(&mut snapshot);
     snapshot
+}
+
+fn set_listed_pod_metrics(snapshot: &mut Snapshot, cluster: &ClusterId) {
+    let counts = flock_core::pods::nav_counts(&snapshot.pods, cluster);
+    let summary = snapshot.clusters.iter_mut().find(|c| &c.id == cluster);
+    if let Some(metrics) = summary.and_then(|summary| summary.metrics.as_mut()) {
+        metrics.pods = counts;
+    }
 }
 
 fn derive_clusters(snapshot: &mut Snapshot) {
@@ -402,6 +411,21 @@ mod tests {
     }
 
     #[test]
+    fn prod_us_east_pod_totals_come_from_the_pod_list() {
+        let snapshot = snapshot();
+        let prod = ClusterId::new(PROD_US_EAST);
+        let listed = snapshot.pods.iter().filter(|p| p.cluster == prod).count();
+        let listed = u32::try_from(listed).unwrap_or(u32::MAX);
+        let overview = snapshot.detail(&prod).map(|d| d.overview.pods.total());
+        let metrics = snapshot
+            .cluster(&prod)
+            .and_then(|c| c.metrics.as_ref())
+            .and_then(|m| m.pods.total);
+        assert_eq!(overview, Some(listed));
+        assert_eq!(metrics, Some(listed));
+    }
+
+    #[test]
     fn prod_us_east_nav_counts_come_from_its_detail() {
         let summary = prod_us_east();
         assert_eq!(
@@ -481,6 +505,9 @@ mod tests {
         let mut summary = snapshot.cluster(&prod).cloned();
         if let Some(summary) = summary.as_mut() {
             summary.nav.remove(&Page::Pods);
+            if let Some(metrics) = summary.metrics.as_mut() {
+                metrics.pods = Counts::default();
+            }
         }
         assert_eq!(summary, Some(prod_us_east()));
         let prod_pods: Vec<_> = snapshot

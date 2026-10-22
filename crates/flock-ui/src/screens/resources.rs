@@ -478,12 +478,15 @@ impl ResourcesScreen {
         })
     }
 
-    fn row_actions(&self, cx: &mut Context<Self>) -> impl Fn(&Resource) -> Vec<MenuItem> + 'static {
+    fn row_actions(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(&Resource, &[&Resource]) -> Vec<MenuItem> + 'static {
         let cluster = self.cluster.clone();
         let kind = self.kind;
         let confirm_destructive = self.confirm_destructive;
         let screen = cx.weak_entity();
-        move |row: &Resource| {
+        move |row: &Resource, _: &[&Resource]| {
             let Some(cluster) = cluster.clone() else {
                 return Vec::new();
             };

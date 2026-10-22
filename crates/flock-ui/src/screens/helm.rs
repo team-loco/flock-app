@@ -150,7 +150,7 @@ impl HelmReleasesScreen {
         });
         let scope = self.cluster.as_ref().map(|c| c.as_str().to_owned());
         let screen = cx.weak_entity();
-        let actions = move |row: &HelmRelease| -> Vec<MenuItem> {
+        let actions = move |row: &HelmRelease, _: &[&HelmRelease]| -> Vec<MenuItem> {
             let open_screen = screen.clone();
             let open = new_tab_item(Command::OpenHelmRelease(row.key.clone()), move |c, cx| {
                 let _ = open_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(c)));

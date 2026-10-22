@@ -373,11 +373,14 @@ impl NodesScreen {
             .update(cx, |menu, cx| menu.set_items(items, cx));
     }
 
-    fn row_actions(&self, cx: &mut Context<Self>) -> impl Fn(&NodeRow) -> Vec<MenuItem> + 'static {
+    fn row_actions(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(&NodeRow, &[&NodeRow]) -> Vec<MenuItem> + 'static {
         let cluster = self.cluster.clone();
         let confirm_destructive = self.confirm_destructive;
         let screen = cx.weak_entity();
-        move |row: &NodeRow| {
+        move |row: &NodeRow, _: &[&NodeRow]| {
             let Some(cluster) = cluster.clone() else {
                 return Vec::new();
             };

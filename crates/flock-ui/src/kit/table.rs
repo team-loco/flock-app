@@ -43,7 +43,7 @@ pub const TABLE_CONTEXT: &str = "FlockTable";
 
 pub type CellRenderer<R> = Rc<dyn Fn(&R, &Palette) -> AnyElement>;
 pub type Comparator<R> = Rc<dyn Fn(&R, &R) -> Ordering>;
-pub type RowActions<R> = Rc<dyn Fn(&R) -> Vec<MenuItem>>;
+pub type RowActions<R> = Rc<dyn Fn(&R, &[&R]) -> Vec<MenuItem>>;
 type RowStatus<R> = Rc<dyn Fn(&R) -> Option<Status>>;
 type RowKey<R> = Rc<dyn Fn(&R) -> SharedString>;
 type SpanRow<R> = Rc<dyn Fn(&R, &Palette) -> Option<AnyElement>>;
@@ -549,14 +549,14 @@ impl<R: 'static> Table<R> {
         }
     }
 
-    pub fn row_actions(mut self, actions: impl Fn(&R) -> Vec<MenuItem> + 'static) -> Self {
+    pub fn row_actions(mut self, actions: impl Fn(&R, &[&R]) -> Vec<MenuItem> + 'static) -> Self {
         self.actions = Some(Rc::new(actions));
         self
     }
 
     pub fn set_row_actions(
         &mut self,
-        actions: impl Fn(&R) -> Vec<MenuItem> + 'static,
+        actions: impl Fn(&R, &[&R]) -> Vec<MenuItem> + 'static,
         cx: &mut Context<Self>,
     ) {
         self.actions = Some(Rc::new(actions));
@@ -727,7 +727,7 @@ impl<R: 'static> Table<R> {
         cx: &mut Context<Self>,
     ) {
         let items = match (self.rows.get(ix), &self.actions) {
-            (Some(row), Some(actions)) => actions(row),
+            (Some(row), Some(actions)) => actions(row, &self.marked_rows()),
             _ => Vec::new(),
         };
         if items.is_empty() {
@@ -838,14 +838,6 @@ impl<R: 'static> Table<R> {
             .filter_map(|&ix| self.rows.get(ix))
             .filter(|row| marked.contains(&key(row)))
             .collect()
-    }
-
-    pub fn clear_marks(&mut self, cx: &mut Context<Self>) {
-        if let Some(marked) = self.marked.as_mut().filter(|marked| !marked.is_empty()) {
-            marked.clear();
-            cx.emit(TableEvent::Marked);
-            cx.notify();
-        }
     }
 
     fn is_marked(&self, row: &R) -> bool {
@@ -1277,7 +1269,7 @@ impl<R: 'static> Table<R> {
 impl<R: 'static> Table<R> {
     fn row_more(&self, ix: usize, row: &R, cx: &mut Context<Self>) -> Option<AnyElement> {
         let actions = self.actions.as_ref()?;
-        if actions(row).is_empty() {
+        if actions(row, &self.marked_rows()).is_empty() {
             return None;
         }
         let id = format!("{}-row-{ix}-more", self.id);

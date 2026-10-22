@@ -6,20 +6,18 @@ use gpui::{
     Animation, AnimationExt, AnyElement, App, ClickEvent, Context, CursorStyle, DispatchPhase,
     ElementId, FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, SharedString, StatefulInteractiveElement,
-    Styled, Window, canvas, div, ease_out_quint, prelude::FluentBuilder, px, svg,
+    Styled, Window, canvas, div, ease_out_quint, prelude::FluentBuilder, px,
 };
 
 use super::Shell;
 use super::keys::SIDEBAR_CONTEXT;
-use crate::assets::CHEVRON_RIGHT;
-use crate::kit::{Toast, Tooltip, status_symbols, toast};
+use crate::kit::{Toast, status_symbols, toast};
 use crate::theme::{
-    ActiveTheme, COLLAPSE, FONT_MONO, ICON, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, ROW_NAV,
-    RULE, SIDEBAR, SIDEBAR_CLOSE, SIDEBAR_MAX, SIDEBAR_MIN, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
-    SPACE_6, SPACE_8, SPLITTER, TEXT_LABEL, TEXT_UI, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
+    ActiveTheme, COLLAPSE, FONT_MONO, PAGE_HEADER, Palette, RADIUS, ROW_NAV, RULE, SIDEBAR,
+    SIDEBAR_CLOSE, SIDEBAR_MAX, SIDEBAR_MIN, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8,
+    SPLITTER, TEXT_LABEL, TEXT_UI, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
 };
 
-const EXPAND_TOOLTIP: &str = "Expand sidebar  ⌘B";
 const EDGE_GROUP: &str = "sidebar-edge";
 const REOPEN_GROUP: &str = "sidebar-reopen";
 const SAVE_FAILED: &str = "Could not save the sidebar width";
@@ -236,9 +234,7 @@ impl Shell {
             return None;
         }
         let palette = *cx.palette();
-        let expand = icon_button("expand-sidebar", CHEVRON_RIGHT, EXPAND_TOOLTIP, &palette)
-            .on_click(cx.listener(|this, _, _, cx| this.dispatch(Command::ToggleSidebar, cx)));
-        let width = TRAFFIC_LIGHTS_INSET + ICON_BUTTON + SPACE_3;
+        let width = TRAFFIC_LIGHTS_INSET;
         let (from, to) = if open {
             (width, Pixels::ZERO)
         } else {
@@ -255,15 +251,7 @@ impl Shell {
             .w(to)
             .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
             .child(div().h(RULE))
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .items_center()
-                    .w(width)
-                    .pl(TRAFFIC_LIGHTS_INSET)
-                    .child(expand),
-            )
+            .child(div().flex_1().w(width))
             .child(div().h(RULE).bg(palette.line));
         Some(self.slide(controls, "window-controls", from, to))
     }
@@ -485,29 +473,6 @@ fn section_head(text: &str, palette: &Palette) -> impl IntoElement {
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(palette.mute)
         .child(text.to_uppercase())
-}
-
-fn icon_button(
-    id: &'static str,
-    path: &'static str,
-    tooltip: &'static str,
-    palette: &Palette,
-) -> gpui::Stateful<gpui::Div> {
-    let hover = palette.hover;
-    div()
-        .debug_selector(|| id.to_owned())
-        .id(id)
-        .flex()
-        .items_center()
-        .justify_center()
-        .flex_none()
-        .size(ICON_BUTTON)
-        .rounded(RADIUS)
-        .cursor_pointer()
-        .hover(move |style| style.bg(hover))
-        .tooltip(Tooltip::text(tooltip))
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(svg().path(path).size(ICON).text_color(palette.mute))
 }
 
 #[cfg(test)]
