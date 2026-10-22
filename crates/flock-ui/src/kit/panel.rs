@@ -22,8 +22,7 @@ use crate::theme::{
     TEXT_BODY, TEXT_LABEL, TEXT_SMALL, TEXT_UI,
 };
 
-pub const EVENTS_EMPTY: &str = "No events in the last 1h";
-const EVENTS_WINDOW: &str = "last 1h";
+pub const EVENTS_EMPTY: &str = "0";
 const NO_LABELS: &str = "None";
 const LABELS: &str = "Labels";
 const COUNT_PREFIX: &str = "×";
@@ -34,9 +33,9 @@ type IndexHandler = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
 pub fn events_count(shown: usize, total: usize) -> String {
     if shown < total {
-        format!("{shown} of {total} · {EVENTS_WINDOW}")
+        format!("{shown} of {total}")
     } else {
-        format!("{total} · {EVENTS_WINDOW}")
+        total.to_string()
     }
 }
 
@@ -623,8 +622,9 @@ mod tests {
             section_id("namespace-inspector", "Network policies"),
             "namespace-inspector-network-policies"
         );
-        assert_eq!(events_count(4, 4), "4 · last 1h");
-        assert_eq!(events_count(4, 11), "4 of 11 · last 1h");
+        assert_eq!(events_count(4, 4), "4");
+        assert_eq!(events_count(4, 11), "4 of 11");
+        assert_eq!(events_count(0, 0), EVENTS_EMPTY);
     }
 
     #[gpui::test]
