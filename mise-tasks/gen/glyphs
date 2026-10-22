@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run --with fonttools python
-#MISE description="Rebuild the Apache-2.0 Flock Status fonts from geometric outlines"
+#MISE description="Rebuild the Apache-2.0 Flock Status fonts from the 16px status icon paths"
 import math
 from pathlib import Path
 import tomllib
@@ -8,16 +8,23 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.ttLib import TTFont
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 
-ADV = 600
-CX, CY = 300, 330
-R = 215
-SEGMENTS = 8
-TOP = 545
-BOTTOM = 125
-TRIANGLE_HALF_WIDTH = 245
-CROSS_HALF_SIZE = 190
-REGULAR_STROKE = 80
-MEDIUM_STROKE = 100
+GRID = 16
+GRID_CENTER = GRID / 2
+ICON_BASELINE_OFFSET = 0.14
+ARC_STEP = math.pi / 4
+STROKE = 1.6
+DOT_RADIUS = 3.6
+SPINNER_RADIUS = 6
+OFFLINE_RADIUS = 5.75
+OFFLINE_DASH = 2.1
+OFFLINE_GAP = 2.1
+DIAMOND = [(8, 1.6), (14.4, 8), (8, 14.4), (1.6, 8)]
+TRIANGLE = [(8, 2.2), (14.3, 13.25), (1.7, 13.25)]
+WARNING_MARKS = [((8, 6.5), (8, 9.6)), ((8, 11.4), (8, 11.5))]
+BARS = [((6, 3.75), (6, 12.25)), ((10, 3.75), (10, 12.25))]
+TOP = -math.pi / 2
+LOADER_PROBE = "m"
+SPINNER_SWEEP = 3 * math.pi / 2
 FONT_EPOCH = 2082844800
 FAMILY = "Flock Status"
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,83 +33,121 @@ COPYRIGHT = "Copyright 2026 Flock contributors"
 LICENSE = "Licensed under the Apache License, Version 2.0"
 LICENSE_URL = "https://www.apache.org/licenses/LICENSE-2.0"
 
-def arc(pen, r, start, end, first_move=True):
-    n = max(1, round(abs(end - start) / (2 * math.pi) * SEGMENTS))
+
+def polar(center, radius, angle):
+    return (center[0] + radius * math.cos(angle), center[1] + radius * math.sin(angle))
+
+
+def arc_points(center, radius, start, end):
+    n = max(1, math.ceil(abs(end - start) / ARC_STEP - 1e-9))
     step = (end - start) / n
-    half = step / 2
-    ctrl_r = r / math.cos(half)
-    pt = lambda a, rad: (CX + rad * math.cos(a), CY + rad * math.sin(a))
-    if first_move:
-        pen.moveTo(pt(start, r))
+    control = radius / math.cos(step / 2)
+    points = [(polar(center, radius, start), True)]
     for k in range(n):
-        a0 = start + k * step
-        pen.qCurveTo(pt(a0 + half, ctrl_r), pt(a0 + step, r))
+        angle = start + k * step
+        points.append((polar(center, control, angle + step / 2), False))
+        points.append((polar(center, radius, angle + step), True))
+    return points
 
-def disc(pen, r, clockwise=True):
-    if clockwise:
-        arc(pen, r, math.pi / 2, math.pi / 2 - 2 * math.pi)
-    else:
-        arc(pen, r, math.pi / 2, math.pi / 2 + 2 * math.pi)
-    pen.closePath()
 
-def poly(pen, pts):
-    pen.moveTo(pts[0])
-    for p in pts[1:]:
-        pen.lineTo(p)
-    pen.closePath()
+def disc(center, radius):
+    return arc_points(center, radius, TOP, TOP + 2 * math.pi)[:-1]
 
-def build(stroke):
-    h = stroke / 2
-    glyphs = {}
 
-    def make(fn):
-        pen = TTGlyphPen(None)
-        fn(pen)
-        return pen.glyph()
+def polygon(points):
+    return [(p, True) for p in points]
 
-    glyphs[ord("●")] = make(lambda p: disc(p, R))
-    def ring(p):
-        disc(p, R)
-        disc(p, R - stroke, clockwise=False)
-    glyphs[ord("○")] = make(ring)
-    def bullseye(p):
-        ring(p)
-        disc(p, h)
-    glyphs[ord("◎")] = make(bullseye)
-    def half(p):
-        ring(p)
-        ri = R - stroke
-        arc(p, ri, -math.pi / 2, -3 * math.pi / 2)
-        p.closePath()
-    glyphs[ord("◐")] = make(half)
-    glyphs[ord("▲")] = make(lambda p: poly(p, [(CX, TOP), (CX + TRIANGLE_HALF_WIDTH, BOTTOM), (CX - TRIANGLE_HALF_WIDTH, BOTTOM)]))
-    e = CROSS_HALF_SIZE
-    k = h / math.sqrt(2)
-    def cross(p):
-        a, b = (CX - e, CY + e), (CX + e, CY - e)
-        poly(p, [(a[0] + k, a[1] + k), (b[0] + k, b[1] + k), (b[0] - k, b[1] - k), (a[0] - k, a[1] - k)])
-        a, b = (CX - e, CY - e), (CX + e, CY + e)
-        poly(p, [(a[0] - k, a[1] + k), (b[0] - k, b[1] + k), (b[0] + k, b[1] - k), (a[0] + k, a[1] - k)])
-    glyphs[ord("✕")] = make(cross)
-    gap = stroke
-    def bars(p):
-        for x0 in (CX - gap / 2 - stroke, CX + gap / 2):
-            poly(p, [(x0, BOTTOM), (x0, TOP), (x0 + stroke, TOP), (x0 + stroke, BOTTOM)])
-    glyphs[ord("‖")] = make(bars)
-    return glyphs
 
-def generate(weight, stroke, version):
+def line(start, end, width):
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    length = math.hypot(dx, dy) or 1
+    nx, ny = -dy / length * width / 2, dx / length * width / 2
+    band = polygon([(start[0] + nx, start[1] + ny), (end[0] + nx, end[1] + ny),
+                    (end[0] - nx, end[1] - ny), (start[0] - nx, start[1] - ny)])
+    return [band, disc(start, width / 2), disc(end, width / 2)]
+
+
+def arc(center, radius, start, end, width):
+    outer = arc_points(center, radius + width / 2, start, end)
+    inner = arc_points(center, radius - width / 2, end, start)
+    caps = [disc(polar(center, radius, angle), width / 2) for angle in (start, end)]
+    return [outer + inner, *caps]
+
+
+def outline(points, width):
+    edges = zip(points, points[1:] + points[:1])
+    return [contour for a, b in edges for contour in line(a, b, width)]
+
+
+def dashes(center, radius, width):
+    circumference = 2 * math.pi * radius
+    period = OFFLINE_DASH + OFFLINE_GAP
+    count = math.ceil(circumference / period)
+    spans = [(k * period, min(k * period + OFFLINE_DASH, circumference)) for k in range(count)]
+    return [contour for a, b in spans
+            for contour in arc(center, radius, TOP + a / radius, TOP + b / radius, width)]
+
+
+def shapes():
+    center = (GRID_CENTER, GRID_CENTER)
+    return {
+        "✕": [polygon(DIAMOND)],
+        "▲": outline(TRIANGLE, STROKE)
+             + [contour for a, b in WARNING_MARKS for contour in line(a, b, STROKE)],
+        "●": [disc(center, DOT_RADIUS)],
+        "◐": arc(center, SPINNER_RADIUS, TOP, TOP + SPINNER_SWEEP, STROKE),
+        "‖": [contour for a, b in BARS for contour in line(a, b, STROKE)],
+        "○": dashes(center, OFFLINE_RADIUS, STROKE),
+    }
+
+
+def to_font(contour, upm):
+    scale = upm / GRID
+    top = upm * (1 - ICON_BASELINE_OFFSET)
+    points = [((x * scale, top - y * scale), on) for (x, y), on in contour]
+    area = sum(a[0] * b[1] - b[0] * a[1]
+               for (a, _), (b, _) in zip(points, points[1:] + points[:1]))
+    return points[::-1] if area > 0 else points
+
+
+def draw(contours, upm):
+    pen = TTGlyphPen(None)
+    for contour in contours:
+        points = to_font(contour, upm)
+        start = next(i for i, (_, on) in enumerate(points) if on)
+        points = points[start:] + points[:start]
+        pen.moveTo(points[0][0])
+        pending = []
+        for point, on in points[1:] + points[:1]:
+            if on:
+                if pending:
+                    pen.qCurveTo(*pending, point)
+                    pending = []
+                else:
+                    pen.lineTo(point)
+            else:
+                pending.append(point)
+        pen.closePath()
+    glyph = pen.glyph()
+    glyph.flags[0] |= 0x40
+    return glyph
+
+
+def generate(weight, version):
     reference = TTFont(FONTS / f"IBMPlexMono-{weight}.ttf")
-    glyphs = build(stroke)
+    upm = reference["head"].unitsPerEm
+    glyphs = {ord(character): draw(contours, upm) for character, contours in shapes().items()}
+    glyphs[ord(LOADER_PROBE)] = TTGlyphPen(None).glyph()
     names = {cp: f"uni{cp:04X}" for cp in glyphs}
     order = [".notdef", *names.values()]
     outlines = {names[cp]: glyph for cp, glyph in glyphs.items()}
     outlines[".notdef"] = TTGlyphPen(None).glyph()
-    metrics = {name: (ADV, 0) for name in order}
-    font = FontBuilder(reference["head"].unitsPerEm, isTTF=True)
+    font = FontBuilder(upm, isTTF=True)
     font.setupGlyphOrder(order)
     font.setupCharacterMap(names)
     font.setupGlyf(outlines)
+    glyf = font.font["glyf"]
+    metrics = {name: (upm, getattr(glyf[name], "xMin", 0)) for name in order}
     font.setupHorizontalMetrics(metrics)
     horizontal = reference["hhea"]
     font.setupHorizontalHeader(ascent=horizontal.ascent, descent=horizontal.descent,
@@ -137,5 +182,5 @@ def generate(weight, stroke, version):
 
 with (ROOT / "Cargo.toml").open("rb") as manifest:
     version = tomllib.load(manifest)["workspace"]["package"]["version"]
-generate("Regular", REGULAR_STROKE, version)
-generate("Medium", MEDIUM_STROKE, version)
+generate("Regular", version)
+generate("Medium", version)
