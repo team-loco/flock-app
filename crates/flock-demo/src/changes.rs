@@ -10,7 +10,6 @@ const MINUTE: u64 = 60;
 const HOUR: u64 = 60 * MINUTE;
 const DAY: u64 = 24 * HOUR;
 const FETCHED_MINUTES: u64 = 4;
-const AS_COMMITTED: &str = "Source change as committed.";
 const APPLIED_HEALTHY: &str = "applied · healthy";
 
 const STAGING: &str = "staging";
@@ -106,18 +105,18 @@ fn added_file(path: &str, lines: &[&str]) -> FilePatch {
     file(path, numbered)
 }
 
-fn source(note: &str, files: Vec<FilePatch>) -> Rendering {
+fn source(files: Vec<FilePatch>) -> Rendering {
     Rendering {
         kind: ViewKind::Source,
-        note: note.into(),
+        truncated: false,
         files,
     }
 }
 
-fn rendered(cluster: &str, note: &str, files: Vec<FilePatch>) -> Rendering {
+fn rendered(cluster: &str, files: Vec<FilePatch>) -> Rendering {
     Rendering {
         kind: ViewKind::Rendered(ClusterId::new(cluster)),
-        note: note.into(),
+        truncated: false,
         files,
     }
 }
@@ -184,20 +183,9 @@ fn checkout_bump() -> Commit {
             ),
         ],
         views: vec![
-            source(
-                "Source change as committed. Overlays that patch these fields are not shown here; switch to a rendered view to see what each cluster actually receives.",
-                vec![deployment, configmap],
-            ),
-            rendered(
-                US_EAST,
-                "Rendered by kustomize for prod-us-east at a41e07c, diffed against what is live. The overlay patch overrides the key from base.",
-                vec![checkout_rendered(US_EAST)],
-            ),
-            rendered(
-                STAGING,
-                "Rendered by kustomize for staging at a41e07c, diffed against what is live. No overlay patch on this field.",
-                vec![checkout_rendered(STAGING)],
-            ),
+            source(vec![deployment, configmap]),
+            rendered(US_EAST, vec![checkout_rendered(US_EAST)]),
+            rendered(STAGING, vec![checkout_rendered(STAGING)]),
         ],
     }
 }
@@ -248,17 +236,14 @@ fn prometheus_bump() -> Commit {
             "infra-monitoring",
             "HelmRelease upgrade retrying (2/3): context deadline exceeded",
         )],
-        views: vec![source(
-            AS_COMMITTED,
-            vec![file(
-                "infrastructure/monitoring/staging/release.yaml",
-                vec![
-                    ctx(12, "      chart: kube-prometheus-stack"),
-                    del(13, "      version: 61.9.0"),
-                    add(13, "      version: 62.7.0"),
-                ],
-            )],
-        )],
+        views: vec![source(vec![file(
+            "infrastructure/monitoring/staging/release.yaml",
+            vec![
+                ctx(12, "      chart: kube-prometheus-stack"),
+                del(13, "      version: 61.9.0"),
+                add(13, "      version: 62.7.0"),
+            ],
+        )])],
     }
 }
 
@@ -271,17 +256,14 @@ fn web_replicas() -> Commit {
         when: "yesterday 11:40".into(),
         target: ks("apps-web"),
         rollout: healthy_everywhere("apps-web"),
-        views: vec![source(
-            AS_COMMITTED,
-            vec![file(
-                "apps/web/base/hpa.yaml",
-                vec![
-                    ctx(9, "spec:"),
-                    del(10, "  minReplicas: 3"),
-                    add(10, "  minReplicas: 6"),
-                ],
-            )],
-        )],
+        views: vec![source(vec![file(
+            "apps/web/base/hpa.yaml",
+            vec![
+                ctx(9, "spec:"),
+                del(10, "  minReplicas: 3"),
+                add(10, "  minReplicas: 6"),
+            ],
+        )])],
     }
 }
 
@@ -294,20 +276,17 @@ fn retry_budget() -> Commit {
         when: "Oct 3".into(),
         target: ks("apps-payments"),
         rollout: healthy_everywhere("apps-payments"),
-        views: vec![source(
-            AS_COMMITTED,
-            vec![file(
-                "apps/payments/base/deployment.yaml",
-                vec![
-                    ctx(24, "        env:"),
-                    add(25, "        - name: STRIPE_MAX_RETRIES"),
-                    add(26, "          value: \"3\""),
-                    add(27, "        - name: STRIPE_RETRY_BUDGET_MS"),
-                    add(28, "          value: \"2000\""),
-                    ctx(29, "        - name: LOG_LEVEL"),
-                ],
-            )],
-        )],
+        views: vec![source(vec![file(
+            "apps/payments/base/deployment.yaml",
+            vec![
+                ctx(24, "        env:"),
+                add(25, "        - name: STRIPE_MAX_RETRIES"),
+                add(26, "          value: \"3\""),
+                add(27, "        - name: STRIPE_RETRY_BUDGET_MS"),
+                add(28, "          value: \"2000\""),
+                ctx(29, "        - name: LOG_LEVEL"),
+            ],
+        )])],
     }
 }
 
@@ -376,7 +355,7 @@ fn payments_pdb() -> Commit {
         when: "Sep 19".into(),
         target: ks("apps-payments"),
         rollout: healthy_everywhere("apps-payments"),
-        views: vec![source(AS_COMMITTED, vec![pdb, hpa, kustomization])],
+        views: vec![source(vec![pdb, hpa, kustomization])],
     }
 }
 

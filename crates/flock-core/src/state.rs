@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use crate::app_settings::Refresh;
 use crate::crd::CrdKey;
@@ -62,7 +61,6 @@ pub enum Command {
         name: String,
         yaml: String,
     },
-    WatchFolder(PathBuf),
     RemoveCluster(ClusterId),
     RenameCluster(ClusterId, String),
     SwitchContext(ClusterId, ContextRef),

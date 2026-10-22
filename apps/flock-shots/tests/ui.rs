@@ -271,6 +271,18 @@ fn cluster_actions_open_from_the_switcher() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn add_cluster_offers_paste_but_no_folder_watching() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-shift-c")?;
+    ui.type_text("add cluster")?;
+    ui.press("enter")?;
+    assert!(ui.bounds("paste").is_some());
+    assert!(ui.bounds("cancel").is_some());
+    assert!(ui.bounds("watch-folder").is_none());
+    Ok(())
+}
+
 #[cfg(feature = "loco")]
 #[test]
 fn the_loco_section_shows_only_for_clusters_running_loco() -> anyhow::Result<()> {

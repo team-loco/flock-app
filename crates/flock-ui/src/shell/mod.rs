@@ -670,7 +670,6 @@ impl Shell {
             Command::CheckContexts(_) => {}
             Command::AddClusters(_) => {}
             Command::SaveKubeconfig { .. } => {}
-            Command::WatchFolder(_) => {}
             Command::RemoveCluster(_) => {}
             Command::RenameCluster(..) => {}
             Command::SwitchContext(..) => {}

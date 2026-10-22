@@ -14,8 +14,6 @@ use serde_json::Value;
 use super::convert::{Parsed, elapsed};
 use super::git::{GitCommit, MirrorState, RepoKey};
 
-const AS_COMMITTED: &str = "Source change as committed.";
-const TRUNCATED: &str = "Source change as committed; the diff is too large to show in full.";
 const DEFAULT_BRANCH: &str = "master";
 const REPO_SEPARATOR: &str = ", ";
 const TODAY: &str = "today";
@@ -241,12 +239,7 @@ fn commit(
         rollout,
         views: vec![Rendering {
             kind: ViewKind::Source,
-            note: if commit.truncated {
-                TRUNCATED
-            } else {
-                AS_COMMITTED
-            }
-            .to_owned(),
+            truncated: commit.truncated,
             files: commit.files.clone(),
         }],
     })

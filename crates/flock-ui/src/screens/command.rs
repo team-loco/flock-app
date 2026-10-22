@@ -20,28 +20,13 @@ use crate::theme::{
     ActiveTheme, FONT_MONO, PALETTE_CLUSTER, PALETTE_IN, PALETTE_INPUT, PALETTE_KIND,
     PALETTE_NAMESPACE, PALETTE_OUT, PALETTE_RESULTS, PALETTE_SCALE_FROM, PALETTE_STATUS,
     PALETTE_TOP, PALETTE_WIDTH, Palette, RADIUS_MENU, ROW_TABLE_MAX, RULE, SPACE_2, SPACE_3,
-    SPACE_5, SPACE_6, SPACE_7, SPACE_8, TEXT_BODY, TEXT_LABEL, TEXT_PALETTE, TEXT_SMALL,
+    SPACE_5, SPACE_6, TEXT_BODY, TEXT_LABEL, TEXT_PALETTE, TEXT_SMALL,
 };
 
 const PLACEHOLDER: &str = "Go to anything";
 const NO_MATCHES: &str = "No matches.";
 pub(crate) const PALETTE_CONTEXT: &str = "CommandPalette";
 const OVERLAY_PRIORITY: usize = 5;
-const HINTS: &[(&str, &str)] = &[
-    ("@", "cluster"),
-    ("ns:", "namespace"),
-    ("k:", "kind"),
-    ("l:", "label=value"),
-    (">", "command"),
-];
-const FOOTER_START: &[&str] = &[
-    "↑↓ move",
-    "↵ open",
-    "⌘↵ open in new tab",
-    "⌥↵ open in new window",
-    "⌘⇧↵ open in split",
-];
-const FOOTER_END: &str = "esc";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
@@ -381,44 +366,6 @@ fn section_label(section: Section, first: bool) -> impl IntoElement {
         .child(SectionLabel::new(section.label()))
 }
 
-fn hints(palette: &Palette) -> impl IntoElement {
-    let hints = HINTS.iter().map(|(prefix, rest)| {
-        div()
-            .flex()
-            .child(div().text_color(palette.fg2).child(*prefix))
-            .child(*rest)
-    });
-    div()
-        .flex()
-        .flex_wrap()
-        .gap(SPACE_7)
-        .px(SPACE_6)
-        .py(SPACE_3)
-        .border_b(RULE)
-        .border_color(palette.line)
-        .font_family(FONT_MONO)
-        .text_size(TEXT_SMALL)
-        .text_color(palette.mute)
-        .children(hints)
-}
-
-fn footer(palette: &Palette) -> impl IntoElement {
-    div()
-        .flex()
-        .gap(SPACE_8)
-        .px(SPACE_6)
-        .py(SPACE_3)
-        .border_t(RULE)
-        .border_color(palette.line)
-        .bg(palette.chrome)
-        .font_family(FONT_MONO)
-        .text_size(TEXT_LABEL)
-        .text_color(palette.mute)
-        .children(FOOTER_START.iter().map(|hint| div().child(*hint)))
-        .child(div().flex_1())
-        .child(FOOTER_END)
-}
-
 pub fn child_index(hits: &[Hit], ix: usize) -> usize {
     let labels_before = hits
         .iter()
@@ -504,9 +451,7 @@ impl Render for CommandPalette {
                 panel.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             })
             .child(self.render_query(&palette))
-            .child(hints(&palette))
-            .child(self.render_results(cx))
-            .child(footer(&palette));
+            .child(self.render_results(cx));
         let key = ElementId::NamedInteger("command-palette-reveal".into(), self.generation);
         let animation = Animation::new(duration).with_easing(ease_out_quint());
         let panel = panel.with_animation(key, animation, move |panel, t| {

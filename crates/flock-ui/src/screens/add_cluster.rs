@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use flock_core::{
     AddClusterFlow, AddClusterStep, Candidate, CheckLine, CheckStatus, Command, ContextChoice,
@@ -8,8 +7,8 @@ use flock_core::{
 use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, ElementId, Entity, EventEmitter,
     FocusHandle, Focusable, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement,
-    PathPromptOptions, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    Window, div, prelude::FluentBuilder, relative,
+    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
+    prelude::FluentBuilder, relative,
 };
 
 use crate::kit::status_symbols;
@@ -30,14 +29,12 @@ const NOTHING_LEFT: &str =
     "Every context in ~/.kube and $KUBECONFIG is already in Flock, or there are none yet.";
 const NAME_LABEL: &str = "name";
 const PASTE: &str = "Paste kubeconfig…";
-const WATCH_FOLDER: &str = "Watch a folder…";
 const PASTE_TITLE: &str = "Paste kubeconfig";
 const PASTE_SUBTITLE: &str =
     "Flock saves the pasted text in its own folder and lists its contexts here.";
 const PASTE_NAME_PLACEHOLDER: &str = "file name, e.g. lab";
 const PASTE_PLACEHOLDER: &str = "apiVersion: v1\nkind: Config\n…";
 const SAVE: &str = "Save";
-const WATCH_PROMPT: &str = "Watch folder";
 const CANCEL: &str = "Cancel";
 const BACK: &str = "Back";
 const COPY: &str = "Copy";
@@ -148,27 +145,6 @@ impl AddClusterDialog {
         }));
     }
 
-    fn pick_folder(cx: &mut Context<Self>) {
-        let options = PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some(WATCH_PROMPT.into()),
-        };
-        let chosen = cx.prompt_for_paths(options);
-        cx.spawn(async move |this, cx| {
-            let folder = chosen.await.ok().and_then(Result::ok).flatten();
-            let folder: Option<PathBuf> = folder.and_then(|paths| paths.into_iter().next());
-            if let Some(folder) = folder {
-                this.update(cx, |_, cx| {
-                    cx.emit(AddClusterEvent::Send(Command::WatchFolder(folder)));
-                })
-                .ok();
-            }
-        })
-        .detach();
-    }
-
     fn load(&mut self, files: Vec<KubeconfigFile>, window: &mut Window, cx: &mut Context<Self>) {
         let started = self.flow.load(files);
         let ids: Vec<ContextRef> = self.flow.choices().map(|c| c.id.clone()).collect();
@@ -260,11 +236,6 @@ impl AddClusterDialog {
                     cx.notify();
                 },
             )))
-            .child(
-                Button::new("watch-folder", WATCH_FOLDER)
-                    .ghost()
-                    .on_click(cx.listener(|_, _, _, cx| Self::pick_folder(cx))),
-            )
             .child(div().flex_1())
             .child(Button::new("cancel", CANCEL).on_click(close))
             .child(connect);
