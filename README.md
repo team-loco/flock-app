@@ -16,15 +16,7 @@
 curl -fsSL https://raw.githubusercontent.com/team-loco/flock-app/main/install.sh | sh
 ```
 
-The script downloads the latest release, verifies its checksum and installs `/Applications/Flock.app`
-without a Gatekeeper prompt. Set `FLOCK_VERSION=0.2.7` to pick a version or `FLOCK_INSTALL_DIR` to
-install elsewhere.
-
-Or download `Flock-<version>-arm64.zip` from [Releases](https://github.com/team-loco/flock-app/releases)
-and unzip it. A browser download is quarantined; see [docs/releasing.md](docs/releasing.md#first-install-and-gatekeeper).
-
-Apple Silicon only. Flock checks for new releases itself, verifies their signature and checksum, and
-offers "Restart to update".
+For Apple Silicon only.
 
 ## What it does
 
