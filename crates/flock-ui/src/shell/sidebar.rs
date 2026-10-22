@@ -1,37 +1,64 @@
 use std::collections::BTreeMap;
 
 use flock_core::switcher::ALL_CLUSTERS;
-use flock_core::{ClusterSummary, Command, Counts, NavSection, Page};
+use flock_core::{ClusterSummary, Command, Counts, NavSection, Page, Status};
 use gpui::{
-    Animation, AnimationExt, AnyElement, ClickEvent, Context, ElementId, FontWeight, Hsla,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, ease_out_quint, prelude::FluentBuilder, svg,
+    Animation, AnimationExt, AnyElement, App, ClickEvent, Context, CursorStyle, DispatchPhase,
+    ElementId, FontWeight, Hsla, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, SharedString, StatefulInteractiveElement,
+    Styled, Window, canvas, div, ease_out_quint, prelude::FluentBuilder, px, svg,
 };
 
 use super::Shell;
 use super::keys::SIDEBAR_CONTEXT;
-use crate::assets::{CHEVRON_LEFT, CHEVRON_RIGHT};
-use crate::kit::{Tooltip, status_symbols};
+use crate::assets::CHEVRON_RIGHT;
+use crate::kit::{Toast, Tooltip, status_symbols, toast};
 use crate::theme::{
     ActiveTheme, COLLAPSE, FONT_MONO, ICON, ICON_BUTTON, PAGE_HEADER, Palette, RADIUS, ROW_NAV,
-    RULE, SIDEBAR, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_LABEL, TEXT_UI,
-    TITLE_ROW, TRAFFIC_LIGHTS_INSET,
+    RULE, SIDEBAR, SIDEBAR_CLOSE, SIDEBAR_MAX, SIDEBAR_MIN, SPACE_1, SPACE_2, SPACE_3, SPACE_4,
+    SPACE_6, SPACE_8, SPLITTER, TEXT_LABEL, TEXT_UI, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
 };
 
-const COLLAPSE_TOOLTIP: &str = "Collapse sidebar  ⌘B";
 const EXPAND_TOOLTIP: &str = "Expand sidebar  ⌘B";
+const EDGE_GROUP: &str = "sidebar-edge";
+const REOPEN_GROUP: &str = "sidebar-reopen";
+const SAVE_FAILED: &str = "Could not save the sidebar width";
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct SidebarDrag {
+    start: Pixels,
+    initial: Pixels,
+    width: Pixels,
+}
+
+fn dragged_width(initial: Pixels, start: Pixels, now: Pixels) -> Option<Pixels> {
+    let width = initial + now - start;
+    (width >= SIDEBAR_CLOSE).then(|| width.clamp(SIDEBAR_MIN, SIDEBAR_MAX))
+}
+
+fn sidebar_width(cx: &App) -> Pixels {
+    let saved = crate::settings::current(cx).sidebar_width;
+    saved.map_or(SIDEBAR, |width| {
+        px(f32::from(width)).clamp(SIDEBAR_MIN, SIDEBAR_MAX)
+    })
+}
 
 impl Shell {
     pub(super) fn sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let palette = *cx.palette();
         let open = self.state.sidebar_open;
+        let width = self.open_width(cx);
         self.forget_stale_nav_cursor();
         let highlight = self.sidebar_highlight(window);
-        let content = open.then(|| self.sidebar_open(highlight, &palette, cx));
+        let content = open.then(|| {
+            self.sidebar_open(highlight, width, &palette, cx)
+                .into_any_element()
+        });
+        let edge = open.then(|| self.sidebar_edge(&palette, cx));
         let (from, to) = if open {
-            (Pixels::ZERO, SIDEBAR)
+            (Pixels::ZERO, width)
         } else {
-            (SIDEBAR, Pixels::ZERO)
+            (width, Pixels::ZERO)
         };
         let panel = div()
             .debug_selector(|| "sidebar".to_owned())
@@ -41,11 +68,166 @@ impl Shell {
             .overflow_hidden()
             .w(to)
             .bg(palette.panel)
-            .when(open, |panel| {
-                panel.border_r(RULE).border_color(palette.line)
-            })
-            .children(content);
+            .children(content)
+            .children(edge);
         self.slide(panel, "sidebar", from, to)
+    }
+
+    fn open_width(&self, cx: &App) -> Pixels {
+        self.sidebar_drag
+            .map_or_else(|| sidebar_width(cx), |drag| drag.width)
+    }
+
+    fn sidebar_edge(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let line = self.drag_line(palette.line, EDGE_GROUP, palette);
+        div()
+            .debug_selector(|| "sidebar-resize".to_owned())
+            .id("sidebar-resize")
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right_0()
+            .w(SPLITTER)
+            .flex()
+            .justify_end()
+            .group(EDGE_GROUP)
+            .cursor(CursorStyle::ResizeLeftRight)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.start_sidebar_drag(event.position.x, cx);
+                }),
+            )
+            .child(line)
+            .into_any_element()
+    }
+
+    pub(super) fn sidebar_reopen(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.state.sidebar_open {
+            return None;
+        }
+        let palette = *cx.palette();
+        let line = self.drag_line(gpui::transparent_black(), REOPEN_GROUP, &palette);
+        let handle = div()
+            .debug_selector(|| "sidebar-reopen".to_owned())
+            .id("sidebar-reopen")
+            .absolute()
+            .top(TITLE_ROW)
+            .bottom_0()
+            .left_0()
+            .w(SPLITTER)
+            .group(REOPEN_GROUP)
+            .cursor(CursorStyle::ResizeLeftRight)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    this.start_sidebar_drag(event.position.x, cx);
+                }),
+            )
+            .child(line);
+        Some(handle.into_any_element())
+    }
+
+    fn drag_line(&self, rest: Hsla, group: &'static str, palette: &Palette) -> gpui::Div {
+        let accent = palette.acc;
+        let color = if self.sidebar_drag.is_some() {
+            accent
+        } else {
+            rest
+        };
+        div()
+            .w(RULE)
+            .h_full()
+            .bg(color)
+            .group_hover(group, move |style| style.bg(accent))
+    }
+
+    pub(super) fn sidebar_drag_tracker(cx: &mut Context<Self>) -> AnyElement {
+        let shell = cx.entity();
+        canvas(
+            |_, _, _| (),
+            move |_, (), window, _| {
+                let moving = shell.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                    if phase == DispatchPhase::Capture {
+                        moving.update(cx, |shell, cx| shell.drag_sidebar(event, cx));
+                    }
+                });
+                let releasing = shell.clone();
+                window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                    if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                        releasing.update(cx, Self::end_sidebar_drag);
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_full()
+        .into_any_element()
+    }
+
+    fn start_sidebar_drag(&mut self, start: Pixels, cx: &mut Context<Self>) {
+        let width = sidebar_width(cx);
+        let initial = if self.state.sidebar_open {
+            width
+        } else {
+            Pixels::ZERO
+        };
+        self.sidebar_generation = 0;
+        self.sidebar_drag = Some(SidebarDrag {
+            start,
+            initial,
+            width,
+        });
+        cx.notify();
+    }
+
+    fn drag_sidebar(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.sidebar_drag.is_none() {
+            return;
+        }
+        if !event.dragging() {
+            self.end_sidebar_drag(cx);
+            return;
+        }
+        let Some(drag) = self.sidebar_drag.as_mut() else {
+            return;
+        };
+        let resized = dragged_width(drag.initial, drag.start, event.position.x);
+        if let Some(width) = resized {
+            drag.width = width;
+        }
+        self.state.sidebar_open = resized.is_some();
+        cx.notify();
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn end_sidebar_drag(&mut self, cx: &mut Context<Self>) {
+        let Some(drag) = self.sidebar_drag.take() else {
+            return;
+        };
+        let open = self.state.sidebar_open;
+        let width = f32::from(drag.width).round() as u16;
+        let saved = crate::settings::update(cx, |settings| {
+            settings.sidebar_closed = !open;
+            if open {
+                settings.sidebar_width = Some(width);
+            }
+        });
+        if let Err(error) = saved {
+            toast(Toast::new(Status::Err, SAVE_FAILED).detail(error), cx);
+        }
+        cx.notify();
+    }
+
+    pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_generation += 1;
+        let closed = self.state.sidebar_open;
+        let saved = crate::settings::update(cx, |settings| settings.sidebar_closed = closed);
+        if let Err(error) = saved {
+            toast(Toast::new(Status::Err, SAVE_FAILED).detail(error), cx);
+        }
     }
 
     pub(super) fn window_controls(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -129,6 +311,7 @@ impl Shell {
     fn sidebar_open(
         &self,
         highlight: Page,
+        width: Pixels,
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -144,8 +327,6 @@ impl Shell {
             }
             items.extend(section_rows(section, highlight, &counts, palette, cx));
         }
-        let collapse = icon_button("collapse-sidebar", CHEVRON_LEFT, COLLAPSE_TOOLTIP, palette)
-            .on_click(cx.listener(|this, _, _, cx| this.dispatch(Command::ToggleSidebar, cx)));
         let scope: SharedString = match &self.state.location().cluster {
             Some(id) => flock_core::tabs::cluster_name(id, &self.state.snapshot).into(),
             None => ALL_CLUSTERS.into(),
@@ -156,8 +337,7 @@ impl Shell {
             .flex_none()
             .items_center()
             .h(PAGE_HEADER)
-            .pl(SPACE_8)
-            .pr(SPACE_3)
+            .px(SPACE_8)
             .child(
                 div()
                     .flex_1()
@@ -166,10 +346,9 @@ impl Shell {
                     .text_size(TEXT_UI)
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(scope),
-            )
-            .child(collapse);
+            );
         div()
-            .w(SIDEBAR)
+            .w(width)
             .h_full()
             .flex()
             .flex_col()
@@ -329,4 +508,26 @@ fn icon_button(
         .tooltip(Tooltip::text(tooltip))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(svg().path(path).size(ICON).text_color(palette.mute))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_drag_clamps_to_the_limits_and_closes_below_the_threshold() {
+        let start = px(200.);
+        assert_eq!(dragged_width(SIDEBAR, start, px(260.)), Some(px(260.)));
+        assert_eq!(dragged_width(SIDEBAR, start, px(900.)), Some(SIDEBAR_MAX));
+        assert_eq!(
+            dragged_width(SIDEBAR, start, SIDEBAR_CLOSE),
+            Some(SIDEBAR_MIN)
+        );
+        assert_eq!(dragged_width(SIDEBAR, start, SIDEBAR_CLOSE - px(1.)), None);
+        assert_eq!(dragged_width(Pixels::ZERO, px(2.), px(42.)), None);
+        assert_eq!(
+            dragged_width(Pixels::ZERO, px(2.), px(302.)),
+            Some(px(300.))
+        );
+    }
 }

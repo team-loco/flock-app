@@ -685,10 +685,11 @@ fn sidebar_round_trip(ui: &mut Ui, from: &str) -> anyhow::Result<()> {
         ui.state().sidebar_open,
         "⌘B from {from} did not reopen the sidebar"
     );
-    ui.click("collapse-sidebar")?;
+    let close = gpui::point(-flock_ui::theme::SIDEBAR, gpui::px(0.));
+    ui.drag("sidebar-resize", close)?;
     anyhow::ensure!(
         !ui.state().sidebar_open,
-        "the chevron from {from} did not collapse it"
+        "dragging the edge from {from} did not close it"
     );
     ui.click("expand-sidebar")?;
     anyhow::ensure!(
@@ -701,11 +702,11 @@ fn sidebar_round_trip(ui: &mut Ui, from: &str) -> anyhow::Result<()> {
         ui.state().sidebar_open,
         "⌘B then the chevron from {from} left it closed"
     );
-    ui.click("collapse-sidebar")?;
+    ui.drag("sidebar-resize", close)?;
     ui.press("cmd-b")?;
     anyhow::ensure!(
         ui.state().sidebar_open,
-        "the chevron then ⌘B from {from} left it closed"
+        "dragging closed then ⌘B from {from} left it closed"
     );
     Ok(())
 }

@@ -135,7 +135,7 @@ Settled; change only with a new entry that says why.
     accent text is ≥ 4.5:1 on `editor`, `panel` and its own tint, `onacc` is ≥ 4.5:1 on `acc`,
     and `selfg`, `fg`, `fg2`, `mute` are ≥ 4.5:1 and status glyphs ≥ 3:1 on `sel`. The override
     applies to every window at once and to the gpui-component kit theme.
-25. **v3 sidebar and status-bar switcher** (design v3; product owner): supersedes the parts of 16
+25. **v3 sidebar and status-bar switcher** (design v3; product owner; collapse chevron and width superseded by 52): supersedes the parts of 16
     and 18 that conflict. The sidebar is 200px: the 28px strip (traffic lights only), then a 32px
     header with the scope (All clusters, or the active tab's cluster) and the ⌘B collapse
     chevron, then the nav. Collapsed it is 76px with only the expand chevron: the product owner
@@ -513,3 +513,17 @@ Settled; change only with a new entry that says why.
     `kit::RawMessage` (a forbidden list reads like the API server's, `secrets is forbidden:
     cannot list resource "secrets"`) followed by what breaks; verdicts read Ready and
     Unauthorized, and the footer counts `N of M ready`.
+52. **The sidebar resizes by dragging; dragging it closed replaces the collapse chevron** (product
+    owner; supersedes the ⌘B collapse chevron in 25 and the fixed 200px width in 25 and 29): the
+    sidebar's right edge is a `SPLITTER`-wide handle with a col-resize cursor whose 1px line stays
+    the sidebar border until hovered or dragged, then turns `acc`. Dragging resizes live, with no
+    animation, between `theme::SIDEBAR_MIN` (160px) and `SIDEBAR_MAX` (360px), starting from
+    `SIDEBAR` (200px); labels and the scope truncate. Releasing below `SIDEBAR_CLOSE` (80px, half
+    the minimum) closes it to 0px; between that and the minimum it stays at the minimum. Closed, a
+    `SPLITTER`-wide handle on the window's left edge, from below the title row (so the traffic
+    lights and window dragging keep the row) to the status bar, drags it open again; it never
+    stops a mouse down, so clicks reach the content under it. ⌘B still toggles with the
+    `COLLAPSE` animation and reopens at the last open width; the expand chevron in the closed
+    title row stays. The width (`sidebar_width`, absent for the default) and whether it is closed
+    (`sidebar_closed`) live in `AppSettings`, next to the inspector widths; each window starts
+    from them and every drag or ⌘B writes them, so the width is shared by all windows.

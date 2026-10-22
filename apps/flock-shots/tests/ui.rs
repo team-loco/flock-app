@@ -6,8 +6,9 @@ use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
 use flock_ui::theme::{
-    FONT_MONO, FONT_SANS, FONT_STATUS, ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SPACE_3, SPACE_5,
-    TAB_ENTER, TAB_LEAVE, TEXT_MONO, TEXT_UI, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
+    FONT_MONO, FONT_SANS, FONT_STATUS, ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SIDEBAR_CLOSE,
+    SIDEBAR_MAX, SIDEBAR_MIN, SPACE_3, SPACE_5, SPLITTER, TAB_ENTER, TAB_LEAVE, TEXT_MONO, TEXT_UI,
+    TITLE_ROW, TRAFFIC_LIGHTS_INSET,
 };
 use gpui::{Pixels, SharedString, TextRun, font, rgb};
 
@@ -72,13 +73,122 @@ fn the_expand_chevron_sits_after_the_traffic_lights_in_the_title_row() -> anyhow
     Ok(())
 }
 
+fn saved_sidebar(ui: &Ui) -> (Option<u16>, bool) {
+    ui.read_app(|cx| {
+        let settings = flock_ui::settings::current(cx);
+        (settings.sidebar_width, settings.sidebar_closed)
+    })
+}
+
+fn drag_edge(ui: &mut Ui, by: Pixels) -> anyhow::Result<()> {
+    ui.drag("sidebar-resize", gpui::point(by, Pixels::ZERO))
+}
+
 #[test]
-fn the_sidebar_buttons_collapse_and_expand_it() -> anyhow::Result<()> {
+fn the_sidebar_has_no_collapse_arrow_and_an_invisible_edge_handle() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
-    ui.click("collapse-sidebar")?;
-    assert!(!ui.state().sidebar_open);
-    ui.click("expand-sidebar")?;
+    assert!(ui.bounds("collapse-sidebar").is_none());
+    let edge = ui
+        .bounds("sidebar-resize")
+        .ok_or_else(|| anyhow::anyhow!("no sidebar edge handle"))?;
+    assert_eq!(edge.size.width, SPLITTER);
+    assert_eq!(edge.origin.x + edge.size.width, SIDEBAR);
+    assert!(ui.bounds("sidebar-reopen").is_none());
+    Ok(())
+}
+
+#[test]
+fn dragging_the_sidebar_edge_resizes_it_within_its_clamps() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let wider = SIDEBAR + gpui::px(60.);
+    drag_edge(&mut ui, wider - SIDEBAR)?;
+    assert_eq!(width(&mut ui, "sidebar"), Some(wider));
+    assert_eq!(left(&mut ui, "tab-0"), Some(wider));
+    assert_eq!(saved_sidebar(&ui), (Some(260), false));
+    drag_edge(&mut ui, gpui::px(1000.))?;
+    assert_eq!(width(&mut ui, "sidebar"), Some(SIDEBAR_MAX));
+    let between = SIDEBAR_CLOSE + (SIDEBAR_MIN - SIDEBAR_CLOSE) / 2.;
+    drag_edge(&mut ui, between - SIDEBAR_MAX)?;
     assert!(ui.state().sidebar_open);
+    assert_eq!(width(&mut ui, "sidebar"), Some(SIDEBAR_MIN));
+    assert_eq!(left(&mut ui, "tab-0"), Some(SIDEBAR_MIN));
+    let scope = ui
+        .bounds("sidebar-scope")
+        .ok_or_else(|| anyhow::anyhow!("no sidebar scope"))?;
+    assert!(scope.origin.x + scope.size.width <= SIDEBAR_MIN);
+    Ok(())
+}
+
+#[test]
+fn dragging_the_sidebar_past_the_threshold_closes_it() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    drag_edge(&mut ui, SIDEBAR_CLOSE - SIDEBAR - gpui::px(1.))?;
+    assert!(!ui.state().sidebar_open);
+    assert_eq!(width(&mut ui, "sidebar"), Some(Pixels::ZERO));
+    assert!(ui.bounds("sidebar-scope").is_none());
+    assert_eq!(saved_sidebar(&ui), (None, true));
+    assert!(ui.bounds("sidebar-reopen").is_some());
+    Ok(())
+}
+
+#[test]
+fn dragging_from_the_left_edge_reopens_the_sidebar() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.press("cmd-b")?;
+    let handle = ui
+        .bounds("sidebar-reopen")
+        .ok_or_else(|| anyhow::anyhow!("no reopen handle"))?;
+    assert_eq!(handle.origin.x, Pixels::ZERO);
+    assert_eq!(handle.origin.y, TITLE_ROW);
+    assert_eq!(handle.size.width, SPLITTER);
+    ui.drag(
+        "sidebar-reopen",
+        gpui::point(SIDEBAR_CLOSE / 2., Pixels::ZERO),
+    )?;
+    assert!(!ui.state().sidebar_open);
+    let opened = gpui::px(240.);
+    ui.drag("sidebar-reopen", gpui::point(opened, Pixels::ZERO))?;
+    assert!(ui.state().sidebar_open);
+    assert_eq!(width(&mut ui, "sidebar"), Some(opened));
+    assert_eq!(left(&mut ui, "tab-0"), Some(opened));
+    assert_eq!(saved_sidebar(&ui), (Some(240), false));
+    assert!(ui.bounds("sidebar-reopen").is_none());
+    Ok(())
+}
+
+#[test]
+fn the_reopen_handle_lets_clicks_through_to_the_content_under_it() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Resources)?;
+    ui.press("cmd-b")?;
+    let row = ui
+        .bounds("resources-Deployment-row-0")
+        .ok_or_else(|| anyhow::anyhow!("no deployment row"))?;
+    assert_eq!(row.origin.x, Pixels::ZERO);
+    assert_eq!(ui.state().location().inspecting, None);
+    ui.click_at(gpui::point(SPLITTER / 2., row.center().y), 1)?;
+    assert!(ui.state().location().inspecting.is_some());
+    assert!(!ui.state().sidebar_open);
+    Ok(())
+}
+
+#[test]
+fn command_b_restores_the_last_dragged_width() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let dragged = gpui::px(280.);
+    drag_edge(&mut ui, dragged - SIDEBAR)?;
+    ui.press("cmd-b")?;
+    assert!(!ui.state().sidebar_open);
+    assert_eq!(width(&mut ui, "sidebar"), Some(Pixels::ZERO));
+    assert_eq!(saved_sidebar(&ui), (Some(280), true));
+    ui.press("cmd-b")?;
+    assert!(ui.state().sidebar_open);
+    assert_eq!(width(&mut ui, "sidebar"), Some(dragged));
+    assert_eq!(left(&mut ui, "tab-0"), Some(dragged));
+    assert_eq!(saved_sidebar(&ui), (Some(280), false));
+    drag_edge(&mut ui, -dragged)?;
+    assert!(!ui.state().sidebar_open);
+    ui.press("cmd-b")?;
+    assert_eq!(width(&mut ui, "sidebar"), Some(dragged));
     Ok(())
 }
 
@@ -2368,7 +2478,8 @@ fn sidebar_shortcuts_survive_removing_the_focused_sidebar() -> anyhow::Result<()
         assert!(ui.state().sidebar_open);
     }
     ui.press("cmd-shift-e")?;
-    ui.click("collapse-sidebar")?;
+    drag_edge(&mut ui, -SIDEBAR)?;
+    assert!(!ui.state().sidebar_open);
     ui.press("cmd-b")?;
     assert!(ui.state().sidebar_open);
     ui.press("cmd-k escape cmd-b cmd-b")?;

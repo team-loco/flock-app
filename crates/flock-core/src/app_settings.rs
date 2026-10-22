@@ -17,6 +17,8 @@ const CHANNEL: u32 = 0xFF;
 pub struct AppSettings {
     pub show_in_menu_bar: bool,
     pub inspector_widths: BTreeMap<String, u16>,
+    pub sidebar_width: Option<u16>,
+    pub sidebar_closed: bool,
     pub open_sections: BTreeMap<String, bool>,
     pub theme: ThemeChoice,
     pub primary: Highlight,
@@ -31,6 +33,8 @@ impl Default for AppSettings {
         Self {
             show_in_menu_bar: true,
             inspector_widths: BTreeMap::default(),
+            sidebar_width: None,
+            sidebar_closed: false,
             open_sections: BTreeMap::default(),
             theme: ThemeChoice::default(),
             primary: Highlight::default(),
@@ -373,6 +377,8 @@ mod tests {
                 paused: true,
             },
             inspector_widths: BTreeMap::from([("resource-inspector".to_owned(), 640)]),
+            sidebar_width: Some(240),
+            sidebar_closed: true,
             open_sections: BTreeMap::from([("pod-inspector-events".to_owned(), true)]),
             updates: Updates {
                 automatic: false,
@@ -389,6 +395,7 @@ mod tests {
         );
         assert!(json.contains("\"secondary\":\"teal\""), "{json}");
         assert!(json.contains("\"interval\":\"24h\""), "{json}");
+        assert!(json.contains("\"sidebar_width\":240"), "{json}");
         let read: Result<AppSettings, _> = serde_json::from_str(&json);
         assert_eq!(read.ok(), Some(settings));
     }
@@ -424,6 +431,8 @@ mod tests {
         assert_eq!(read.ok(), Some(expected));
         let updates = AppSettings::default().updates;
         assert!(AppSettings::default().show_in_menu_bar);
+        assert_eq!(AppSettings::default().sidebar_width, None);
+        assert!(!AppSettings::default().sidebar_closed);
         assert!(updates.automatic);
         assert!(!updates.prereleases);
     }
