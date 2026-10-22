@@ -22,7 +22,6 @@ const SOURCES: [(&str, &str); 3] = [
     ("pvc ", CLAIM),
 ];
 const KEPT: usize = 16;
-const DOMAIN: char = '.';
 
 fn app(name: &str) -> BTreeMap<String, String> {
     BTreeMap::from([(APP_LABEL.to_owned(), name.to_owned())])
@@ -51,11 +50,7 @@ fn pod_fact(pod: &Pod) -> Fact {
             Some(Key::new(*kind, name))
         })
     });
-    let node = pod
-        .node
-        .iter()
-        .filter_map(|node| node.split(DOMAIN).next())
-        .map(|node| Key::new(NODE, node));
+    let node = pod.node.iter().map(|node| Key::new(NODE, node));
     Fact {
         status: pod.status,
         note: pod.reason.clone(),

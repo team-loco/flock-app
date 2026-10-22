@@ -352,7 +352,7 @@ impl Shell {
             .unwrap_or_default()
     }
 
-    fn screen_event(&mut self, event: &ScreenEvent, cx: &mut Context<Self>) {
+    fn screen_event(&mut self, event: &ScreenEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             ScreenEvent::Command(command) => self.dispatch(command.clone(), cx),
             ScreenEvent::Navigate(page) => self.dispatch(Command::SelectPage(*page), cx),
@@ -367,10 +367,24 @@ impl Shell {
             ScreenEvent::NeedsAttention { page, namespace } => {
                 self.show_attention(*page, namespace.as_deref(), cx);
             }
+            ScreenEvent::Filter { page, tokens } => {
+                self.open_list(*page, None, cx);
+                if let Some(bar) = self.filter_bar(cx) {
+                    bar.update(cx, |bar, cx| bar.preset(tokens.clone(), window, cx));
+                }
+            }
         }
     }
 
     fn show_attention(&mut self, page: Page, namespace: Option<&str>, cx: &mut Context<Self>) {
+        self.open_list(page, namespace, cx);
+        let chip = flock_core::resources::attention_chip(page);
+        if let Some(bar) = self.filter_bar(cx) {
+            bar.update(cx, |bar, cx| bar.select_chip(chip, cx));
+        }
+    }
+
+    fn open_list(&mut self, page: Page, namespace: Option<&str>, cx: &mut Context<Self>) {
         let location = self.state.location().clone();
         let list = flock_core::resources::namespace_list(page);
         if let (Some(list), Some(cluster)) = (list, location.cluster.clone()) {
@@ -379,10 +393,6 @@ impl Shell {
             self.dispatch(Command::SetPreferences(cluster, preferences), cx);
         }
         self.dispatch(Command::SelectPage(page), cx);
-        let chip = flock_core::resources::attention_chip(page);
-        if let Some(bar) = self.filter_bar(cx) {
-            bar.update(cx, |bar, cx| bar.select_chip(chip, cx));
-        }
     }
 
     fn send(&self, command: Command) {

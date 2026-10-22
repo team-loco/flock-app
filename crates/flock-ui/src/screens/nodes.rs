@@ -1,6 +1,6 @@
 use flock_core::emptiness::Noun;
 use flock_core::events::Event;
-use flock_core::filter::label_values;
+use flock_core::filter::{label_values, node_query};
 use flock_core::node_pools::{kubelet_skewed, pressure};
 use flock_core::nodes::{Node, NodeFilter, NodePod, NodeSummary, Usage, pool_counts, request_line};
 use flock_core::overview::{Commitment, percent};
@@ -15,7 +15,7 @@ use gpui::{
     ParentElement, Pixels, Render, SharedString, Styled, WeakEntity, Window, div, px,
 };
 
-use super::{NODE_KIND, ScreenEvent};
+use super::{ALL_LINK, NODE_KIND, ScreenEvent};
 use crate::kit::{
     ActionMenu, CONDITIONS, Column, ConditionTable, ConfirmDialog, FilterBar, FilterEvent,
     Inspector, KeyValue, LabelChips, Link, MenuItem, Meter, MiniMeter, PanelSection, Presence,
@@ -44,6 +44,7 @@ const INSPECTOR_LABEL: Pixels = px(72.);
 const USAGE_LABEL: Pixels = px(64.);
 const POD_FIGURE: Pixels = px(56.);
 const INSPECTOR_ID: &str = "node-inspector";
+const ALL_PODS_ID: &str = "node-inspector-all-pods";
 const ACTIONS_ID: &str = "node-actions";
 const FOOTER_NOTE: &str = "requests / allocatable";
 const USED: &str = "used";
@@ -403,8 +404,15 @@ impl NodesScreen {
         let taints = PanelSection::new(INSPECTOR_ID, "Taints")
             .count(node.taints.len().to_string())
             .child(LabelChips::new(node.taints.clone()));
+        let filter = ScreenEvent::Filter {
+            page: Page::Pods,
+            tokens: vec![node_query(&node.name)],
+        };
+        let all_pods = Link::new(ALL_PODS_ID, ALL_LINK)
+            .on_click(cx.listener(move |_, _, _, cx| cx.emit(filter.clone())));
         let pods = PanelSection::new(INSPECTOR_ID, "Pods")
             .count(pods_count(node))
+            .trailing(all_pods)
             .child(self.top_pods(node, palette, cx));
         Inspector::new(INSPECTOR_ID, node.name.clone())
             .mono()

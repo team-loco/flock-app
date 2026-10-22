@@ -6,6 +6,7 @@ use crate::Status;
 
 pub const NAMESPACE_PREFIX: &str = "ns:";
 pub const LABEL_PREFIXES: [&str; 2] = ["label:", "l:"];
+pub const NODE_PREFIX: &str = "node:";
 const LABEL_SEPARATOR: char = '=';
 const TOKEN_KEYWORDS: [(&str, &str); 4] = [
     (NAMESPACE_PREFIX, NAMESPACE_PREFIX),
@@ -20,6 +21,14 @@ pub fn namespace_token(token: &str) -> Option<String> {
     token
         .strip_prefix(NAMESPACE_PREFIX)
         .map(str::to_ascii_lowercase)
+}
+
+pub fn node_token(token: &str) -> Option<String> {
+    token.strip_prefix(NODE_PREFIX).map(str::to_ascii_lowercase)
+}
+
+pub fn node_query(node: &str) -> String {
+    format!("{NODE_PREFIX}{node}")
 }
 
 pub fn label_token(token: &str) -> Option<LabelMatch> {
@@ -130,6 +139,9 @@ pub fn applied_token(token: &str) -> bool {
     if let Some(namespace) = namespace_token(token) {
         return !namespace.is_empty();
     }
+    if let Some(node) = node_token(token) {
+        return !node.is_empty();
+    }
     label_token(token)
         .is_some_and(|(key, value)| !key.is_empty() && value.is_none_or(|value| !value.is_empty()))
 }
@@ -177,6 +189,7 @@ impl StatusFilter {
 const PLACEHOLDER_PREFIX: &str = "Filter by ";
 const NAMESPACE_NAME: &str = "namespace";
 const LABEL_NAME: &str = "label";
+const NODE_NAME: &str = "node";
 
 pub type FieldValues<'a> = Vec<Cow<'a, str>>;
 pub type FieldFn<T, C = ()> = for<'a> fn(&'a T, &'a C, &mut FieldValues<'a>);
@@ -215,7 +228,21 @@ impl<T, C> FilterSpec<T, C> {
         };
         let labels_ok = query.labels.is_empty()
             || (self.labels && label_sets.iter().any(|labels| query.matches_labels(labels)));
-        namespace_ok && labels_ok && self.text_matches(row, context, query)
+        namespace_ok
+            && labels_ok
+            && self.node_matches(row, context, query)
+            && self.text_matches(row, context, query)
+    }
+
+    fn node_matches(&self, row: &T, context: &C, query: &TextFilter) -> bool {
+        let Some(wanted) = &query.node else {
+            return true;
+        };
+        let mut values = FieldValues::new();
+        for (_, field) in self.fields.iter().filter(|(name, _)| *name == NODE_NAME) {
+            field(row, context, &mut values);
+        }
+        values.iter().any(|node| node.eq_ignore_ascii_case(wanted))
     }
 
     fn text_matches(&self, row: &T, context: &C, query: &TextFilter) -> bool {
@@ -285,6 +312,7 @@ impl FilterScope {
 pub struct TextFilter {
     pub words: Vec<String>,
     pub namespace: Option<String>,
+    pub node: Option<String>,
     pub labels: Vec<LabelMatch>,
 }
 
@@ -294,6 +322,8 @@ impl TextFilter {
         for token in input.split_whitespace() {
             if let Some(namespace) = namespace_token(token) {
                 filter.namespace = Some(namespace);
+            } else if let Some(node) = node_token(token) {
+                filter.node = Some(node);
             } else if let Some(label) = label_token(token) {
                 filter.labels.push(label);
             } else {
@@ -304,7 +334,10 @@ impl TextFilter {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.words.is_empty() && self.namespace.is_none() && self.labels.is_empty()
+        self.words.is_empty()
+            && self.namespace.is_none()
+            && self.node.is_none()
+            && self.labels.is_empty()
     }
 
     pub fn matches_text(&self, fields: &[&str]) -> bool {
@@ -328,7 +361,10 @@ impl TextFilter {
     }
 
     pub fn matches(&self, namespace: Option<&str>, fields: &[&str]) -> bool {
-        self.labels.is_empty() && self.matches_namespace(namespace) && self.matches_text(fields)
+        self.labels.is_empty()
+            && self.node.is_none()
+            && self.matches_namespace(namespace)
+            && self.matches_text(fields)
     }
 
     pub fn matches_labeled(
@@ -337,7 +373,8 @@ impl TextFilter {
         labels: &BTreeMap<String, String>,
         fields: &[&str],
     ) -> bool {
-        self.matches_namespace(namespace)
+        self.node.is_none()
+            && self.matches_namespace(namespace)
             && self.matches_labels(labels)
             && self.matches_text(fields)
     }
@@ -440,7 +477,15 @@ mod tests {
         for token in ["ns:payments", "label:App=Cart", "l:tier"] {
             assert!(applied_token(token), "{token}");
         }
-        for token in ["ns:", "label:", "l:app=", "checkout", "label:=cart"] {
+        assert!(applied_token("node:ip-10-4-12-87"));
+        for token in [
+            "ns:",
+            "node:",
+            "label:",
+            "l:app=",
+            "checkout",
+            "label:=cart",
+        ] {
             assert!(!applied_token(token), "{token}");
         }
         let filter = TextFilter::parse("checkout ns:payments label:App=Cart");
@@ -561,6 +606,17 @@ mod tests {
         assert!(!toy_matches("gamma"));
         assert!(!toy_matches("delta"));
         assert_eq!(toy().hidden, "gamma");
+    }
+
+    #[test]
+    fn node_tokens_parse_lowercased_and_need_a_node_field() {
+        let filter = TextFilter::parse("api node:Worker-2");
+        assert_eq!(filter.words, ["api"]);
+        assert_eq!(filter.node.as_deref(), Some("worker-2"));
+        assert!(!filter.is_empty());
+        assert!(TextFilter::parse(&node_query("worker")).node.is_some());
+        assert!(!TextFilter::parse("node:worker").matches(None, &["worker"]));
+        assert!(!toy_matches("node:alpha"));
     }
 
     #[test]

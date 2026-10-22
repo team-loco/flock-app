@@ -125,8 +125,8 @@ impl PaneScreens {
         loco.update(cx, |screen, cx| {
             screen.set_navigation(navigation.clone(), cx);
         });
-        let pages = ClusterPages::new(window, cx, move |shell: &mut Shell, event, cx| {
-            shell.pane_screen_event(pane, event, cx);
+        let pages = ClusterPages::new(window, cx, move |shell: &mut Shell, event, window, cx| {
+            shell.pane_screen_event(pane, event, window, cx);
         });
         #[cfg_attr(not(feature = "loco"), allow(unused_mut))]
         let mut subscriptions = vec![
@@ -233,10 +233,11 @@ impl Shell {
         &mut self,
         pane: PaneId,
         event: &ScreenEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.focus_pane_id(pane, cx);
-        self.screen_event(event, cx);
+        self.screen_event(event, window, cx);
     }
 
     fn focus_pane_id(&mut self, pane: PaneId, cx: &mut Context<Self>) {

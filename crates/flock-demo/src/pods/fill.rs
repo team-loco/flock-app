@@ -9,7 +9,6 @@ use super::{
     template_hash, volumes,
 };
 
-const NODE_DOMAIN: &str = ".ec2.internal";
 const STATEFUL_SET: &str = "StatefulSet";
 const DAEMON_SET: &str = "DaemonSet";
 const REPLICA_SET: &str = "ReplicaSet";
@@ -474,9 +473,7 @@ fn filler(group: &Group, replica: u32, index: u32, node: Option<String>) -> Pod 
         Health::Crashing(_) => (PodPhase::Running, Status::Err, CRASH_LOOP),
     };
     let scheduled = !matches!(group.health, Health::Pending(_));
-    let node = node
-        .filter(|_| scheduled)
-        .map(|node| format!("{node}{NODE_DOMAIN}"));
+    let node = node.filter(|_| scheduled);
     let usage = scheduled.then(|| Usage {
         cpu_millis: CPU_BASE + index.wrapping_mul(CPU_STEP) % CPU_SPREAD,
         memory_mib: MEMORY_BASE + index.wrapping_mul(MEMORY_STEP) % MEMORY_SPREAD,
