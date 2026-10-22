@@ -1,13 +1,74 @@
 use gpui::{
     Anchor, Animation, AnimationExt, AnyElement, BoxShadow, ElementId, InteractiveElement,
-    IntoElement, ParentElement, Pixels, Point, Stateful, Styled, anchored, deferred, div,
-    ease_out_quint, point,
+    IntoElement, ParentElement, Pixels, Point, Stateful, Styled, WeakEntity, anchored, deferred,
+    div, ease_out_quint, point, px,
 };
 
 use crate::theme::{
-    POPOVER_IN, POPOVER_SLIDE, Palette, RADIUS_MENU, RULE, SHADOW_BLUR, SHADOW_OFFSET, SPACE_2,
-    SPACE_3, SPACE_4,
+    MENU_MAX_HEIGHT, POPOVER_IN, POPOVER_SLIDE, Palette, RADIUS_MENU, RULE, SHADOW_BLUR,
+    SHADOW_OFFSET, SPACE_2, SPACE_3, SPACE_4,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fit(Pixels);
+
+impl Default for Fit {
+    fn default() -> Self {
+        Self(MENU_MAX_HEIGHT)
+    }
+}
+
+impl Fit {
+    pub fn height(self) -> Pixels {
+        self.0
+    }
+
+    pub fn observe(&mut self, children: &[Pixels]) -> bool {
+        let next = fit_height(children, MENU_MAX_HEIGHT);
+        let changed = self.0 != next;
+        self.0 = next;
+        changed
+    }
+}
+
+pub fn fit_height(children: &[Pixels], max: Pixels) -> Pixels {
+    let border = RULE * 2.;
+    let total = children.iter().fold(px(0.), |sum, height| sum + *height);
+    if total + border + SPACE_2 * 2. <= max {
+        return max;
+    }
+    let room = max - border - SPACE_2;
+    let mut shown = px(0.);
+    for height in children {
+        if shown + *height > room {
+            break;
+        }
+        shown += *height;
+    }
+    if shown <= px(0.) {
+        return max;
+    }
+    border + SPACE_2 + shown
+}
+
+pub fn fitted_surface<T: 'static>(
+    id: impl Into<ElementId>,
+    palette: &Palette,
+    this: WeakEntity<T>,
+    fit: fn(&mut T) -> &mut Fit,
+) -> Stateful<gpui::Div> {
+    let measure =
+        move |children: Vec<gpui::Bounds<Pixels>>, _: &mut gpui::Window, cx: &mut gpui::App| {
+            let heights: Vec<Pixels> = children.iter().map(|bounds| bounds.size.height).collect();
+            this.update(cx, |owner, cx| {
+                if fit(owner).observe(&heights) {
+                    cx.notify();
+                }
+            })
+            .ok();
+        };
+    surface_in(div().on_children_prepainted(measure), id, palette)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
@@ -71,8 +132,11 @@ pub fn shadow(palette: &Palette) -> Vec<BoxShadow> {
 }
 
 pub fn surface(id: impl Into<ElementId>, palette: &Palette) -> Stateful<gpui::Div> {
-    div()
-        .id(id)
+    surface_in(div(), id, palette)
+}
+
+fn surface_in(base: gpui::Div, id: impl Into<ElementId>, palette: &Palette) -> Stateful<gpui::Div> {
+    base.id(id)
         .occlude()
         .flex()
         .flex_col()
@@ -166,5 +230,37 @@ mod tests {
     fn steps_nowhere_when_nothing_is_enabled() {
         assert_eq!(step(None, 3, |_| false, Step::Next), None);
         assert_eq!(step(Some(1), 0, |_| true, Step::Previous), None);
+    }
+
+    fn rows(heights: &[f32]) -> Vec<Pixels> {
+        heights.iter().map(|height| px(*height)).collect()
+    }
+
+    #[test]
+    fn a_list_that_fits_keeps_the_max_height() {
+        let max = px(360.);
+        assert_eq!(fit_height(&rows(&[100., 100.]), max), max);
+    }
+
+    #[test]
+    fn a_tall_list_shows_only_whole_rows() {
+        let max = px(360.);
+        let children = rows(&[40., 52., 40., 52., 40., 52., 40., 52.]);
+        let height = fit_height(&children, max);
+        assert!(height <= max);
+        let shown = height - RULE * 2. - SPACE_2;
+        let mut edge = px(0.);
+        let on_edge = std::iter::once(px(0.)).chain(children.iter().map(|row| {
+            edge += *row;
+            edge
+        }));
+        assert!(on_edge.into_iter().any(|bottom| bottom == shown));
+        assert!(height > max - px(52.));
+    }
+
+    #[test]
+    fn a_first_row_taller_than_the_max_falls_back_to_the_max() {
+        let max = px(100.);
+        assert_eq!(fit_height(&rows(&[200., 40.]), max), max);
     }
 }
