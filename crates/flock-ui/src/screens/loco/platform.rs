@@ -12,8 +12,8 @@ use gpui::{
 use super::LocoEvent;
 use crate::kit::status_symbols;
 use crate::kit::{
-    Column, KeyValue, Level, Link, LogLine, LogView, PageTitle, RawMessage, SectionHeader,
-    StatusGlyph, Table, TableEvent,
+    Column, KeyValue, Level, Link, LogLine, LogView, PageTitle, SectionHeader, StatusGlyph, Table,
+    TableEvent,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LOG_LINE, Palette, ROW_TABLE, RULE, SPACE_2, SPACE_3, SPACE_4, SPACE_8,
@@ -382,28 +382,23 @@ fn placement_columns() -> Vec<Column<PlacementRow>> {
         })
         .mono()
         .fixed(PLACEMENT_REVISION),
-        Column::new("Message", |row: &PlacementRow, palette| {
-            let Some(issue) = row.app.placement.issue.as_ref() else {
-                return div()
-                    .truncate()
-                    .text_size(TEXT_SMALL)
-                    .text_color(palette.fg2)
-                    .child(row.app.placement.detail())
-                    .into_any_element();
-            };
-            let color = if issue.status == Status::Err {
-                palette.err
-            } else {
-                palette.fg2
-            };
-            RawMessage::new(issue.message.clone())
-                .color(color)
-                .line()
-                .into_any_element()
+        Column::colored_text("Message", placement_message, |row, palette| {
+            match row.app.placement.issue.as_ref() {
+                Some(issue) if issue.status == Status::Err => palette.err,
+                _ => palette.fg2,
+            }
         })
+        .tooltip(placement_message)
         .mono()
         .flex(1., Pixels::ZERO),
     ]
+}
+
+fn placement_message(row: &PlacementRow) -> SharedString {
+    match row.app.placement.issue.as_ref() {
+        Some(issue) => issue.message.clone().into(),
+        None => row.app.placement.detail().into(),
+    }
 }
 
 fn component_columns() -> Vec<Column<Component>> {

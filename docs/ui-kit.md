@@ -90,10 +90,12 @@ inline code block: Plex Mono `TEXT_SMALL`, `raise` ground, 1px `line2` border, `
 copies the exact text. The border is always drawn, so hover and selection never change its size.
 Labels, reasons and our own sentences stay plain text.
 
+Table cells: plain text; RawMessage: inspectors, panels, headers.
+
 ```rust
 RawMessage::new(event.message.clone())          // block: wraps at spaces, selectable
 RawMessage::new(message).color(palette.err)     // text colour, default fg2
-RawMessage::new(message).line()                 // one truncated line, for table cells
+RawMessage::new(message).line()                 // one truncated line, for headers
 ```
 
 `PageHeader` is the document header of a resource page (title, status, one primary action, the

@@ -1042,9 +1042,12 @@ fn history_columns() -> Vec<Column<HistoryEntry>> {
         .mono()
         .selectable()
         .auto(REVISION_COLUMN, REVISION_MAX),
-        Column::new("Message", |h: &HistoryEntry, _| {
-            RawMessage::new(h.message.clone()).line().into_any_element()
-        })
+        Column::colored_text(
+            "Message",
+            |h: &HistoryEntry| h.message.clone().into(),
+            |_, p| p.fg2,
+        )
+        .tooltip(|h: &HistoryEntry| h.message.clone().into())
         .flex(1., Pixels::ZERO),
         Column::colored_text(
             "Count",

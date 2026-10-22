@@ -12,8 +12,7 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    Column, EmptyState, Link, RawMessage, SectionHeader, Segmented, Skeleton, StatusGlyph, Table,
-    TableEvent,
+    Column, EmptyState, Link, SectionHeader, Segmented, Skeleton, StatusGlyph, Table, TableEvent,
 };
 use crate::screens::new_tab_item;
 use crate::shell::switcher::{Run, cluster_items};
@@ -546,6 +545,13 @@ fn pods_cell(cluster: &ClusterSummary, palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
+fn problem_message(row: &ProblemRow) -> SharedString {
+    match row {
+        ProblemRow::Item(p) => p.message.clone().into(),
+        ProblemRow::Group { .. } => SharedString::default(),
+    }
+}
+
 fn problem_columns() -> Vec<Column<ProblemRow>> {
     vec![
         Column::new("", |row: &ProblemRow, _| match row {
@@ -564,11 +570,9 @@ fn problem_columns() -> Vec<Column<ProblemRow>> {
         })
         .mono()
         .flex(PROBLEM_OBJECT_WEIGHT, PROBLEM_OBJECT_MIN),
-        Column::new("Message", |row: &ProblemRow, _| match row {
-            ProblemRow::Item(p) => RawMessage::new(p.message.clone()).line().into_any_element(),
-            ProblemRow::Group { .. } => div().into_any_element(),
-        })
-        .flex(PROBLEM_MESSAGE_WEIGHT, PROBLEM_MESSAGE_MIN),
+        Column::colored_text("Message", problem_message, |_, p| p.fg2)
+            .tooltip(problem_message)
+            .flex(PROBLEM_MESSAGE_WEIGHT, PROBLEM_MESSAGE_MIN),
         Column::new("Age", |row: &ProblemRow, palette| match row {
             ProblemRow::Item(p) => small(flock_core::time::age(p.age), palette.mute),
             ProblemRow::Group { .. } => div().into_any_element(),
