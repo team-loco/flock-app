@@ -463,9 +463,11 @@ mod tests {
 
     use flock_core::Counts;
     use flock_core::pods::{PodFilter, PodQuery, nav_counts};
+    use flock_core::problem_groups::causes;
 
     use super::*;
     use crate::metrics;
+    use crate::problems::pod_problems;
     use crate::problems::tests::{at, crash_status, now, parse, ready_status, replica_pod};
 
     static UTC: TimeZone = TimeZone::UTC;
@@ -609,6 +611,25 @@ mod tests {
         assert_eq!(run.as_deref(), Some("07:30 → 07:31 · 1m"));
         assert_eq!(migrate.requests.label(), None);
         assert_eq!(migrate.last_termination, None);
+    }
+
+    #[test]
+    fn unschedulable_pod_has_one_reason_on_the_fleet_and_cluster_pages() {
+        let raw: Arc<core::Pod> = parse(json!({
+            "metadata": { "name": "unschedulable", "namespace": "apps", "creationTimestamp": at(6) },
+            "spec": { "containers": [{ "name": "app", "image": "busybox" }] },
+            "status": { "phase": "Pending", "conditions": [{
+                "type": "PodScheduled", "status": "False", "reason": "Unschedulable",
+                "message": "0/1 nodes are available", "lastTransitionTime": at(6)
+            }] }
+        }));
+        let row = pod(&cluster(), &raw, None, Vec::new(), &clock());
+        let problems = pod_problems(&cluster(), &[raw], &[], now());
+        let from_pods = causes(&cluster(), &[row], &[]);
+        let from_problems = causes(&cluster(), &[], &problems);
+        assert_eq!(problems[0].reason, "Unschedulable");
+        assert_eq!(from_pods[0].reason, problems[0].reason);
+        assert_eq!(from_problems[0].reason, problems[0].reason);
     }
 
     #[test]
