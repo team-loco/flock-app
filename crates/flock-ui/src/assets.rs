@@ -87,14 +87,17 @@ mod tests {
 
     use crate::kit::STATUSES;
 
+    const ICON_DROP_PERCENT: i16 = 14;
+    const LOADER_PROBE: char = 'm';
+
     #[test]
-    fn flock_status_contains_monospaced_status_symbols_and_bullseye()
+    fn flock_status_draws_each_status_symbol_in_a_square_em_box()
     -> Result<(), ttf_parser::FaceParsingError> {
         let plex =
             ttf_parser::Face::parse(include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"), 0)?;
-        let reference = plex
-            .glyph_index('M')
-            .and_then(|glyph| plex.glyph_hor_advance(glyph));
+        let em = plex.units_per_em();
+        let em_box = i16::try_from(em).unwrap_or(i16::MAX);
+        let bottom = -em_box * ICON_DROP_PERCENT / 100;
         for bytes in [FLOCK_STATUS, FLOCK_STATUS_MEDIUM] {
             let face = ttf_parser::Face::parse(bytes, 0)?;
             assert_eq!(face.units_per_em(), plex.units_per_em());
@@ -115,17 +118,31 @@ mod tests {
             let characters: Vec<_> = STATUSES
                 .iter()
                 .flat_map(|status| status.glyph().chars())
-                .chain(['◎'])
                 .collect();
-            assert_eq!(usize::from(face.number_of_glyphs()), characters.len() + 1);
+            assert_eq!(usize::from(face.number_of_glyphs()), characters.len() + 2);
+            let probe = face.glyph_index(LOADER_PROBE);
+            assert!(probe.is_some(), "gpui skips fonts without {LOADER_PROBE}");
+            assert!(
+                probe
+                    .and_then(|glyph| face.glyph_bounding_box(glyph))
+                    .is_none()
+            );
             for character in characters {
                 let glyph = face.glyph_index(character);
                 assert!(glyph.is_some(), "missing {character}");
                 let advance = glyph.and_then(|glyph| face.glyph_hor_advance(glyph));
-                assert_eq!(advance, reference);
+                assert_eq!(advance, Some(em));
                 let bounds = glyph.and_then(|glyph| face.glyph_bounding_box(glyph));
-                assert!(bounds.is_some_and(|bounds| bounds.y_min > 0
-                    && bounds.y_max < face.capital_height().unwrap_or_default()));
+                let bearing = glyph.and_then(|glyph| face.glyph_hor_side_bearing(glyph));
+                assert_eq!(
+                    bearing,
+                    bounds.map(|bounds| bounds.x_min),
+                    "{character} bearing"
+                );
+                assert!(bounds.is_some_and(|bounds| bounds.x_min >= 0
+                    && bounds.x_max <= em_box
+                    && bounds.y_min >= bottom
+                    && bounds.y_max <= bottom + em_box));
             }
             assert!(face.glyph_index('M').is_none());
         }

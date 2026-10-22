@@ -15,10 +15,25 @@ SHA-256 checksums were verified against the official IBM release assets:
 
 Flock Status is an original geometric symbol font owned by Flock contributors,
 licensed under the repository's [Apache-2.0 license](../../../../LICENSE).
-`FlockStatus.ttf` and `FlockStatus-Medium.ttf` contain only ● ▲ ✕ ◐ ‖ ○ ◎,
-plus the required empty `.notdef` glyph. They preserve the status outlines from
-#93 and match Plex Mono's advance width and vertical metrics without copying
-its outlines or name tables.
+`FlockStatus.ttf` and `FlockStatus-Medium.ttf` contain only the six status
+icons, plus the required empty `.notdef` glyph and an empty `m`, because gpui
+skips any font without an `m` glyph:
+
+| Codepoint | Status | Shape |
+|---|---|---|
+| ✕ U+2715 | error | filled diamond |
+| ▲ U+25B2 | warning | outlined triangle with a mark |
+| ● U+25CF | ready | filled dot, radius 3.6 |
+| ◐ U+25D0 | progressing | 270° arc, open at the top left |
+| ‖ U+2016 | suspended | two bars |
+| ○ U+25CB | offline or unknown | dashed circle, radius 5.75, 2.1 on and 2.1 off |
+
+The outlines come from the 16px icon paths in the design: each grid unit is
+1/16 em, strokes are 1.6 units wide in both weights, with round caps and joins,
+and the generator expands them into filled outlines. Every glyph has a 1em
+advance, so each icon is a square, and sits 0.14em below the baseline. The
+fonts match Plex Mono's units per em and vertical metrics without copying its
+outlines or name tables.
 
 Run `mise run gen:glyphs` to rebuild both files from scratch using uv and fonttools.
 The generator reads only numeric metrics from the unmodified Mono fonts and
