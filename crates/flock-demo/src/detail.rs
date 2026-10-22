@@ -15,7 +15,7 @@ use flock_core::nodes::{
 };
 use flock_core::overview::{Commitment, NetworkFacts, Overview, PodPhases, TimeRange, Utilization};
 use flock_core::pod_tops::PodTops;
-use flock_core::pods::Pod;
+use flock_core::pods::{Pod, PodFilter, failing};
 use flock_core::{ClusterDetail, ClusterId, Counts, ResourceRef, Status, Uid};
 
 use crate::lists;
@@ -67,7 +67,7 @@ pub fn days(n: u64) -> Duration {
 pub fn prod_us_east(pods: &[Pod]) -> ClusterDetail {
     let resources = lists::prod_us_east();
     ClusterDetail {
-        overview: overview(),
+        overview: overview(pods),
         nodes: nodes(pods),
         namespaces: namespaces(),
         events: events(),
@@ -78,7 +78,22 @@ pub fn prod_us_east(pods: &[Pod]) -> ClusterDetail {
     }
 }
 
-fn overview() -> Overview {
+const UNSCHEDULABLE_PODS: u32 = 6;
+
+fn pod_phases(pods: &[Pod]) -> PodPhases {
+    let tally = |keep: &dyn Fn(&Pod) -> bool| {
+        let matching = pods.iter().filter(|pod| keep(pod)).count();
+        u32::try_from(matching).unwrap_or(u32::MAX)
+    };
+    PodPhases {
+        running: tally(&|pod| PodFilter::Running.keeps(pod) && !failing(pod)),
+        pending: tally(&|pod| PodFilter::Pending.keeps(pod)),
+        failing: tally(&failing),
+        unschedulable: UNSCHEDULABLE_PODS,
+    }
+}
+
+fn overview(pods: &[Pod]) -> Overview {
     Overview {
         utilization_source: flock_core::overview::UtilizationSource::Prometheus,
         cpu: Commitment {
@@ -89,12 +104,7 @@ fn overview() -> Overview {
             requests: 0.66,
             limits: 0.92,
         },
-        pods: PodPhases {
-            running: 398,
-            pending: 9,
-            failing: 5,
-            unschedulable: 6,
-        },
+        pods: pod_phases(pods),
         utilization: utilization(),
         tops: PodTops::default(),
         network: NetworkFacts {
@@ -545,7 +555,7 @@ const NODE_DISK: f32 = 50.;
 const DISK_BASE: f32 = 12.;
 const DISK_PER_POD: f32 = 0.85;
 const DISK_UNAVAILABLE: &str = "ip-10-4-41-66";
-const CORDONED: &str = "ip-10-4-31-12";
+pub(crate) const CORDONED: &str = "ip-10-4-31-12";
 
 pub fn schedulable_node_names() -> Vec<String> {
     NODES
@@ -593,9 +603,14 @@ fn top_pods(on_node: &[&Pod]) -> Vec<NodePod> {
     top
 }
 
+pub(crate) fn node_load(pods: &[Pod], name: &str) -> (u32, Vec<NodePod>) {
+    let on_node = node_pods(pods, name);
+    let count = u32::try_from(on_node.len()).unwrap_or(u32::MAX);
+    (count, top_pods(&on_node))
+}
+
 fn node(seed: &NodeSeed, pods: &[Pod]) -> Node {
-    let on_node = node_pods(pods, seed.name);
-    let pod_count = u32::try_from(on_node.len()).unwrap_or(u32::MAX);
+    let (pod_count, top_pods) = node_load(pods, seed.name);
     let schedulable = seed.name != CORDONED;
     let (instance, memory, group, kubelet) = if seed.gpu {
         (GPU, GPU_MEMORY, "gpu", GPU_KUBELET)
@@ -611,7 +626,6 @@ fn node(seed: &NodeSeed, pods: &[Pod]) -> Node {
         requests: memory_request,
         limits: memory_request * MEMORY_LIMIT_RATIO,
     };
-    let top_pods = top_pods(&on_node);
     let mut taints = Vec::new();
     if seed.gpu {
         taints.push(GPU_TAINT.to_owned());
@@ -1154,6 +1168,26 @@ mod tests {
         let older = event_details("deployment/checkout", Status::Ok, hours(2));
         assert_eq!(older.first_age, Some(hours(2)));
         assert_eq!(older.first_seen, older.last_seen);
+    }
+
+    #[test]
+    fn the_cordoned_node_still_runs_a_few_demo_pods() {
+        let pods = crate::pods::pods();
+        let nodes = nodes(&pods);
+        let cordoned = nodes.iter().find(|node| node.name == CORDONED);
+        assert!(cordoned.is_some_and(|node| node.pods > 0 && !node.schedulable));
+        assert!(cordoned.is_some_and(|node| !node.top_pods.is_empty()));
+    }
+
+    #[test]
+    fn the_overview_pod_phases_are_counted_from_the_demo_pods() {
+        let pods = crate::pods::pods();
+        let phases = pod_phases(&pods);
+        assert_eq!(phases.total() as usize, pods.len());
+        assert_eq!(
+            phases.failing as usize,
+            pods.iter().filter(|p| failing(p)).count()
+        );
     }
 
     #[test]

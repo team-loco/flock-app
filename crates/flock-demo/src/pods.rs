@@ -606,10 +606,25 @@ pub fn pods() -> Vec<Pod> {
         .chain(problem_seeds())
         .chain(platform_seeds())
         .map(pod)
-        .chain(fill::pods(&nodes))
+        .chain(cordon(fill::pods(&nodes)))
         .collect()
 }
 
+fn cordon(pods: Vec<Pod>) -> Vec<Pod> {
+    let mut stay = CORDONED_PODS;
+    pods.into_iter()
+        .map(|mut pod| {
+            let settled = pod.node.is_some() && pod.status == Status::Ok;
+            if settled && stay > 0 {
+                stay -= 1;
+                pod.node = Some(crate::detail::CORDONED.into());
+            }
+            pod
+        })
+        .collect()
+}
+
+const CORDONED_PODS: usize = 3;
 const TERMINATING: &str = "Terminating";
 const CREATING: &str = "ContainerCreating";
 const SCHEDULED: &str = "Scheduled";
