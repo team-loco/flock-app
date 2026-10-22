@@ -18,6 +18,33 @@ pub const POD_MEMORY_UNIT: &str = "MiB";
 pub const NOT_MEASURED: &str = "—";
 pub const WAITING_FOR_METRICS: &str = "Waiting for metrics";
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Amount {
+    pub figures: String,
+    pub unit: Option<String>,
+}
+
+impl Amount {
+    pub fn of(figures: String, unit: &str) -> Self {
+        let unit = (figures != NOT_MEASURED).then(|| unit.to_owned());
+        Self { figures, unit }
+    }
+
+    pub fn missing() -> Self {
+        Self {
+            figures: NOT_MEASURED.to_owned(),
+            unit: None,
+        }
+    }
+
+    pub fn labelled(&self) -> String {
+        match &self.unit {
+            Some(unit) => format!("{} {unit}", self.figures),
+            None => self.figures.clone(),
+        }
+    }
+}
+
 pub fn figure(value: f32) -> String {
     let value = value.max(0.);
     if value > 0. && value < SMALLEST_FIGURE {
@@ -50,8 +77,8 @@ pub fn against(used: Option<f32>, requested: f32) -> String {
     format!("{used}{BETWEEN}{requested}")
 }
 
-pub fn amount(used: f32, total: f32, unit: &str) -> String {
-    format!("{}{BETWEEN}{} {unit}", figure(used), figure(total))
+pub fn amount(used: f32, total: f32, unit: &str) -> Amount {
+    Amount::of(format!("{}{BETWEEN}{}", figure(used), figure(total)), unit)
 }
 
 #[allow(clippy::cast_possible_truncation)]
@@ -66,7 +93,26 @@ pub fn cpu_quantity(text: &str) -> Option<f32> {
 }
 
 pub fn written_cpu(text: &str) -> String {
-    cpu_quantity(text).map_or_else(|| text.to_owned(), figure)
+    cpu_quantity(text).map_or_else(
+        || text.to_owned(),
+        |cores| format!("{} {CPU_UNIT}", figure(cores)),
+    )
+}
+
+pub fn written_cpus(first: Option<&str>, second: Option<&str>, between: &str) -> String {
+    let side = |text: Option<&str>| {
+        let cores = text.and_then(cpu_quantity);
+        let shown = cores.map_or_else(|| text.unwrap_or(NOT_MEASURED).to_owned(), figure);
+        (shown, cores.is_some())
+    };
+    let (first, first_parsed) = side(first);
+    let (second, second_parsed) = side(second);
+    let figures = format!("{first}{between}{second}");
+    if first_parsed || second_parsed {
+        format!("{figures} {CPU_UNIT}")
+    } else {
+        figures
+    }
 }
 
 pub fn times(count: u32) -> String {
@@ -140,9 +186,23 @@ mod tests {
 
     #[test]
     fn written_cpu_reads_in_cores_or_as_written() {
-        assert_eq!(written_cpu("100m"), "0.10");
-        assert_eq!(written_cpu("1"), "1.00");
+        assert_eq!(written_cpu("100m"), "0.10 cores");
+        assert_eq!(written_cpu("1"), "1.00 cores");
         assert_eq!(written_cpu("lots"), "lots");
+    }
+
+    #[test]
+    fn written_cpu_pairs_carry_the_unit_once() {
+        assert_eq!(
+            written_cpus(Some("500m"), Some("1"), BETWEEN),
+            "0.50 / 1.00 cores"
+        );
+        assert_eq!(written_cpus(Some("250m"), None, BETWEEN), "0.25 / — cores");
+        assert_eq!(written_cpus(None, None, BETWEEN), "— / —");
+        assert_eq!(
+            written_cpus(Some("1200m"), Some("4"), "/"),
+            "1.20/4.00 cores"
+        );
     }
 
     #[test]
@@ -153,8 +213,17 @@ mod tests {
 
     #[test]
     fn amounts_keep_two_decimals_on_both_sides() {
-        assert_eq!(amount(1., 7.8, MEMORY_UNIT), "1.00 / 7.80 GiB");
-        assert_eq!(amount(68.4, 112., CPU_UNIT), "68.40 / 112.00 cores");
-        assert_eq!(amount(0., 0., MEMORY_UNIT), "0.00 / 0.00 GiB");
+        assert_eq!(amount(1., 7.8, MEMORY_UNIT).labelled(), "1.00 / 7.80 GiB");
+        let cpu = amount(68.4, 112., CPU_UNIT);
+        assert_eq!(cpu.figures, "68.40 / 112.00");
+        assert_eq!(cpu.unit.as_deref(), Some("cores"));
+        assert_eq!(amount(0., 0., MEMORY_UNIT).labelled(), "0.00 / 0.00 GiB");
+    }
+
+    #[test]
+    fn unmeasured_amounts_carry_no_unit() {
+        assert_eq!(Amount::of(NOT_MEASURED.to_owned(), CPU_UNIT).unit, None);
+        assert_eq!(Amount::missing().labelled(), "—");
+        assert_eq!(Amount::of(figure(0.2), CPU_UNIT).labelled(), "0.20 cores");
     }
 }

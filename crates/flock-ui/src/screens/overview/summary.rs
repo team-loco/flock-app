@@ -106,7 +106,9 @@ fn capacity(label: &'static str, capacity: &Capacity, palette: &Palette) -> Heal
         ),
     ];
     let id = format!("overview-capacity-{label}");
-    HealthTile::new(id, label, capacity.amount(), meter).notes(parts)
+    HealthTile::new(id, label, String::new(), meter)
+        .amount(capacity.amount())
+        .notes(parts)
 }
 
 pub(super) fn render(

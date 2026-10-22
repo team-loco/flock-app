@@ -216,12 +216,12 @@ pub struct Usage {
 }
 
 impl Usage {
-    pub fn cpu_label(self) -> String {
-        units::millicores(self.cpu_millis)
+    pub fn cpu_label(self) -> units::Amount {
+        units::Amount::of(units::millicores(self.cpu_millis), units::CPU_UNIT)
     }
 
-    pub fn memory_label(self) -> String {
-        self.memory_mib.to_string()
+    pub fn memory_label(self) -> units::Amount {
+        units::Amount::of(self.memory_mib.to_string(), units::POD_MEMORY_UNIT)
     }
 }
 
@@ -844,10 +844,10 @@ mod tests {
         assert_eq!(web.restarts_label(), "1 restart");
         assert_eq!(
             web.requests.label().as_deref(),
-            Some("cpu <0.01 · mem 16Mi")
+            Some("cpu <0.01 cores · mem 16Mi")
         );
         assert_eq!(web.requests.written().as_deref(), Some("cpu 1m · mem 16Mi"));
-        assert_eq!(web.limits.label().as_deref(), Some("cpu 2.00"));
+        assert_eq!(web.limits.label().as_deref(), Some("cpu 2.00 cores"));
         assert_eq!(Resources::default().label(), None);
         assert_eq!(
             web.probes_label().as_deref(),
@@ -956,16 +956,22 @@ mod tests {
             memory_mib: 301,
         };
         assert_eq!(
-            (small.cpu_label(), small.memory_label()),
-            ("0.21".into(), "301".into())
+            (
+                small.cpu_label().labelled(),
+                small.memory_label().labelled()
+            ),
+            ("0.21 cores".into(), "301 MiB".into())
         );
         let large = Usage {
             cpu_millis: 1500,
             memory_mib: 2048,
         };
         assert_eq!(
-            (large.cpu_label(), large.memory_label()),
-            ("1.50".into(), "2048".into())
+            (
+                large.cpu_label().labelled(),
+                large.memory_label().labelled()
+            ),
+            ("1.50 cores".into(), "2048 MiB".into())
         );
     }
 

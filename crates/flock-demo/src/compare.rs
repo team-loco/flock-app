@@ -95,9 +95,9 @@ fn checkout_api() -> Comparison {
             field(
                 "CPU request / limit",
                 [
-                    plain("0.50 / 1.00"),
-                    plain("0.50 / 1.00"),
-                    warn("0.25 / 0.50"),
+                    plain("0.50 / 1.00 cores"),
+                    plain("0.50 / 1.00 cores"),
+                    warn("0.25 / 0.50 cores"),
                 ],
             ),
             field("Memory request / limit", same("512Mi / 1Gi")),

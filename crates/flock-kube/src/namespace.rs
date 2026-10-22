@@ -400,7 +400,7 @@ mod tests {
         let lines: Vec<String> = detail.quotas.items.iter().map(Quota::line).collect();
         assert_eq!(
             lines,
-            ["payments-quota · pods 2/30 · requests.cpu 1.20/4.00 · requests.memory 0/8Gi"]
+            ["payments-quota · pods 2/30 · requests.cpu 1.20/4.00 cores · requests.memory 0/8Gi"]
         );
         assert_eq!(
             detail.policies.items[0].summary,

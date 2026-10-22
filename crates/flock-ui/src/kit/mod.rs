@@ -82,7 +82,7 @@ pub use table::{
     min_row_width, resized,
 };
 pub use terminal::{SendBackTab, SendTab, TERMINAL_CONTEXT, Terminal, TerminalEvent};
-pub use text::{Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel};
+pub use text::{AmountText, Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel};
 pub use tile::{Activate, HealthTile, HealthTiles, TileNote, problem_link};
 pub use tooltip::{TOOLTIP_SELECTOR, Tooltip};
 

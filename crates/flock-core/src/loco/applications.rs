@@ -479,7 +479,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             resources.summary(),
-            "CPU 0.50 · memory 512Mi · 2–6 replicas · scales at 70% CPU"
+            "CPU 0.50 cores · memory 512Mi · 2–6 replicas · scales at 70% CPU"
         );
         let check = HealthCheck {
             path: "/healthz".into(),

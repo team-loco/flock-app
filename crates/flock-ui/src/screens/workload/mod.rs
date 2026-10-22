@@ -7,7 +7,6 @@ use std::rc::Rc;
 
 use flock_core::palette::COMPARE_KEY;
 use flock_core::related::Related;
-use flock_core::units::{CPU_UNIT, POD_MEMORY_UNIT};
 use flock_core::watch::WATCH_SYNC_TIMEOUT;
 use flock_core::workload::{ContainerSpec, EnvVar, Pod, Revision, short_image, short_pod_name};
 use flock_core::{Command, LogTarget, ResourceRef, Seen, Sink, Status, Workload};
@@ -61,7 +60,7 @@ const STATUS_MIN: Pixels = px(90.);
 const STATUS_MAX: Pixels = px(260.);
 const RESTARTS_WIDTH: Pixels = px(58.);
 const NODE_WIDTH: Pixels = px(178.);
-const CPU_WIDTH: Pixels = px(52.);
+const CPU_WIDTH: Pixels = px(84.);
 const MEM_WIDTH: Pixels = px(76.);
 const AGE_WIDTH: Pixels = px(34.);
 
@@ -926,22 +925,14 @@ fn pod_columns() -> Vec<Column<Pod>> {
         )
         .mono()
         .fixed(NODE_WIDTH),
-        Column::colored_text(
-            format!("CPU {CPU_UNIT}"),
-            |p: &Pod| p.cpu_label().into(),
-            |_, palette| palette.fg2,
-        )
-        .mono()
-        .end()
-        .fixed(CPU_WIDTH),
-        Column::colored_text(
-            format!("Memory {POD_MEMORY_UNIT}"),
-            |p: &Pod| p.memory_label().into(),
-            |_, palette| palette.fg2,
-        )
-        .mono()
-        .end()
-        .fixed(MEM_WIDTH),
+        Column::amount("CPU", Pod::cpu_label)
+            .mono()
+            .end()
+            .fixed(CPU_WIDTH),
+        Column::amount("Memory", Pod::memory_label)
+            .mono()
+            .end()
+            .fixed(MEM_WIDTH),
         Column::colored_text(
             "Age",
             |p: &Pod| p.age_label().into(),

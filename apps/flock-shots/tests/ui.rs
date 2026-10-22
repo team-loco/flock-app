@@ -4286,11 +4286,11 @@ fn end_aligned_cells_with_tooltips_stay_end_aligned() -> anyhow::Result<()> {
         })
     };
     let ink: Vec<u32> = (left..right).filter(|&x| inked(x)).collect();
-    let middle = left.midpoint(right);
     assert!(!ink.is_empty(), "the CPU cell drew nothing");
+    let gap = right - ink.last().copied().unwrap_or(left);
     assert!(
-        ink.iter().all(|&x| x > middle),
-        "CPU text should hug the right edge of its column: ink {:?}..{:?}, middle {middle}",
+        gap <= INSET,
+        "CPU text should hug the right edge of its column: ink {:?}..{:?}, edge {right}",
         ink.first(),
         ink.last()
     );

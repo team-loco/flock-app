@@ -9,7 +9,7 @@ use crate::overview::{WorkloadHealth, plural};
 use crate::related::{Group, Related};
 use crate::resources::ResourceKind;
 use crate::time::age;
-use crate::units::{self, CPU_UNIT, MEMORY_UNIT};
+use crate::units::{self, Amount, CPU_UNIT, MEMORY_UNIT};
 use crate::watch::WatchState;
 use crate::{Counts, Page, ResourceRef, Status};
 
@@ -84,18 +84,19 @@ impl Requested {
         Some((self.requested / quota).clamp(0., 1.))
     }
 
-    pub fn cpu_label(&self) -> String {
+    pub fn cpu_label(&self) -> Amount {
         self.label(CPU_UNIT)
     }
 
-    pub fn memory_label(&self) -> String {
+    pub fn memory_label(&self) -> Amount {
         self.label(MEMORY_UNIT)
     }
 
-    fn label(&self, unit: &str) -> String {
+    fn label(&self, unit: &str) -> Amount {
+        let unit = format!("{unit} {REQUESTED}");
         match self.quota {
-            Some(quota) => format!("{} {REQUESTED}", units::amount(self.requested, quota, unit)),
-            None => format!("{} {unit} {REQUESTED}", units::figure(self.requested)),
+            Some(quota) => units::amount(self.requested, quota, &unit),
+            None => Amount::of(units::figure(self.requested), &unit),
         }
     }
 }
@@ -109,17 +110,12 @@ pub struct QuotaItem {
 
 impl QuotaItem {
     pub fn label(&self) -> String {
-        let read: fn(&str) -> String = if self.is_cpu() {
-            units::written_cpu
+        let amounts = if self.is_cpu() {
+            units::written_cpus(Some(&self.used), Some(&self.hard), RATIO)
         } else {
-            str::to_owned
+            format!("{}{RATIO}{}", self.used, self.hard)
         };
-        format!(
-            "{} {}{RATIO}{}",
-            self.resource,
-            read(&self.used),
-            read(&self.hard)
-        )
+        format!("{} {amounts}", self.resource)
     }
 
     fn is_cpu(&self) -> bool {
@@ -884,8 +880,14 @@ mod tests {
     #[test]
     fn usage_pairs_the_namespace_requests_with_its_quota() {
         let page = page();
-        assert_eq!(page.cpu().cpu_label(), "1.20 / 4.00 cores requested");
-        assert_eq!(page.memory().memory_label(), "2.50 GiB requested");
+        assert_eq!(
+            page.cpu().cpu_label().labelled(),
+            "1.20 / 4.00 cores requested"
+        );
+        assert_eq!(
+            page.memory().memory_label().labelled(),
+            "2.50 GiB requested"
+        );
     }
 
     #[test]
@@ -894,24 +896,24 @@ mod tests {
             requested: 1.2,
             quota: Some(4.),
         };
-        assert_eq!(cpu.cpu_label(), "1.20 / 4.00 cores requested");
+        assert_eq!(cpu.cpu_label().labelled(), "1.20 / 4.00 cores requested");
         assert_eq!(cpu.share(), Some(0.3));
         let memory = Requested {
             requested: 2.6,
             quota: None,
         };
-        assert_eq!(memory.memory_label(), "2.60 GiB requested");
+        assert_eq!(memory.memory_label().labelled(), "2.60 GiB requested");
         assert_eq!(memory.share(), None);
         let small = Requested {
             requested: 0.12,
             quota: Some(0.5),
         };
-        assert_eq!(small.cpu_label(), "0.12 / 0.50 cores requested");
+        assert_eq!(small.cpu_label().labelled(), "0.12 / 0.50 cores requested");
         let little = Requested {
             requested: 0.0625,
             quota: None,
         };
-        assert_eq!(little.memory_label(), "0.06 GiB requested");
+        assert_eq!(little.memory_label().labelled(), "0.06 GiB requested");
         let over = Requested {
             requested: 5.,
             quota: Some(4.),
@@ -935,8 +937,8 @@ mod tests {
             used: "1200m".into(),
             hard: "4".into(),
         };
-        assert_eq!(cpu("requests.cpu").label(), "requests.cpu 1.20/4.00");
-        assert_eq!(cpu("cpu").label(), "cpu 1.20/4.00");
+        assert_eq!(cpu("requests.cpu").label(), "requests.cpu 1.20/4.00 cores");
+        assert_eq!(cpu("cpu").label(), "cpu 1.20/4.00 cores");
         assert_eq!(cpu("requests.memory").label(), "requests.memory 1200m/4");
         let denied: Listing<Quota> = Listing {
             items: Vec::new(),

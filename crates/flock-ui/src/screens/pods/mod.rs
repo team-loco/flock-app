@@ -13,7 +13,7 @@ use flock_core::pods::{
 use flock_core::related::Related;
 use flock_core::resources::{NamespaceCount, POD_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
-use flock_core::units::{CPU_UNIT, POD_MEMORY_UNIT};
+use flock_core::units::Amount;
 use flock_core::{
     ClusterId, Command, Condition, LogInstance, LogTarget, Page, Preferences, ResourceRef, Seen,
     Snapshot, Status,
@@ -49,9 +49,9 @@ const REQUESTS: &str = "requests";
 const LIMITS: &str = "limits";
 const FAILING_ELSEWHERE: &str = "pod-failing-elsewhere";
 const OWNER_LINK: &str = "pod-owner";
-const NAME_MIN: Pixels = px(180.);
+const NAME_MIN: Pixels = px(150.);
 const NAME_WEIGHT: f32 = 2.;
-const OWNER_MIN: Pixels = px(96.);
+const OWNER_MIN: Pixels = px(84.);
 const OWNER_WEIGHT: f32 = 1.;
 const READY: Pixels = px(48.);
 const RESTARTS: Pixels = px(64.);
@@ -59,8 +59,8 @@ const STATUS_MIN: Pixels = px(92.);
 const STATUS_MAX: Pixels = px(220.);
 const NODE_MIN: Pixels = px(100.);
 const NODE_WEIGHT: f32 = 1.;
-const CPU: Pixels = px(52.);
-const MEMORY: Pixels = px(60.);
+const CPU: Pixels = px(84.);
+const MEMORY: Pixels = px(68.);
 const AGE: Pixels = px(44.);
 const NAMESPACE_SELECT: Pixels = px(180.);
 const CONTAINER_SELECT: Pixels = px(160.);
@@ -1093,9 +1093,8 @@ fn ready_color(pod: &Pod, palette: &Palette) -> gpui::Hsla {
     }
 }
 
-fn usage_text(pod: &Pod, label: fn(Usage) -> String) -> SharedString {
-    pod.usage
-        .map_or_else(|| MISSING.into(), |usage| label(usage).into())
+fn usage(pod: &Pod, label: fn(Usage) -> Amount) -> Amount {
+    pod.usage.map_or_else(Amount::missing, label)
 }
 
 fn columns() -> Vec<Column<Pod>> {
@@ -1145,24 +1144,16 @@ fn columns() -> Vec<Column<Pod>> {
         .mono()
         .flex(NODE_WEIGHT, NODE_MIN)
         .sort_by_key(|p: &Pod| p.node.clone()),
-        Column::colored_text(
-            format!("CPU {CPU_UNIT}"),
-            |p: &Pod| usage_text(p, Usage::cpu_label),
-            |_, palette| palette.fg2,
-        )
-        .mono()
-        .end()
-        .fixed(CPU)
-        .sort_by_key(|p: &Pod| std::cmp::Reverse(p.usage.map(|u| u.cpu_millis))),
-        Column::colored_text(
-            format!("Mem {POD_MEMORY_UNIT}"),
-            |p: &Pod| usage_text(p, Usage::memory_label),
-            |_, palette| palette.fg2,
-        )
-        .mono()
-        .end()
-        .fixed(MEMORY)
-        .sort_by_key(|p: &Pod| std::cmp::Reverse(p.usage.map(|u| u.memory_mib))),
+        Column::amount("CPU", |p: &Pod| usage(p, Usage::cpu_label))
+            .mono()
+            .end()
+            .fixed(CPU)
+            .sort_by_key(|p: &Pod| std::cmp::Reverse(p.usage.map(|u| u.cpu_millis))),
+        Column::amount("Memory", |p: &Pod| usage(p, Usage::memory_label))
+            .mono()
+            .end()
+            .fixed(MEMORY)
+            .sort_by_key(|p: &Pod| std::cmp::Reverse(p.usage.map(|u| u.memory_mib))),
         Column::new("Age", |p: &Pod, palette| {
             text(flock_core::time::age(p.age), palette.mute)
         })

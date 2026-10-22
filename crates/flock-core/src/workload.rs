@@ -173,20 +173,27 @@ impl Workload {
             },
         );
         let container = self.containers.first();
-        let pair = |request: Option<&String>, limit: Option<&String>, read: fn(&str) -> String| {
-            let side = |value: Option<&String>| value.map_or_else(|| NONE.to_owned(), |v| read(v));
-            format!("{}{LIMIT_SEPARATOR}{}", side(request), side(limit))
+        let pair = |request: Option<&String>, limit: Option<&String>| {
+            let request = request.map_or(NONE, String::as_str);
+            let limit = limit.map_or(NONE, String::as_str);
+            format!("{request}{LIMIT_SEPARATOR}{limit}")
         };
-        let cpu_request = container.and_then(|c| c.requests.cpu.as_ref());
-        let cpu_limit = container.and_then(|c| c.limits.cpu.as_ref());
+        let cpu_request = container.and_then(|c| c.requests.cpu.as_deref());
+        let cpu_limit = container.and_then(|c| c.limits.cpu.as_deref());
+        let cpu_written = pair(
+            container.and_then(|c| c.requests.cpu.as_ref()),
+            container.and_then(|c| c.limits.cpu.as_ref()),
+        );
         let cpu = Field {
-            written: Some(pair(cpu_request, cpu_limit, str::to_owned)),
-            ..Field::new(CPU_FIELD, pair(cpu_request, cpu_limit, units::written_cpu))
+            written: Some(cpu_written),
+            ..Field::new(
+                CPU_FIELD,
+                units::written_cpus(cpu_request, cpu_limit, LIMIT_SEPARATOR),
+            )
         };
         let memory = pair(
             container.and_then(|c| c.requests.memory.as_ref()),
             container.and_then(|c| c.limits.memory.as_ref()),
-            str::to_owned,
         );
         let mut fields = vec![
             ready,
@@ -244,14 +251,18 @@ impl Pod {
         self.containers.iter().find(|c| c.name == name)
     }
 
-    pub fn cpu_label(&self) -> String {
+    pub fn cpu_label(&self) -> units::Amount {
         self.cpu_millis
-            .map_or_else(|| NONE.to_owned(), units::millicores)
+            .map_or_else(units::Amount::missing, |millis| {
+                units::Amount::of(units::millicores(millis), units::CPU_UNIT)
+            })
     }
 
-    pub fn memory_label(&self) -> String {
+    pub fn memory_label(&self) -> units::Amount {
         self.memory_bytes
-            .map_or_else(|| NONE.to_owned(), units::mebibytes)
+            .map_or_else(units::Amount::missing, |bytes| {
+                units::Amount::of(units::mebibytes(bytes), units::POD_MEMORY_UNIT)
+            })
     }
 
     pub fn age_label(&self) -> String {
@@ -610,7 +621,7 @@ pub(crate) mod tests {
                 ("Image", "checkout-api:2.37"),
                 ("Revision", "37 · 1h ago"),
                 ("Replicas", "3"),
-                ("CPU request / limit", "0.50 / 1.00"),
+                ("CPU request / limit", "0.50 / 1.00 cores"),
                 ("Memory request / limit", "512Mi / —"),
                 ("Managed by", "apps-payments"),
             ]
@@ -679,7 +690,7 @@ pub(crate) mod tests {
             cpu: Some("500m".into()),
             memory: Some("512Mi".into()),
         };
-        assert_eq!(requests.label(), "CPU 0.50 · memory 512Mi");
+        assert_eq!(requests.label(), "CPU 0.50 cores · memory 512Mi");
         assert_eq!(requests.written(), "CPU 500m · memory 512Mi");
         assert_eq!(Resources::default().label(), "none");
         let probe = Probe {
@@ -780,14 +791,14 @@ pub(crate) mod tests {
     fn pods_without_metrics_show_a_dash() {
         let mut p = pod("a", "Running", Status::Ok, true);
         assert_eq!(
-            (p.cpu_label().as_str(), p.memory_label().as_str()),
-            ("—", "—")
+            (p.cpu_label().labelled(), p.memory_label().labelled()),
+            ("—".to_owned(), "—".to_owned())
         );
         p.cpu_millis = Some(120);
         p.memory_bytes = Some(64 * 1024 * 1024);
         assert_eq!(
-            (p.cpu_label().as_str(), p.memory_label().as_str()),
-            ("0.12", "64")
+            (p.cpu_label().labelled(), p.memory_label().labelled()),
+            ("0.12 cores".to_owned(), "64 MiB".to_owned())
         );
     }
 

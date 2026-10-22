@@ -4,6 +4,7 @@ use crate::workload::{ContainerSpec, EnvResolution, EnvSource, EnvVar, Resources
 use crate::{ClusterId, ResourceRef, Seen, Status, Uid, Workload, units};
 
 const MISSING: &str = "—";
+const BETWEEN: &str = " / ";
 const READY: &str = "Ready";
 const IMAGE: &str = "Image";
 const REPLICAS: &str = "Replicas · HPA";
@@ -197,15 +198,13 @@ fn container_text(
         .unwrap_or_else(|| MISSING.to_owned())
 }
 
-fn pair(
-    request: &Resources,
-    limit: &Resources,
-    pick: fn(&Resources) -> Option<&String>,
-    read: fn(&str) -> String,
-) -> String {
-    let side =
-        |resources: &Resources| pick(resources).map_or_else(|| MISSING.to_owned(), |v| read(v));
-    format!("{} / {}", side(request), side(limit))
+fn pair(request: &Resources, limit: &Resources, pick: fn(&Resources) -> Option<&String>) -> String {
+    let side = |resources: &Resources| {
+        pick(resources)
+            .cloned()
+            .unwrap_or_else(|| MISSING.to_owned())
+    };
+    format!("{}{BETWEEN}{}", side(request), side(limit))
 }
 
 fn env_cell(var: Option<&EnvVar>) -> Cell {
@@ -338,11 +337,10 @@ fn fields(observed: &[&Observed]) -> Vec<Field> {
         each(&|o| {
             container_text(
                 |c| {
-                    Some(pair(
-                        &c.requests,
-                        &c.limits,
-                        |r| r.cpu.as_ref(),
-                        units::written_cpu,
+                    Some(units::written_cpus(
+                        c.requests.cpu.as_deref(),
+                        c.limits.cpu.as_deref(),
+                        BETWEEN,
                     ))
                 },
                 &o.workload,
@@ -353,14 +351,7 @@ fn fields(observed: &[&Observed]) -> Vec<Field> {
         MEMORY,
         each(&|o| {
             container_text(
-                |c| {
-                    Some(pair(
-                        &c.requests,
-                        &c.limits,
-                        |r| r.memory.as_ref(),
-                        str::to_owned,
-                    ))
-                },
+                |c| Some(pair(&c.requests, &c.limits, |r| r.memory.as_ref())),
                 &o.workload,
             )
         }),
@@ -597,7 +588,7 @@ mod tests {
         );
         assert_eq!(
             texts(&comparison.fields[4]),
-            [("0.50 / 1.00", None), ("0.50 / 1.00", None)]
+            [("0.50 / 1.00 cores", None), ("0.50 / 1.00 cores", None)]
         );
         assert_eq!(
             texts(&comparison.fields[5]),
