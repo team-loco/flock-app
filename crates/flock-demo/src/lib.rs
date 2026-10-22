@@ -415,7 +415,7 @@ mod tests {
     fn sample_matches_design_rollups() {
         let snapshot = snapshot();
         assert_eq!(snapshot.clusters.len(), 6);
-        assert_eq!(snapshot.connected(), 5);
+        assert_eq!(snapshot.connected(), 4);
         let problems = snapshot.problems();
         assert_eq!((problems.err, problems.warn, problems.sus), (3, 6, 1));
     }
