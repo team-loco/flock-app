@@ -424,6 +424,11 @@ impl ClusterPages {
             .update(cx, |screen, cx| screen.show_filter(filter, cx));
     }
 
+    pub fn open_node_shell(&self, node: ResourceRef, window: &mut Window, cx: &mut App) {
+        self.nodes
+            .update(cx, |screen, cx| screen.open_shell(node, window, cx));
+    }
+
     pub fn show_event(&self, key: String, cx: &mut App) {
         self.events
             .update(cx, |screen, cx| screen.show_event(key, cx));

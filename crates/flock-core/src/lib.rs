@@ -78,8 +78,8 @@ pub use settings::{ClusterCatalog, Preferences};
 pub use state::{AppState, Command, Update};
 pub use status::{Counts, Status};
 pub use stream::{
-    ExecEvent, ExecRequest, ExecTarget, LogInstance, LogLevel, LogLine, LogRequest, Sink, Source,
-    TermSize,
+    ExecEvent, ExecRequest, ExecTarget, LogInstance, LogLevel, LogLine, LogRequest,
+    NodeShellRequest, Sink, Source, TermSize, node_shell_command_line,
 };
 pub use updater::{Trigger, UpdaterRequest, UpdaterState, UpdaterStatus};
 pub use watch::WatchState;

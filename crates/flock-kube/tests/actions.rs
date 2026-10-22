@@ -5,7 +5,8 @@ use flock_core::compare::{Field, SpecDiff};
 use flock_core::flux::{FluxAction, FluxKey, FluxKind};
 use flock_core::{
     Backend, ClusterId, Command, ContextRef, ExecEvent, ExecRequest, ExecTarget, NewCluster,
-    Notice, Receiver, ResourceRef, Seen, Sender, Sink, Snapshot, Source, TermSize, Uid, Update,
+    NodeShellRequest, Notice, Receiver, ResourceRef, Seen, Sender, Sink, Snapshot, Source,
+    TermSize, Uid, Update,
 };
 use flock_kube::LiveBackend;
 use flock_kube::discovery::{DiscoverySources, KubeContext, discover};
@@ -37,6 +38,7 @@ const PODINFO_CONTAINER: &str = "podinfo";
 const PODINFO_PORT: u16 = 9898;
 const DEBUG_POD: &str = "flock-actions-e2e";
 const DEBUG_IMAGE: &str = "busybox:1.37";
+const NODE_SHELL_NAMESPACE: &str = "default";
 const ECHO_MARKER: &str = "flock-e2e-exec";
 const OTHER_CONTEXT: &str = "kind-fleet-b";
 const SCRATCH_DEPLOYMENT: &str = "flock-compare-e2e";
@@ -1347,5 +1349,55 @@ async fn force_apply_recreates_an_immutable_change_then_restores_spec_force() {
             .delete(SCRATCH_KUSTOMIZATION, &DeleteParams::default())
             .await;
     })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn node_shell_runs_on_the_node_and_deletes_its_pod() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let nodes: Api<Node> = Api::all(harness.client.clone());
+    let Ok(listed) = nodes.list(&ListParams::default()).await else {
+        panic!("list nodes");
+    };
+    let Some(node) = listed.items.first().map(ResourceExt::name_any) else {
+        panic!("no node");
+    };
+    let (input, source) = Source::channel();
+    let (_resize, sizes) = Source::channel();
+    let (output, events) = Sink::channel();
+    harness.send(Command::NodeShell(NodeShellRequest {
+        node: resource("Node", None, &node),
+        image: DEBUG_IMAGE.into(),
+        input: source,
+        resize: sizes,
+        output,
+    }));
+    let Ok(Ok(started)) = tokio::time::timeout(WAIT, events.recv()).await else {
+        panic!("node shell never started");
+    };
+    let ExecEvent::Started { note } = &started else {
+        panic!("{started:?}");
+    };
+    let Some(pod) = note.rsplit('/').next().map(str::to_owned) else {
+        panic!("{note}");
+    };
+    let pods: Api<Pod> = Api::namespaced(harness.client.clone(), NODE_SHELL_NAMESPACE);
+    assert!(pods.get_opt(&pod).await.ok().flatten().is_some(), "{pod}");
+    assert!(input.send(b"hostname\r".to_vec()).await.is_ok());
+    let output = shell_output_until(&events, &format!("{node}\r\n")).await;
+    assert!(output.contains(&node), "{output}");
+    assert!(input.send(b"exit\r".to_vec()).await.is_ok());
+    let (seen, _) = exec_events(&events).await;
+    assert!(
+        matches!(seen.last(), Some(ExecEvent::Exited { .. })),
+        "{seen:?}"
+    );
+    eventually(
+        "node shell pod deleted",
+        || async { pods.get_opt(&pod).await.ok().flatten() },
+        Option::is_none,
+    )
     .await;
 }

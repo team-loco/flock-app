@@ -1005,6 +1005,15 @@ impl Live {
         changed
     }
 
+    #[cfg(feature = "loco")]
+    fn loco_command(&mut self, command: &flock_core::loco::LocoCommand) {
+        let cluster = command.seen().target.cluster.clone();
+        let handle = self.clusters.values().find(|c| c.id == cluster);
+        self.navigation
+            .loco
+            .command(command, handle.map(|c| &c.handle));
+    }
+
     fn apply_current(&mut self, command: &Command) -> bool {
         self.gitops.command(self.window_id, command);
         if leaves_compare(command) {
@@ -1065,17 +1074,12 @@ impl Live {
             Command::StreamLogs(_) => self.act(command),
             Command::StreamPodLogs(_) => self.act(command),
             Command::Exec(_) => self.act(command),
+            Command::NodeShell(_) => self.act(command),
             Command::RestartRollout(_) => self.act(command),
             Command::Scale { .. } => self.act(command),
             Command::Rollback { .. } => self.act(command),
             #[cfg(feature = "loco")]
-            Command::Loco(command) => {
-                let cluster = command.seen().target.cluster.clone();
-                let handle = self.clusters.values().find(|c| c.id == cluster);
-                self.navigation
-                    .loco
-                    .command(command, handle.map(|c| &c.handle));
-            }
+            Command::Loco(command) => self.loco_command(command),
             Command::CopySpec { from, to, path } => self.copy_spec(from, to, path),
             Command::ShowClusterSettings(_) => {}
             Command::SetPreferences(id, preferences) => {

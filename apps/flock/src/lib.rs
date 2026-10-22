@@ -195,6 +195,7 @@ pub enum Screen {
     Split,
     Pods,
     PodsShell,
+    NodesShell,
     Logs,
     Kustomization,
     Helmrelease,
@@ -282,6 +283,7 @@ impl Screen {
             Self::Split => vec![sample, Command::OpenResource(preset.deployment())],
             Self::Pods => vec![sample, Command::SelectPage(Page::Pods)],
             Self::PodsShell => vec![sample, Command::SelectPage(Page::Pods)],
+            Self::NodesShell => inspect_node(preset, sample),
             Self::Logs => vec![sample, follow_logs(preset)],
             Self::Kustomization => flux_screen(preset.flux(
                 SAMPLE_CLUSTER,
@@ -488,6 +490,7 @@ pub fn root_view(
         Screen::Split => shell_view(store, screen, preset, window, cx),
         Screen::Pods => shell_view(store, screen, preset, window, cx),
         Screen::PodsShell => shell_view(store, screen, preset, window, cx),
+        Screen::NodesShell => shell_view(store, screen, preset, window, cx),
         Screen::Logs => shell_view(store, screen, preset, window, cx),
         Screen::Kustomization => shell_view(store, screen, preset, window, cx),
         Screen::Helmrelease => shell_view(store, screen, preset, window, cx),
@@ -507,6 +510,12 @@ pub fn root_view(
     }
 }
 
+fn inspect_node(preset: &Preset, sample: Command) -> Vec<Command> {
+    let target = preset.cluster_object(NODE, SAMPLE_NODE);
+    let page = Command::SelectPage(Page::Nodes);
+    vec![sample, page, Command::InspectResource(target)]
+}
+
 fn shell_view(
     store: Entity<Store>,
     screen: Screen,
@@ -521,6 +530,10 @@ fn shell_view(
     }
     if let Screen::Switcher = screen {
         shell.update(cx, |shell, cx| shell.open_switcher(window, cx));
+    }
+    if let Screen::NodesShell = screen {
+        let node = preset.cluster_object(NODE, SAMPLE_NODE);
+        shell.update(cx, |shell, cx| shell.open_node_shell(node, window, cx));
     }
     if let Screen::PodsShell = screen {
         shell.update(cx, |shell, cx| shell.show_pod_terminal(window, cx));

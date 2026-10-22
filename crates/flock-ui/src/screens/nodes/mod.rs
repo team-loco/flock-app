@@ -15,17 +15,21 @@ use gpui::{
     ParentElement, Pixels, Render, SharedString, Styled, WeakEntity, Window, div, px,
 };
 
+mod shell;
+
 use super::{ALL_LINK, NODE_KIND, ScreenEvent};
 use crate::kit::{
-    ActionMenu, CONDITIONS, Column, ConditionTable, ConfirmDialog, FilterBar, FilterEvent,
-    Inspector, KeyValue, LabelChips, Link, MenuItem, Meter, MiniMeter, PanelSection, Presence,
-    Select, SelectEvent, Table, TableEvent, chip_label, confirm, slide_in, slide_out,
+    ActionMenu, Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, FilterBar,
+    FilterEvent, Inspector, KeyValue, LabelChips, Link, MenuItem, Meter, MiniMeter, PanelSection,
+    Presence, Select, SelectEvent, Table, TableEvent, Terminal, chip_label, confirm, slide_in,
+    slide_out,
 };
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR_NODE, Palette, SEARCH_WIDTH, SPACE_3, SPACE_4, SPACE_5,
     SPACE_6, TEXT_BODY, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
 };
+use shell::{NodeShell, SHELL_LABEL, TERMINAL_ID, ask_shell};
 
 const VERSION_SEPARATOR: char = '-';
 const ALL_POOLS: &str = "All pools";
@@ -45,6 +49,8 @@ const DISK_LABEL: &str = "Disk";
 const USAGE_LABEL: Pixels = px(64.);
 const POD_FIGURE: Pixels = px(56.);
 const INSPECTOR_ID: &str = "node-inspector";
+const SHELL_ID: &str = "node-shell";
+const SHELL_ITEM: &str = "Shell…";
 const ALL_PODS_ID: &str = "node-inspector-all-pods";
 const ACTIONS_ID: &str = "node-actions";
 const FOOTER_NOTE: &str = "requests / allocatable";
@@ -69,6 +75,9 @@ pub struct NodesScreen {
     pools: Entity<Select>,
     actions: Entity<ActionMenu>,
     presence: Presence<Node>,
+    shell: Option<NodeShell>,
+    terminal: Entity<Terminal>,
+    dock: Entity<DockState>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -145,6 +154,14 @@ impl NodesScreen {
         })
         .detach();
         let actions = cx.new(|cx| ActionMenu::new(ACTIONS_ID, cx));
+        let terminal = cx.new(|cx| Terminal::new(TERMINAL_ID, cx));
+        let dock = cx.new(|_| DockState::collapsed());
+        cx.observe(&dock, |this, dock, cx| {
+            if !dock.read(cx).is_open() {
+                this.close_shell(cx);
+            }
+        })
+        .detach();
         Self {
             cluster: None,
             cluster_name: String::new(),
@@ -161,6 +178,9 @@ impl NodesScreen {
             pools,
             actions,
             presence: Presence::default(),
+            shell: None,
+            terminal,
+            dock,
         }
     }
 
@@ -346,7 +366,7 @@ impl NodesScreen {
             .zip(self.cluster.as_ref())
             .map(|(node, cluster)| {
                 let actions = NodeActions::of(node, cluster, self.confirm_destructive, &screen);
-                vec![actions.toggle, actions.drain, actions.edit]
+                vec![actions.toggle, actions.drain, actions.edit, actions.shell]
             })
             .unwrap_or_default();
         self.actions
@@ -415,11 +435,25 @@ impl NodesScreen {
             .count(pods_count(node))
             .trailing(all_pods)
             .child(self.top_pods(node, palette, cx));
+        let target = self
+            .cluster
+            .as_ref()
+            .map(|cluster| node_ref(cluster, &node.name));
+        let screen = cx.weak_entity();
+        let shell = Button::new(SHELL_ID, SHELL_LABEL)
+            .primary()
+            .small()
+            .on_click(move |_, window, cx| {
+                if let Some(target) = target.clone() {
+                    ask_shell(target, screen.clone(), window, cx);
+                }
+            });
         Inspector::new(INSPECTOR_ID, node.name.clone())
             .mono()
             .width(INSPECTOR_NODE)
             .status(node.status, node.state.clone())
             .issues(node.issue())
+            .actions(shell)
             .actions(self.actions.clone())
             .panel(PanelSection::new(INSPECTOR_ID, "Usage").child(node_usage(node, palette)))
             .panel(PanelSection::new(INSPECTOR_ID, "Details").child(details))
@@ -525,8 +559,10 @@ impl Render for NodesScreen {
                 slide_out(panel, INSPECTOR_ID, INSPECTOR_NODE)
             }),
         };
-        div()
-            .size_full()
+        let dock = self.dock_view(cx);
+        let main = div()
+            .flex_1()
+            .min_h_0()
             .flex()
             .child(
                 div()
@@ -538,7 +574,8 @@ impl Render for NodesScreen {
                     .child(div().flex_1().min_h_0().child(body))
                     .child(footer),
             )
-            .children(inspector)
+            .children(inspector);
+        div().size_full().flex().flex_col().child(main).child(dock)
     }
 }
 
@@ -591,6 +628,7 @@ fn node_target(node: &Node, cluster: &ClusterId) -> Seen {
 }
 
 struct NodeActions {
+    shell: MenuItem,
     toggle: MenuItem,
     drain: MenuItem,
     edit: MenuItem,
@@ -620,6 +658,11 @@ impl NodeActions {
             let _ = edit_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
         });
         let detail = format!("{} · {}", target.target.cluster, target.target.name);
+        let shell_screen = screen.clone();
+        let shell_target = target.target.clone();
+        let shell = MenuItem::new(SHELL_ITEM, move |window, cx| {
+            ask_shell(shell_target.clone(), shell_screen.clone(), window, cx);
+        });
         let screen = screen.clone();
         let drain = MenuItem::new("Drain…", move |window, cx| {
             let screen = screen.clone();
@@ -643,6 +686,7 @@ impl NodeActions {
         })
         .destructive();
         Self {
+            shell,
             toggle,
             drain,
             edit,

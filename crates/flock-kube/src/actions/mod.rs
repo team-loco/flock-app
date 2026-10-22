@@ -6,6 +6,7 @@ pub mod forward;
 pub mod logs;
 pub mod multi_logs;
 pub mod mutate;
+pub mod node_shell;
 pub mod pending;
 pub mod rollout;
 
@@ -13,8 +14,8 @@ use std::sync::{Arc, Mutex};
 
 use flock_core::action::Notice;
 use flock_core::{
-    ClusterId, Command, ExecRequest, Forward, LogEvent, LogRequest, MultiLogRequest, Receiver,
-    ResourceRef, Seen, Sender, Snapshot, Status, Update,
+    ClusterId, Command, ExecRequest, Forward, LogEvent, LogRequest, MultiLogRequest,
+    NodeShellRequest, Receiver, ResourceRef, Seen, Sender, Snapshot, Status, Update,
 };
 use pending::Mutation;
 
@@ -60,6 +61,7 @@ pub fn cluster_of(command: &Command) -> Option<&ClusterId> {
         Command::StreamLogs(request) => Some(&request.pod.cluster),
         Command::StreamPodLogs(request) => Some(request.target.cluster()),
         Command::Exec(request) => Some(&request.target.pod.cluster),
+        Command::NodeShell(request) => Some(&request.node.cluster),
         Command::Edit(request) => Some(&request.target.cluster),
         Command::PortForward { service, .. } => Some(&service.cluster),
         Command::Cordon(seen) => Some(&seen.target.cluster),
@@ -114,6 +116,7 @@ impl Actions {
             Command::StreamLogs(request) => Self::stream_logs(request, handle),
             Command::StreamPodLogs(request) => Self::stream_pod_logs(request, handle),
             Command::Exec(request) => Self::exec(request, handle),
+            Command::NodeShell(request) => Self::node_shell(request, handle),
             Command::Edit(request) => Self::edit(request, handle),
             Command::PortForward {
                 service,
@@ -205,6 +208,14 @@ impl Actions {
     fn exec(request: &ExecRequest, handle: Option<ClusterHandle>) {
         if let Some(handle) = handle {
             tokio::spawn(exec::run(handle, request.clone()));
+            return;
+        }
+        exec::fail(&request.output, &Error::NotConnected.to_string());
+    }
+
+    fn node_shell(request: &NodeShellRequest, handle: Option<ClusterHandle>) {
+        if let Some(handle) = handle {
+            tokio::spawn(node_shell::run(handle, request.clone()));
             return;
         }
         exec::fail(&request.output, &Error::NotConnected.to_string());

@@ -552,6 +552,11 @@ impl Terminal {
         self.after_change(cx);
     }
 
+    pub fn line(&mut self, text: impl AsRef<str>, cx: &mut Context<Self>) {
+        self.feed(text.as_ref().as_bytes(), cx);
+        self.feed(NEWLINE, cx);
+    }
+
     pub fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
         self.buffer.set_open(open);
         cx.notify();

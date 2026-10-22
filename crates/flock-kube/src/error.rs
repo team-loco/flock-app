@@ -66,6 +66,8 @@ pub enum Error {
     Redacted(String),
     #[error("debug container {name} did not start: {reason}")]
     DebugContainer { name: String, reason: String },
+    #[error("{0}")]
+    NodeShell(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

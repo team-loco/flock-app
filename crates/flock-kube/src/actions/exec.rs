@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use flock_core::{ExecEvent, ExecRequest, Sink};
-use k8s_openapi::api::core::v1::Pod;
+use flock_core::{ExecEvent, ExecRequest, Sink, Source, TermSize};
+use k8s_openapi::api::core::v1::{ContainerStatus, Pod};
 use kube::Api;
 use kube::api::{Patch, PatchParams};
 use serde_json::{Value, json};
@@ -15,12 +15,12 @@ pub const SHELL_FALLBACK: &str =
     "export TERM=xterm-256color; [ -x /bin/bash ] && exec /bin/bash -i || exec /bin/sh -i";
 const SHELL: &str = "/bin/sh";
 const SHELL_FLAG: &str = "-c";
-const DEBUG_POLL: Duration = Duration::from_millis(500);
-const DEBUG_START_TIMEOUT: Duration = Duration::from_secs(90);
+pub const DEBUG_POLL: Duration = Duration::from_millis(500);
+pub const DEBUG_START_TIMEOUT: Duration = Duration::from_secs(90);
 const DEBUG_PREFIX: &str = "debugger-";
 const DEBUG_SUFFIX_LEN: usize = 5;
 const SUFFIX_ALPHABET: &[u8] = b"bcdfghjklmnpqrstvwxz2456789";
-const PROMPT_NUDGE: &[u8] = b"\r";
+pub const PROMPT_NUDGE: &[u8] = b"\r";
 const CRLF: &str = "\r\n";
 const EXEC_FAILURE: &str = "exec";
 const MISSING_EXECUTABLE: [&str; 2] = ["executable file not found", "no such file or directory"];
@@ -38,6 +38,14 @@ pub fn shell_command() -> Vec<String> {
 }
 
 pub fn debug_name(seed: u128) -> String {
+    format!("{DEBUG_PREFIX}{}", suffix(seed))
+}
+
+pub fn seed() -> u128 {
+    jiff::Timestamp::now().as_nanosecond().unsigned_abs()
+}
+
+pub fn suffix(seed: u128) -> String {
     let base = SUFFIX_ALPHABET.len() as u128;
     let mut rest = seed;
     let mut suffix = String::with_capacity(DEBUG_SUFFIX_LEN);
@@ -47,7 +55,7 @@ pub fn debug_name(seed: u128) -> String {
         suffix.push(char::from(letter));
         rest /= base;
     }
-    format!("{DEBUG_PREFIX}{suffix}")
+    suffix
 }
 
 pub fn debug_patch(name: &str, image: &str, target: &str) -> Value {
@@ -72,10 +80,15 @@ pub enum DebugState {
 }
 
 pub fn debug_state(pod: &Pod, name: &str) -> DebugState {
-    let state = pod
+    let statuses = pod
         .status
         .as_ref()
-        .and_then(|status| status.ephemeral_container_statuses.as_ref())
+        .and_then(|status| status.ephemeral_container_statuses.as_deref());
+    container_state(statuses, name)
+}
+
+pub fn container_state(statuses: Option<&[ContainerStatus]>, name: &str) -> DebugState {
+    let state = statuses
         .and_then(|statuses| statuses.iter().find(|status| status.name == name))
         .and_then(|status| status.state.as_ref());
     let Some(state) = state else {
@@ -102,7 +115,7 @@ pub fn debug_state(pod: &Pod, name: &str) -> DebugState {
     DebugState::Waiting(waiting)
 }
 
-fn exit_code(exit: &ExecExit) -> Option<i32> {
+pub fn exit_code(exit: &ExecExit) -> Option<i32> {
     match exit {
         ExecExit::Success => Some(0),
         ExecExit::Code(code) => Some(*code),
@@ -127,8 +140,7 @@ async fn start_debug(
     let namespace = namespace(request)?;
     let pod = &request.target.pod.name;
     let pods: Api<Pod> = Api::namespaced(handle.client()?, &namespace);
-    let seed = jiff::Timestamp::now().as_nanosecond().unsigned_abs();
-    let name = debug_name(seed);
+    let name = debug_name(seed());
     let patch = debug_patch(&name, image, &request.target.container);
     let params = PatchParams {
         field_manager: Some(FIELD_MANAGER.to_owned()),
@@ -176,7 +188,13 @@ async fn start(handle: &ClusterHandle, request: &ExecRequest) -> Result<(ExecSes
     Ok((session, note))
 }
 
-async fn pump(session: &ExecSession, request: &ExecRequest) -> Option<ExecExit> {
+pub struct Streams<'a> {
+    pub input: &'a Source<Vec<u8>>,
+    pub resize: &'a Source<TermSize>,
+    pub output: &'a Sink<ExecEvent>,
+}
+
+pub async fn pump(session: &ExecSession, request: Streams<'_>) -> Option<ExecExit> {
     let mut resizing = true;
     loop {
         tokio::select! {
@@ -214,9 +232,7 @@ fn no_shell(output: &Sink<ExecEvent>) {
 }
 
 pub fn fail(output: &Sink<ExecEvent>, reason: &str) {
-    let text = format!("{reason}{CRLF}");
-    output.send_blocking(ExecEvent::Output(text.into_bytes()));
-    output.send_blocking(ExecEvent::Exited { code: None });
+    output.send_blocking(ExecEvent::Failed(reason.to_owned()));
 }
 
 pub async fn run(handle: ClusterHandle, request: ExecRequest) {
@@ -251,7 +267,12 @@ async fn session(handle: &ClusterHandle, request: &ExecRequest) {
     if !output.send_blocking(ExecEvent::Started { note }) {
         return;
     }
-    let Some(exit) = pump(&session, request).await else {
+    let streams = Streams {
+        input: &request.input,
+        resize: &request.resize,
+        output: &request.output,
+    };
+    let Some(exit) = pump(&session, streams).await else {
         return;
     };
     if let ExecExit::Failed(message) = &exit

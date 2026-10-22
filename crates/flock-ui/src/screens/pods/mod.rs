@@ -26,6 +26,8 @@ use gpui::{
 
 mod streams;
 
+pub(crate) use streams::exit_note;
+
 use streams::{LogSession, ShellSession, TERMINAL_ID};
 
 use crate::kit::{

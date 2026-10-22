@@ -678,6 +678,7 @@ impl Shell {
             Command::StreamLogs(_) => {}
             Command::StreamPodLogs(_) => {}
             Command::Exec(_) => {}
+            Command::NodeShell(_) => {}
             Command::RestartRollout(_) => {}
             Command::Scale { .. } => {}
             Command::Rollback { .. } => {}
@@ -862,6 +863,17 @@ impl Shell {
         if let Some(bar) = self.filter_bar(cx) {
             bar.update(cx, |bar, cx| bar.focus(window, cx));
         }
+    }
+
+    pub fn open_node_shell(
+        &mut self,
+        node: flock_core::ResourceRef,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focused_screens()
+            .pages
+            .open_node_shell(node, window, cx);
     }
 
     pub fn show_pod_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {

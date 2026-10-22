@@ -3,7 +3,8 @@ use std::time::Duration;
 
 use flock_core::pods::{Container, ContainerState, Pod};
 use flock_core::{
-    Command, ExecEvent, ExecRequest, LogLevel, LogLine, LogRequest, Snapshot, Status,
+    Command, ExecEvent, ExecRequest, LogLevel, LogLine, LogRequest, NodeShellRequest, Snapshot,
+    Status,
 };
 
 use crate::workload::Workloads;
@@ -16,6 +17,8 @@ const SECONDS_PER_MINUTE: u64 = 60;
 const SECONDS_PER_HOUR: u64 = 3600;
 const PROMPT: &str = "/app $ ";
 const NEWLINE: &str = "\r\n";
+const NODE_SHELL_NAMESPACE: &str = "default";
+const NODE_SHELL_PREFIX: &str = "node-shell-";
 const ERASE: &[u8] = b"\x08 \x08";
 const INTERRUPT: &str = "^C";
 const ESC: u8 = 0x1b;
@@ -86,6 +89,11 @@ pub fn handle(command: &Command, snapshot: &Snapshot, workloads: &Workloads) -> 
             };
             let request = request.clone();
             spawn("flock-demo-pod-logs", move || stream_logs(&pod, &request));
+            true
+        }
+        Command::NodeShell(request) => {
+            let request = request.clone();
+            spawn("flock-demo-node-shell", move || run_node_shell(&request));
             true
         }
         Command::Exec(request) => {
@@ -290,6 +298,45 @@ impl Line {
     }
 }
 
+fn node_prompt(node: &str) -> String {
+    format!("root@{node}:/# ")
+}
+
+fn node_echo(bytes: &[u8], prompt: &str) -> Vec<u8> {
+    let newline = format!("{NEWLINE}{prompt}");
+    bytes
+        .iter()
+        .flat_map(|byte| match byte {
+            &ENTER => newline.clone().into_bytes(),
+            other => vec![*other],
+        })
+        .collect()
+}
+
+fn run_node_shell(request: &NodeShellRequest) {
+    let name = &request.node.name;
+    let started = format!("Pod: {NODE_SHELL_NAMESPACE}/{NODE_SHELL_PREFIX}{name}");
+    let prompt = node_prompt(name);
+    if !request
+        .output
+        .send_blocking(ExecEvent::Started { note: started })
+    {
+        return;
+    }
+    if !request
+        .output
+        .send_blocking(ExecEvent::Output(prompt.clone().into_bytes()))
+    {
+        return;
+    }
+    while let Some(bytes) = request.input.recv_blocking() {
+        let echo = node_echo(&bytes, &prompt);
+        if !request.output.send_blocking(ExecEvent::Output(echo)) {
+            return;
+        }
+    }
+}
+
 fn run_shell(pod: &Pod, request: &ExecRequest) {
     let banner = match banner(pod, &request.target.container) {
         Ok(banner) => banner,
@@ -333,6 +380,13 @@ mod tests {
     use flock_core::{ExecTarget, Sink, Source};
 
     use super::*;
+
+    #[test]
+    fn node_shells_echo_input_and_prompt_after_enter() {
+        let prompt = node_prompt("n1");
+        assert_eq!(prompt, "root@n1:/# ");
+        assert_eq!(node_echo(b"ls\r", &prompt), b"ls\r\nroot@n1:/# ".to_vec());
+    }
     use crate::pods::pods;
 
     fn sample(name: &str) -> Pod {

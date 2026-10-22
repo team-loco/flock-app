@@ -9,8 +9,8 @@ use crate::resource::page_for_kind;
 use crate::tabs::{Panes, SavedWindow, TabId};
 use crate::{
     AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, FluxAction, FluxKey, FluxKind,
-    KubeconfigFile, LogRequest, LogTarget, MultiLogRequest, NewCluster, Notice, Page, Preferences,
-    ResourceRef, Seen, Sink, Snapshot, Uid, Verdict, Workload,
+    KubeconfigFile, LogRequest, LogTarget, MultiLogRequest, NewCluster, NodeShellRequest, Notice,
+    Page, Preferences, ResourceRef, Seen, Sink, Snapshot, Uid, Verdict, Workload,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +73,7 @@ pub enum Command {
     StreamLogs(LogRequest),
     StreamPodLogs(MultiLogRequest),
     Exec(ExecRequest),
+    NodeShell(NodeShellRequest),
     RestartRollout(Seen),
     Scale {
         target: Seen,
