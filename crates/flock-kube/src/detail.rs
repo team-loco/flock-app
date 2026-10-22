@@ -14,14 +14,13 @@ use crate::clock::{age, between};
 use crate::conditions::conditions;
 use crate::metrics::{NodeUsage, PodUsage, Usage, cpu_millicores, parse_quantity};
 use crate::problems::{OwnerKey, is_active, owner_of, pod_issue};
-use crate::snapshot::{PodHealth, node_ready, pod_health, schedulable};
+use crate::snapshot::{PodHealth, is_counted, node_ready, pod_health, schedulable};
 use crate::usage::{Allocatable, allocatable, cores, gib, narrow};
 
 const CPU: &str = "cpu";
 const MEMORY: &str = "memory";
 const PODS: &str = "pods";
 const PHASE_PENDING: &str = "Pending";
-const PHASE_SUCCEEDED: &str = "Succeeded";
 const INSTANCE_TYPE_LABELS: [&str; 2] = [
     "node.kubernetes.io/instance-type",
     "beta.kubernetes.io/instance-type",
@@ -122,12 +121,15 @@ impl PodIndex {
         for pod in pods {
             let phase = pod.status.as_ref().and_then(|s| s.phase.as_deref());
             let health = pod_health(pod);
-            match health {
-                PodHealth::Failing => index.phases.failing += 1,
-                PodHealth::Healthy if phase == Some(PHASE_SUCCEEDED) => {}
-                PodHealth::Healthy => index.phases.running += 1,
-                PodHealth::Warning if phase == Some(PHASE_PENDING) => index.phases.pending += 1,
-                PodHealth::Warning => index.phases.running += 1,
+            if is_counted(pod) {
+                match health {
+                    PodHealth::Failing => index.phases.failing += 1,
+                    PodHealth::Healthy => index.phases.running += 1,
+                    PodHealth::Warning if phase == Some(PHASE_PENDING) => {
+                        index.phases.pending += 1;
+                    }
+                    PodHealth::Warning => index.phases.running += 1,
+                }
             }
             if phase == Some(PHASE_PENDING) && crate::pods::unschedulable(pod).is_some() {
                 index.phases.unschedulable += 1;
@@ -663,6 +665,33 @@ mod tests {
         );
         assert_eq!(rows[0].top_pods[0].namespace, "web");
         assert!((rows[0].top_pods[0].memory - 1.).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn fleet_and_cluster_pod_totals_agree_with_completed_pods() {
+        let completed: Arc<Pod> = parse(json!({
+            "metadata": { "name": "job", "namespace": "apps" },
+            "status": { "phase": "Succeeded" }
+        }));
+        let failed: Arc<Pod> = parse(json!({
+            "metadata": { "name": "bad", "namespace": "apps" },
+            "status": { "phase": "Failed" }
+        }));
+        let pending: Arc<Pod> = parse(json!({
+            "metadata": { "name": "wait", "namespace": "apps" },
+            "status": { "phase": "Pending" }
+        }));
+        let pods = [
+            pod_with_resources("a", "w1", "500m", "1Gi"),
+            completed.clone(),
+            completed,
+            failed,
+            pending,
+        ];
+        let index = PodIndex::build(&pods, now());
+        let fleet = crate::snapshot::pod_counts(&pods);
+        assert_eq!(fleet.total, Some(index.phases.total()));
+        assert_eq!(index.phases.total(), 3);
     }
 
     #[test]
