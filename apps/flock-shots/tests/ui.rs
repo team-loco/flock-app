@@ -3777,7 +3777,7 @@ fn back_from_a_related_link_reopens_the_inspector_it_left() -> anyhow::Result<()
 }
 
 #[test]
-fn a_namespace_page_opens_what_needs_attention_contents_and_events() -> anyhow::Result<()> {
+fn a_namespace_page_opens_problem_cards_contents_and_events() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Namespace)?;
     let namespace = ui.state().location().clone();
     assert_eq!(
@@ -3792,10 +3792,7 @@ fn a_namespace_page_opens_what_needs_attention_contents_and_events() -> anyhow::
         .iter()
         .find(|problem| problem.target.namespace.as_deref() == Some("payments"))
         .map(|problem| problem.target.name.clone());
-    assert!(ui.bounds("namespace-issue-row-0").is_some());
-    assert!(ui.bounds("error-blocks").is_none());
-    assert!(ui.bounds("namespace-inspector-labels-body").is_none());
-    ui.click("namespace-inspector-labels-toggle")?;
+    assert!(ui.bounds("error-block-0").is_some());
     assert!(ui.bounds("namespace-inspector-labels-body").is_some());
     let services = ui
         .state()
@@ -3808,7 +3805,7 @@ fn a_namespace_page_opens_what_needs_attention_contents_and_events() -> anyhow::
         )
         .map(|detail| detail.overview.unready_services.len());
     assert_eq!(services, Some(1));
-    ui.click("namespace-issue-row-0")?;
+    ui.click("error-block-0")?;
     assert_eq!(
         ui.state().workload().map(|target| target.name.clone()),
         first
@@ -4041,14 +4038,12 @@ fn workload_pages_show_error_blocks_in_the_panel_not_under_the_name() -> anyhow:
 }
 
 #[test]
-fn flux_pages_show_a_condition_line_of_one_height_and_no_error_block() -> anyhow::Result<()> {
-    let mut heights = Vec::new();
-    for screen in [Screen::Kustomization, Screen::Helmrelease, Screen::Source] {
-        let mut ui = Ui::open(screen)?;
-        heights.push(bounds_of(&mut ui, "flux-condition")?.size.height);
-        assert!(ui.bounds("error-blocks").is_none());
-    }
-    assert!(heights.windows(2).all(|pair| pair[0] == pair[1]));
+fn a_failing_flux_page_shows_its_error_block_in_the_inspector_and_reconciling_does_not_move_it()
+-> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Kustomization)?;
+    let before = bounds_of(&mut ui, "error-block-0")?;
+    ui.click("flux-reconcile")?;
+    assert_eq!(bounds_of(&mut ui, "error-block-0")?, before);
     Ok(())
 }
 
@@ -4339,9 +4334,7 @@ fn failing_flux_list_and_page_name_the_reason() -> anyhow::Result<()> {
     let mut list = Ui::open(Screen::Kustomizations)?;
     assert!(list.bounds("reason-cell").is_some());
     let mut page = Ui::open(Screen::Kustomization)?;
-    let wrong = top(&mut page, "flux-condition")?;
-    let conditions = top(&mut page, "condition-table")?;
-    assert!(wrong < conditions);
+    assert!(page.bounds("error-block-0").is_some());
     Ok(())
 }
 
