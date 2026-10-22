@@ -9,8 +9,6 @@ use super::{
 use crate::kit::Link;
 use crate::theme::{Palette, SPACE_2, SPACE_5, TEXT_CONTROL, TEXT_LABEL, TEXT_MONO};
 
-const ALL: &str = "All →";
-
 struct Row {
     target: ResourceRef,
     detail: String,
@@ -66,8 +64,11 @@ fn row(
 }
 
 fn top(top: Top, palette: &Palette, cx: &mut Context<OverviewScreen>) -> AnyElement {
-    let all = Link::new(SharedString::from(format!("{}-all", top.id)), ALL)
-        .on_click(cx.listener(|_, _, _, cx| cx.emit(super::ScreenEvent::Navigate(Page::Pods))));
+    let all = Link::new(
+        SharedString::from(format!("{}-all", top.id)),
+        crate::screens::ALL_LINK,
+    )
+    .on_click(cx.listener(|_, _, _, cx| cx.emit(super::ScreenEvent::Navigate(Page::Pods))));
     let meta = meta_text(top.meta, palette);
     let meta = if top.problems > 0 {
         let activate = OverviewScreen::attention(Page::Pods, None, cx);

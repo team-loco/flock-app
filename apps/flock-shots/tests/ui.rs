@@ -3967,6 +3967,40 @@ fn a_node_inspector_links_its_biggest_pods_by_request() -> anyhow::Result<()> {
 }
 
 #[test]
+fn a_node_inspector_opens_the_pods_list_filtered_to_its_node() -> anyhow::Result<()> {
+    const NODE: &str = "ip-10-4-12-87";
+    let mut ui = Ui::open(Screen::Node)?;
+    ui.scroll(
+        "node-inspector-pane",
+        gpui::point(gpui::px(0.), gpui::px(-1200.)),
+    )?;
+    ui.click("node-inspector-all-pods")?;
+    let state = ui.state();
+    let location = state.location().clone();
+    assert_eq!(location.page, Page::Pods);
+    let in_cluster: Vec<_> = state
+        .snapshot
+        .pods
+        .iter()
+        .filter(|pod| Some(&pod.cluster) == location.cluster.as_ref())
+        .collect();
+    let on_node = in_cluster
+        .iter()
+        .filter(|pod| pod.node.as_deref() == Some(NODE))
+        .count();
+    assert!(on_node > 0 && on_node < in_cluster.len());
+    let text = ui.read(|shell, cx| shell.filter_bar(cx).map(|bar| bar.read(cx).text(cx)));
+    assert_eq!(text, Some(format!("node:{NODE}")));
+    assert!(ui.bounds("pod-filter-token-0").is_some());
+    let shown =
+        |ui: &Ui| ui.read(|shell, cx| shell.filter_bar(cx).and_then(|bar| bar.read(cx).matches()));
+    assert_eq!(shown(&ui), Some((on_node, in_cluster.len())));
+    ui.click("pod-filter-remove-0")?;
+    assert_eq!(shown(&ui), Some((in_cluster.len(), in_cluster.len())));
+    Ok(())
+}
+
+#[test]
 fn crashing_pod_inspector_leads_with_its_error_block_above_conditions_and_events()
 -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;

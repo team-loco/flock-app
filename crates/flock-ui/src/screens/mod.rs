@@ -54,6 +54,7 @@ pub use overview::OverviewScreen;
 pub use resources::ResourcesScreen;
 
 pub(crate) const ALL_NAMESPACES: &str = "All namespaces";
+pub(crate) const ALL_LINK: &str = "All →";
 
 pub(crate) fn chosen_namespace(select: &Select) -> Option<String> {
     select
@@ -153,6 +154,10 @@ pub enum ScreenEvent {
         page: Page,
         namespace: Option<String>,
     },
+    Filter {
+        page: Page,
+        tokens: Vec<String>,
+    },
 }
 
 pub struct ClusterPages {
@@ -173,7 +178,7 @@ impl ClusterPages {
     pub fn new<V: 'static>(
         window: &mut Window,
         cx: &mut Context<V>,
-        on_event: impl Fn(&mut V, &ScreenEvent, &mut Context<V>) + Clone + 'static,
+        on_event: impl Fn(&mut V, &ScreenEvent, &mut Window, &mut Context<V>) + Clone + 'static,
     ) -> Self {
         let overview = cx.new(OverviewScreen::new);
         let nodes = cx.new(|cx| NodesScreen::new(window, cx));
@@ -186,16 +191,16 @@ impl ClusterPages {
         let flux = cx.new(|cx| FluxListScreen::new(window, cx));
         let graph = cx.new(FluxGraphScreen::new);
         let subscriptions = vec![
-            subscribe(&graph, on_event.clone(), cx),
-            subscribe(&flux, on_event.clone(), cx),
-            subscribe(&overview, on_event.clone(), cx),
-            subscribe(&nodes, on_event.clone(), cx),
-            subscribe(&namespaces, on_event.clone(), cx),
-            subscribe(&events, on_event.clone(), cx),
-            subscribe(&problems, on_event.clone(), cx),
-            subscribe(&custom, on_event.clone(), cx),
-            subscribe(&helm, on_event.clone(), cx),
-            subscribe(&resources, on_event, cx),
+            subscribe(&graph, on_event.clone(), window, cx),
+            subscribe(&flux, on_event.clone(), window, cx),
+            subscribe(&overview, on_event.clone(), window, cx),
+            subscribe(&nodes, on_event.clone(), window, cx),
+            subscribe(&namespaces, on_event.clone(), window, cx),
+            subscribe(&events, on_event.clone(), window, cx),
+            subscribe(&problems, on_event.clone(), window, cx),
+            subscribe(&custom, on_event.clone(), window, cx),
+            subscribe(&helm, on_event.clone(), window, cx),
+            subscribe(&resources, on_event, window, cx),
         ];
         Self {
             overview,
@@ -485,10 +490,13 @@ pub fn is_flux_list(page: Page) -> bool {
 
 fn subscribe<V: 'static, S: gpui::EventEmitter<ScreenEvent>>(
     screen: &Entity<S>,
-    on_event: impl Fn(&mut V, &ScreenEvent, &mut Context<V>) + 'static,
+    on_event: impl Fn(&mut V, &ScreenEvent, &mut Window, &mut Context<V>) + 'static,
+    window: &mut Window,
     cx: &mut Context<V>,
 ) -> Subscription {
-    cx.subscribe(screen, move |view, _, event, cx| on_event(view, event, cx))
+    cx.subscribe_in(screen, window, move |view, _, event, window, cx| {
+        on_event(view, event, window, cx);
+    })
 }
 
 pub(crate) fn init(_: &mut App) {}

@@ -28,10 +28,10 @@ const FALSE: &str = "False";
 const SCHEDULING_MESSAGE: &str = "0/14 nodes are available: 14 Insufficient nvidia.com/gpu.";
 const API_ACCESS: (&str, &str) = ("kube-api-access", "projected · token, ca.crt, namespace");
 
-const NODE_12_87: &str = "ip-10-4-12-87.ec2.internal";
-const NODE_14_201: &str = "ip-10-4-14-201.ec2.internal";
-const NODE_22_63: &str = "ip-10-4-22-63.ec2.internal";
-const NODE_30_5: &str = "ip-10-4-30-5.ec2.internal";
+const NODE_12_87: &str = "ip-10-4-12-87";
+const NODE_14_201: &str = "ip-10-4-14-201";
+const NODE_22_63: &str = "ip-10-4-22-63";
+const NODE_30_5: &str = "ip-10-4-30-5";
 
 const CHECKOUT_IMAGE: &str = "ghcr.io/acme/checkout-api:2.14.0";
 const ENVOY_IMAGE: &str = "envoyproxy/envoy:v1.31.2";
@@ -315,7 +315,7 @@ fn crashing_checkout() -> Seed {
             event(
                 Status::Ok,
                 "Scheduled",
-                "Successfully assigned payments/checkout-api-7f9c6d-x2lqp to ip-10-4-12-87.ec2.internal",
+                "Successfully assigned payments/checkout-api-7f9c6d-x2lqp to ip-10-4-12-87",
                 1,
                 3 * HOUR,
             ),

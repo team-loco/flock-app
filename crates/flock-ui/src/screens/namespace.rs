@@ -48,7 +48,6 @@ const MEMORY: &str = "Memory";
 const QUOTA: &str = "Quota";
 const POLICIES: &str = "Network policies";
 const EVENTS: &str = "Events";
-const ALL: &str = "All →";
 const INSPECTOR_ID: &str = "namespace-inspector";
 const EVENT_ROW: &str = "namespace-event";
 const NONE: &str = "None";
@@ -503,7 +502,7 @@ impl NamespaceScreen {
     fn events(&self, cx: &mut Context<Self>) -> PanelSection {
         let total = self.page.events.len();
         let recent = self.page.recent_events();
-        let all = Link::new("namespace-all-events", ALL)
+        let all = Link::new("namespace-all-events", super::ALL_LINK)
             .on_click(cx.listener(|this, _, _, cx| this.open_list(Page::Events, EVENT_LIST, cx)));
         let screen = cx.weak_entity();
         let rows: Vec<EventRow> = recent

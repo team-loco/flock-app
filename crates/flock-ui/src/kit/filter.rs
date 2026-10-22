@@ -274,6 +274,10 @@ impl FilterBar {
         }
     }
 
+    pub fn matches(&self) -> Option<(usize, usize)> {
+        self.matches
+    }
+
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.field.update(cx, |field, cx| field.focus(window, cx));
     }
@@ -286,10 +290,13 @@ impl FilterBar {
     }
 
     pub fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.is_active() {
-            return;
+        if self.is_active() {
+            self.preset(Vec::new(), window, cx);
         }
-        self.tokens.clear();
+    }
+
+    pub fn preset(&mut self, tokens: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+        self.tokens = tokens;
         self.field
             .update(cx, |field, cx| field.set_value("", window, cx));
         self.suggestions.clear();

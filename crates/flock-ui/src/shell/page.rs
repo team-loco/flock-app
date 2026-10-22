@@ -222,9 +222,13 @@ impl Shell {
         let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
             shell.pane_command(pane, command.clone(), cx);
         });
-        let events = cx.subscribe(&screen, move |shell, _, event: &ScreenEvent, cx| {
-            shell.pane_screen_event(pane, event, cx);
-        });
+        let events = cx.subscribe_in(
+            &screen,
+            window,
+            move |shell, _, event: &ScreenEvent, window, cx| {
+                shell.pane_screen_event(pane, event, window, cx);
+            },
+        );
         screen.update(cx, |screen, _| screen.navigation = Some(navigation));
         self.sync_namespace(&screen, location, cx);
         self.screens_mut(ix).namespace =

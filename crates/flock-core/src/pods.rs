@@ -915,6 +915,23 @@ mod tests {
     }
 
     #[test]
+    fn node_query_matches_the_whole_node_name_only() {
+        let pod = crashing();
+        let scheduled = |query: &str| matches_query(&pod, &TextFilter::parse(query));
+        assert!(scheduled(&crate::filter::node_query(
+            "ip-10-4-12-87.ec2.internal"
+        )));
+        assert!(scheduled("node:IP-10-4-12-87.EC2.internal"));
+        assert!(scheduled("node:ip-10-4-12-87.ec2.internal ns:pay"));
+        assert!(!scheduled("node:ip-10-4-12-8"));
+        assert!(!scheduled("node:ip-10-4-30-5.ec2.internal"));
+        assert!(!matches_query(
+            &pending(),
+            &TextFilter::parse("node:ip-10-4-12-87.ec2.internal")
+        ));
+    }
+
+    #[test]
     fn query_scopes_to_cluster_namespace_and_filter() {
         let mut other = healthy("elsewhere", "web");
         other.cluster = ClusterId::new("staging");

@@ -11,7 +11,6 @@ use crate::theme::{
 };
 
 const TITLE: &str = "Recent changes";
-const ALL: &str = "All →";
 const ALL_ID: &str = "overview-changes-all";
 const ROW_ID: &str = "overview-change";
 const LIMIT: usize = 6;
@@ -84,10 +83,11 @@ pub(super) fn render(
     let recent: Vec<&ClusterChange> = within(&data.changes, range).collect();
     let meta = format!("last {} · {}", range.label(), recent.len());
     let cluster = data.cluster.clone();
-    let all = Link::new(ALL_ID, ALL).on_click(cx.listener(move |_, _, _, cx| {
-        let command = Command::OpenClusterChanges(cluster.clone());
-        cx.emit(ScreenEvent::Command(command));
-    }));
+    let all =
+        Link::new(ALL_ID, crate::screens::ALL_LINK).on_click(cx.listener(move |_, _, _, cx| {
+            let command = Command::OpenClusterChanges(cluster.clone());
+            cx.emit(ScreenEvent::Command(command));
+        }));
     let head = section_head(TITLE, Some(meta), Some(all), palette);
     let rows: Vec<AnyElement> = recent
         .into_iter()
