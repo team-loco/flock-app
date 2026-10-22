@@ -36,7 +36,7 @@ use crate::kit::{
     MenuItem, PanelHeader, PanelSection, Select, SelectEvent, ShowAll, StatusText, Table,
     TableEvent, Terminal, TextFieldState, chip_label, confirm, swap_in,
 };
-use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
+use crate::screens::related::{OnPick, Pick, RELATED, inspector_section, related_count};
 use crate::screens::{
     ALL_NAMESPACES, ListShape, chosen_namespace, edit_item, empty_list, new_tab_item,
     set_namespace_options,
@@ -590,8 +590,13 @@ impl PodsScreen {
                 let _ = screen.update(cx, |_, cx| cx.emit(Command::OpenResource(target)));
             }
         });
-        let related =
-            PanelSection::new(INSPECTOR_ID, RELATED).child(inspector_section(related, &pick, cx));
+        let section = PanelSection::new(INSPECTOR_ID, RELATED).closed();
+        let related = match related {
+            Some(loaded) => section
+                .count(related_count(loaded).to_string())
+                .child(inspector_section(Some(loaded), &pick, cx)),
+            None => section.pending(),
+        };
         let (header, body) = match self.selected_pod() {
             Some(pod) => (
                 Some(Self::pod_header(pod, cx)),

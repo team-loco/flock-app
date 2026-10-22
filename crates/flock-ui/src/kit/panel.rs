@@ -70,6 +70,7 @@ pub struct PanelSection {
     count_color: Option<Hsla>,
     trailing: Option<AnyElement>,
     open_by_default: bool,
+    pending: bool,
     body: Vec<AnyElement>,
 }
 
@@ -83,6 +84,7 @@ impl PanelSection {
             count_color: None,
             trailing: None,
             open_by_default: true,
+            pending: false,
             body: Vec::new(),
         }
     }
@@ -99,6 +101,11 @@ impl PanelSection {
 
     pub fn trailing(mut self, trailing: impl IntoElement) -> Self {
         self.trailing = Some(trailing.into_any_element());
+        self
+    }
+
+    pub fn pending(mut self) -> Self {
+        self.pending = true;
         self
     }
 
@@ -132,7 +139,7 @@ impl RenderOnce for PanelSection {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = cx.palette();
         let id = self.id.to_string();
-        let open = section_open(&id, self.open_by_default, cx);
+        let open = !self.pending && section_open(&id, self.open_by_default, cx);
         let chevron = if open { CHEVRON_DOWN } else { CHEVRON_RIGHT };
         let count = self.count.map(|count| {
             div()

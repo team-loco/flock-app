@@ -4256,18 +4256,53 @@ fn the_pod_picked_when_the_list_opens_loads_its_related_objects() -> anyhow::Res
 }
 
 #[test]
-fn a_loading_related_section_reserves_one_row() -> anyhow::Result<()> {
+fn a_loading_related_section_in_the_pod_inspector_shows_only_its_header() -> anyhow::Result<()> {
     let (mut ui, _updates) = Ui::scripted(Screen::Pods)?;
     ui.press("cmd-j")?;
     ui.scroll(
         "pod-inspector-pane",
         gpui::point(gpui::px(0.), gpui::px(INSPECTOR_SCROLL_TO_END)),
     )?;
-    assert!(ui.bounds("loading-skeleton").is_none());
-    let loading = ui
-        .bounds("related-loading")
-        .context("Related shows no loading row")?;
-    assert_eq!(loading.size.height, flock_ui::theme::ROW_DOCUMENT);
+    assert!(ui.bounds("related-loading").is_none());
+    assert!(ui.bounds("pod-inspector-related").is_some());
+    assert!(ui.bounds("pod-inspector-related-body").is_none());
+    Ok(())
+}
+
+struct WithoutRelated;
+
+impl flock_core::Backend for WithoutRelated {
+    fn start(
+        self: Box<Self>,
+        updates: flock_core::Sender<flock_core::Update>,
+        commands: flock_core::Receiver<Command>,
+    ) {
+        let (inner, filtered) = async_channel::unbounded();
+        std::thread::spawn(move || {
+            while let Ok(command) = commands.recv_blocking() {
+                let loads_related = matches!(
+                    command,
+                    Command::OpenResource(_) | Command::InspectResource(_)
+                );
+                if !loads_related && inner.send_blocking(command).is_err() {
+                    break;
+                }
+            }
+        });
+        Box::new(flock_demo::DemoBackend).start(updates, filtered);
+    }
+}
+
+#[test]
+fn the_workload_events_section_does_not_move_when_related_finishes_loading() -> anyhow::Result<()> {
+    let factory: flock_shots::BackendFactory = std::rc::Rc::new(|| Ok(Box::new(WithoutRelated)));
+    let mut loading = Ui::live(Screen::Workload, Default::default(), factory)?;
+    let before = bounds_of(&mut loading, "workload-inspector-events")?.top();
+    assert!(loading.bounds("workload-inspector-related-body").is_none());
+    let mut loaded = Ui::open(Screen::Workload)?;
+    let after = bounds_of(&mut loaded, "workload-inspector-events")?.top();
+    assert!(loaded.bounds("workload-inspector-related-body").is_none());
+    assert_eq!(before, after);
     Ok(())
 }
 
@@ -5045,14 +5080,10 @@ fn a_nav_row_with_three_badges_keeps_its_full_label() -> anyhow::Result<()> {
     Ok(())
 }
 
-const WORKLOAD_SECTIONS: [(&str, &str); 3] = [
+const WORKLOAD_SECTIONS: [(&str, &str); 2] = [
     (
         "workload-inspector-conditions",
         "workload-inspector-conditions-body",
-    ),
-    (
-        "workload-inspector-related",
-        "workload-inspector-related-body",
     ),
     (
         "workload-inspector-events",
@@ -5080,6 +5111,7 @@ fn the_workload_inspector_orders_conditions_spec_related_and_events() -> anyhow:
     for (section, body) in WORKLOAD_SECTIONS {
         assert!(ui.bounds(body).is_some(), "{section} starts closed");
     }
+    assert!(ui.bounds("workload-inspector-related-body").is_none());
     Ok(())
 }
 
@@ -5109,6 +5141,9 @@ fn the_workload_inspector_lists_events_and_links_related_objects() -> anyhow::Re
     use gpui::{point, px};
     let mut ui = Ui::open(Screen::Workload)?;
     assert!(ui.bounds("object-events").is_some());
+    scroll_workload_inspector_down(&mut ui)?;
+    ui.click("workload-inspector-related-toggle")?;
+    scroll_workload_inspector_down(&mut ui)?;
     let link = bounds_of(&mut ui, "related-Services-checkout-api")?;
     let pane = bounds_of(&mut ui, "workload-inspector-pane")?;
     let delta = point(px(0.), pane.center().y - link.center().y);

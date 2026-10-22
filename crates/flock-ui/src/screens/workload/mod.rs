@@ -26,7 +26,7 @@ use crate::kit::{
     TextFieldState, Toast, Width, confirm, issue_stack, min_row_width, slide_in, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
-use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
+use crate::screens::related::{OnPick, Pick, RELATED, inspector_section, related_count};
 use crate::screens::{EDIT_YAML, FullView, edit_item, full_view_link};
 use crate::theme::{
     ActiveTheme, FIELD_LABEL, FONT_MONO, Palette, ROW_TABLE, RULE, SECTION_HEADER, SPACE_1,
@@ -286,13 +286,13 @@ impl WorkloadScreen {
                 let _ = screen.update(cx, |_, cx| cx.emit(Command::OpenResource(target)));
             }
         });
-        let body = inspector_section(self.related.as_ref(), &pick, cx);
-        let section = PanelSection::new(INSPECTOR_ID, RELATED);
-        let section = match &self.related {
-            Some(related) => section.count(related_count(related).to_string()),
-            None => section,
-        };
-        section.child(body)
+        let section = PanelSection::new(INSPECTOR_ID, RELATED).closed();
+        match &self.related {
+            Some(related) => section
+                .count(related_count(related).to_string())
+                .child(inspector_section(Some(related), &pick, cx)),
+            None => section.pending(),
+        }
     }
 
     fn toggle_yaml(&mut self, cx: &mut Context<Self>) {
@@ -775,10 +775,6 @@ fn conditions_section(conditions: &[Condition], palette: &Palette) -> PanelSecti
         Some(status) => section.count_color(palette.status(status)),
         None => section,
     }
-}
-
-fn related_count(related: &Related) -> usize {
-    related.groups.iter().map(|group| group.total).sum()
 }
 
 fn env_section(env: &[EnvVar], palette: &Palette) -> PanelSection {
