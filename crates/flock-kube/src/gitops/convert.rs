@@ -21,6 +21,8 @@ use crate::resources::owns_suspend;
 const API_VERSION: &str = "apiVersion";
 const KIND: &str = "kind";
 const READY: &str = "Ready";
+const SUSPENDED: &str = "Suspended";
+const SUSPEND_SPEC: &str = "spec.suspend: true";
 const SEPARATOR: &str = " · ";
 const VALUES_MAX: usize = 40;
 const DEFAULT_BRANCH: &str = "master";
@@ -184,15 +186,38 @@ pub fn summary(parsed: &Parsed, objects: &[Parsed]) -> Summary {
     summarize(&parsed.object, source(parsed, objects).map(|s| &s.object))
 }
 
+fn problem_condition<'a>(
+    parsed: &'a Parsed,
+    objects: &'a [Parsed],
+) -> Option<&'a flock_flux::Condition> {
+    let own = failing_condition(&parsed.object);
+    let source = source(parsed, objects).and_then(|source| failing_condition(&source.object));
+    own.or(source).or_else(|| parsed.object.ready())
+}
+
 pub fn health(parsed: &Parsed, objects: &[Parsed], now: Timestamp) -> FluxHealth {
     let summary = summary(parsed, objects);
     let identity = &parsed.object.identity;
+    let condition = problem_condition(parsed, objects);
+    let (reason, message, line) = match condition {
+        _ if parsed.object.suspended => {
+            (SUSPENDED.to_owned(), SUSPEND_SPEC.to_owned(), String::new())
+        }
+        Some(condition) => (
+            condition.reason.clone(),
+            condition.message.clone(),
+            format!("{}={}", condition.type_, condition.status),
+        ),
+        None => (String::new(), String::new(), String::new()),
+    };
     FluxHealth {
         kind: identity.kind,
         namespace: identity.namespace.clone(),
         name: identity.name.clone(),
         status: core_status(summary.status),
-        sentence: summary.sentence,
+        reason,
+        message,
+        condition: line,
         suspended: parsed.object.suspended,
         revision: parsed.object.revision().map(str::to_owned),
         since: parsed

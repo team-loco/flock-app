@@ -14,6 +14,7 @@ const LOAD_BALANCER: &str = "LoadBalancer";
 const PENDING: &str = "Pending";
 const SERVICE_KIND: &str = "Service";
 const NO_ENDPOINTS: &str = "no ready endpoints";
+const ENDPOINTS_NOT_READY: &str = "EndpointsNotReady";
 
 pub fn facts(
     services: &[Arc<Service>],
@@ -115,8 +116,11 @@ pub fn unready_services(
                     namespace: Some(namespace.to_owned()),
                     name: name.to_owned(),
                 },
+                reason: ENDPOINTS_NOT_READY.to_owned(),
                 message,
+                condition: String::new(),
                 age: crate::clock::age(&service.metadata, now),
+                events: Vec::new(),
             })
         })
         .collect()

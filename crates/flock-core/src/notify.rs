@@ -87,7 +87,10 @@ fn alert(problem: &Problem) -> Alert {
             target.cluster, target.kind, target.name
         ),
         title: format!("{}{SEPARATOR}{}", target.name, target.cluster),
-        body: problem.message.clone(),
+        body: crate::issue::object_line([
+            Some(problem.reason.clone()).filter(|r| !r.is_empty()),
+            Some(problem.message.clone()).filter(|m| !m.is_empty()),
+        ]),
         target: target.clone(),
     }
 }
@@ -108,8 +111,11 @@ mod tests {
                 namespace: Some("shop".into()),
                 name: name.into(),
             },
-            message: "CrashLoopBackOff".into(),
+            reason: "CrashLoopBackOff".into(),
+            message: String::new(),
+            condition: String::new(),
             age: Duration::ZERO,
+            events: Vec::new(),
         }
     }
 

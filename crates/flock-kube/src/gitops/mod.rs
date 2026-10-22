@@ -427,14 +427,26 @@ mod tests {
             parsed(&failing),
         ];
         let health = cluster_health(&objects, Timestamp::UNIX_EPOCH);
-        let summarized: Vec<(&str, Status, &str)> = health
+        let summarized: Vec<(&str, Status, &str, &str)> = health
             .iter()
-            .map(|h| (h.name.as_str(), h.status, h.sentence.as_str()))
+            .map(|h| {
+                (
+                    h.name.as_str(),
+                    h.status,
+                    h.reason.as_str(),
+                    h.condition.as_str(),
+                )
+            })
             .collect();
         let page = summary(&objects[0], &objects);
         assert_eq!(
             summarized,
-            [("apps", core_status(page.status), page.sentence.as_str())]
+            [(
+                "apps",
+                core_status(page.status),
+                "GitOperationFailed",
+                "Ready=False"
+            )]
         );
         assert_eq!(health[0].status, Status::Warn);
     }

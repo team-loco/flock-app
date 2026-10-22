@@ -24,9 +24,38 @@ pub struct ClusterSummary {
     pub metrics: Option<ClusterMetrics>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Connection {
+    Connected,
+    Connecting,
+    AuthExpired,
+    Offline,
+}
+
+impl Connection {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Connected => "connected",
+            Self::Connecting => "connecting",
+            Self::AuthExpired => "auth expired",
+            Self::Offline => "offline",
+        }
+    }
+}
+
 impl ClusterSummary {
     pub fn is_connected(&self) -> bool {
         self.status != Status::Offline
+    }
+
+    pub fn connection(&self) -> Connection {
+        match self.status {
+            Status::Progress => Connection::Connecting,
+            Status::Offline => Connection::Offline,
+            _ if self.metrics.is_some() => Connection::Connected,
+            Status::Err => Connection::AuthExpired,
+            _ => Connection::Connected,
+        }
     }
 }
 
@@ -315,8 +344,11 @@ pub(crate) mod tests {
                 namespace: Some("ns".into()),
                 name: "p".into(),
             },
+            reason: String::new(),
             message: String::new(),
+            condition: String::new(),
             age: std::time::Duration::ZERO,
+            events: Vec::new(),
         }
     }
 
@@ -511,6 +543,42 @@ pub(crate) mod tests {
     }
 
     #[cfg(not(feature = "loco"))]
+    #[test]
+    fn connection_words_come_from_reachability_not_health() {
+        let reachable = |status: Status| ClusterSummary {
+            metrics: Some(ClusterMetrics {
+                pods: Counts::default(),
+                cpu_percent: None,
+                memory_percent: None,
+                flux: Counts::default(),
+                revision: crate::home::Revision {
+                    sha: String::new(),
+                    held: false,
+                },
+            }),
+            ..cluster("c", status, Counts::default())
+        };
+        let unreachable = |status: Status| cluster("c", status, Counts::default());
+        let labels = [
+            reachable(Status::Err),
+            reachable(Status::Ok),
+            unreachable(Status::Err),
+            unreachable(Status::Offline),
+            reachable(Status::Progress),
+        ]
+        .map(|c| c.connection().label());
+        assert_eq!(
+            labels,
+            [
+                "connected",
+                "connected",
+                "auth expired",
+                "offline",
+                "connecting"
+            ]
+        );
+    }
+
     #[test]
     fn clusters_show_the_whole_cluster_nav() {
         let snapshot = sample();

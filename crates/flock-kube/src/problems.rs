@@ -1,16 +1,17 @@
-use std::collections::HashMap;
-use std::fmt::Write as _;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
 use flock_core::home::Problem;
+use flock_core::pods::PodEvent;
 use flock_core::{ClusterId, Diagnosis, ResourceRef, Status};
 use jiff::Timestamp;
-use k8s_openapi::api::core::v1::{ContainerStatus, Node, Pod, PodCondition};
+use k8s_openapi::api::core::v1::{ContainerStatus, Event, Node, Pod, PodCondition};
 
 use crate::clock::{age, since};
 use crate::manager::ConnectionStatus;
 use crate::snapshot::{FAILING_WAIT_REASONS, node_ready, schedulable};
+use crate::workload;
 
 const POD_KIND: &str = "Pod";
 const NODE_KIND: &str = "Node";
@@ -28,8 +29,11 @@ const PHASE_RUNNING: &str = "Running";
 const PHASE_SUCCEEDED: &str = "Succeeded";
 const PHASE_FAILED: &str = "Failed";
 const NOT_READY_GRACE: Duration = Duration::from_secs(120);
-const ELLIPSIS: char = '…';
-const CORDONED: &str = "Cordoned (SchedulingDisabled)";
+const FAILED_SCHEDULING: &str = "FailedScheduling";
+const SCHEDULING_DISABLED: &str = "SchedulingDisabled";
+const CORDONED_SPEC: &str = "spec.unschedulable: true";
+const UNAUTHORIZED: &str = "Unauthorized";
+const CONNECTION: &str = "connection";
 const NOT_READY: &str = "NotReady";
 const SINGLE: i32 = 1;
 const UNSCHEDULABLE_TAINT: &str = "node.kubernetes.io/unschedulable";
@@ -86,7 +90,6 @@ pub enum Issue {
         reason: String,
         message: String,
         restarts: i32,
-        exit: Option<i32>,
         last: Option<String>,
     },
     Unschedulable {
@@ -137,44 +140,6 @@ impl Issue {
             }
         }
     }
-
-    pub fn sentence(&self) -> String {
-        match self {
-            Self::Waiting {
-                reason,
-                restarts,
-                exit,
-                ..
-            } if reason == CRASH_LOOP => {
-                let noun = if *restarts == 1 {
-                    "restart"
-                } else {
-                    "restarts"
-                };
-                match exit {
-                    Some(code) => format!("{reason}, {restarts} {noun}, exit {code}"),
-                    None => format!("{reason}, {restarts} {noun}"),
-                }
-            }
-            Self::Waiting {
-                reason, message, ..
-            } => clause(reason, message),
-            Self::Unschedulable { message } => clause("FailedScheduling", message),
-            Self::NotReady {
-                container: Some(container),
-            } => format!("{container} is running but not ready"),
-            Self::NotReady { container: None } => "running but not ready".to_owned(),
-        }
-    }
-}
-
-fn clause(reason: &str, message: &str) -> String {
-    let message = message.trim();
-    if message.is_empty() {
-        reason.to_owned()
-    } else {
-        format!("{reason}: {message}")
-    }
 }
 
 pub(crate) fn last_exit(container: &ContainerStatus) -> Option<String> {
@@ -223,16 +188,10 @@ fn waiting_issue(pod: &Pod) -> Option<Issue> {
             if !FAILING_WAIT_REASONS.contains(&reason) {
                 return None;
             }
-            let exit = container
-                .last_state
-                .as_ref()
-                .and_then(|last| last.terminated.as_ref())
-                .map(|terminated| terminated.exit_code);
             Some(Issue::Waiting {
                 reason: reason.to_owned(),
                 message: waiting.message.clone().unwrap_or_default(),
                 restarts: container.restart_count,
-                exit,
                 last: last_exit(container),
             })
         })
@@ -283,77 +242,116 @@ pub fn pod_issue(pod: &Pod, now: Timestamp) -> Option<(Issue, Duration)> {
 }
 
 struct Flagged {
-    pod: String,
     issue: Issue,
     age: Duration,
+    raw: Diagnosis,
+    condition: String,
 }
 
 #[derive(Default)]
 struct Group {
-    total: u32,
-    ready: u32,
     flagged: Vec<Flagged>,
+    replica_sets: BTreeSet<String>,
+    pods: BTreeSet<String>,
 }
 
-fn short_pod(name: &str) -> String {
-    let tail = name.rsplit('-').next().unwrap_or(name);
-    format!("{ELLIPSIS}{tail}")
+fn condition_line(pod: &Pod, kind: &str) -> String {
+    condition(pod, kind)
+        .map(|c| format!("{}={}", c.type_, c.status))
+        .unwrap_or_default()
 }
 
-pub fn pod_problems(cluster: &ClusterId, pods: &[Arc<Pod>], now: Timestamp) -> Vec<Problem> {
+fn raw(pod: &Pod, issue: &Issue) -> (Diagnosis, String) {
+    match issue {
+        Issue::Waiting {
+            reason, message, ..
+        } => {
+            let raw = Diagnosis::new(reason.clone(), message.clone());
+            (raw, condition_line(pod, READY_CONDITION))
+        }
+        Issue::Unschedulable { message } => {
+            let raw = Diagnosis::new(FAILED_SCHEDULING, message.clone());
+            (raw, condition_line(pod, SCHEDULED_CONDITION))
+        }
+        Issue::NotReady { .. } => {
+            let ready = condition(pod, READY_CONDITION);
+            let reason = ready
+                .and_then(|c| c.reason.clone())
+                .unwrap_or_else(|| NOT_READY.to_owned());
+            let message = ready.and_then(|c| c.message.clone()).unwrap_or_default();
+            (
+                Diagnosis::new(reason, message),
+                condition_line(pod, READY_CONDITION),
+            )
+        }
+    }
+}
+
+fn replica_set(pod: &Pod) -> Option<String> {
+    pod.metadata
+        .owner_references
+        .iter()
+        .flatten()
+        .find(|owner| owner.controller == Some(true) && owner.kind == REPLICA_SET)
+        .map(|owner| owner.name.clone())
+}
+
+pub fn pod_problems(
+    cluster: &ClusterId,
+    pods: &[Arc<Pod>],
+    events: &[Arc<Event>],
+    now: Timestamp,
+) -> Vec<Problem> {
     let mut groups: HashMap<OwnerKey, Group> = HashMap::new();
     for pod in pods.iter().filter(|pod| is_active(pod)) {
+        let Some((issue, age)) = pod_issue(pod, now) else {
+            continue;
+        };
         let group = groups.entry(owner_of(pod)).or_default();
-        group.total += 1;
-        if pod_ready(pod) {
-            group.ready += 1;
-        }
-        if let Some((issue, age)) = pod_issue(pod, now) {
-            group.flagged.push(Flagged {
-                pod: pod.metadata.name.clone().unwrap_or_default(),
-                issue,
-                age,
-            });
-        }
+        group.pods.extend(pod.metadata.name.clone());
+        group.replica_sets.extend(replica_set(pod));
+        let (raw, condition) = raw(pod, &issue);
+        group.flagged.push(Flagged {
+            issue,
+            age,
+            raw,
+            condition,
+        });
     }
     groups
         .into_iter()
-        .filter_map(|(owner, group)| group_problem(cluster, owner, &group))
+        .filter_map(|(owner, group)| group_problem(cluster, owner, &group, events, now))
         .collect()
 }
 
-fn group_problem(cluster: &ClusterId, owner: OwnerKey, group: &Group) -> Option<Problem> {
+fn group_problem(
+    cluster: &ClusterId,
+    owner: OwnerKey,
+    group: &Group,
+    events: &[Arc<Event>],
+    now: Timestamp,
+) -> Option<Problem> {
     let worst = group.flagged.iter().max_by(|a, b| {
         a.issue
             .status()
             .cmp(&b.issue.status())
             .then(a.age.cmp(&b.age))
     })?;
-    let mut message = if owner.kind == POD_KIND {
-        worst.issue.sentence()
-    } else {
-        format!(
-            "{}/{} ready · pod {} {}",
-            group.ready,
-            group.total,
-            short_pod(&worst.pod),
-            worst.issue.sentence()
-        )
+    let target = ResourceRef {
+        cluster: cluster.clone(),
+        kind: owner.kind,
+        namespace: Some(owner.namespace),
+        name: owner.name,
     };
-    let others = group.flagged.len() - 1;
-    if others > 0 {
-        let _ = write!(message, " (+{others} more)");
-    }
+    let events = workload::events(&target, &group.replica_sets, &group.pods, events, now);
     Some(Problem {
         status: worst.issue.status(),
-        target: ResourceRef {
-            cluster: cluster.clone(),
-            kind: owner.kind,
-            namespace: Some(owner.namespace),
-            name: owner.name,
-        },
-        message,
+        target,
+        reason: worst.raw.reason.clone(),
+        message: worst.raw.message.clone(),
+        condition: worst.condition.clone(),
         age: worst.age,
+        events,
     })
 }
 
@@ -366,9 +364,20 @@ fn node_ref(cluster: &ClusterId, node: &Node) -> ResourceRef {
     }
 }
 
-pub fn node_problems(cluster: &ClusterId, nodes: &[Arc<Node>], now: Timestamp) -> Vec<Problem> {
+pub fn target_events(target: &ResourceRef, events: &[Arc<Event>], now: Timestamp) -> Vec<PodEvent> {
+    let none = BTreeSet::new();
+    workload::events(target, &none, &none, events, now)
+}
+
+pub fn node_problems(
+    cluster: &ClusterId,
+    nodes: &[Arc<Node>],
+    events: &[Arc<Event>],
+    now: Timestamp,
+) -> Vec<Problem> {
     let mut problems = Vec::new();
     for node in nodes {
+        let target = node_ref(cluster, node);
         let status = node.status.as_ref();
         if !node_ready(node) {
             let ready = status
@@ -376,12 +385,21 @@ pub fn node_problems(cluster: &ClusterId, nodes: &[Arc<Node>], now: Timestamp) -
                 .into_iter()
                 .flatten()
                 .find(|c| c.type_ == READY_CONDITION);
-            let message = ready.and_then(|c| c.message.as_deref()).unwrap_or_default();
+            let reason = ready
+                .and_then(|c| c.reason.clone())
+                .unwrap_or_else(|| NOT_READY.to_owned());
+            let message = ready.and_then(|c| c.message.clone()).unwrap_or_default();
+            let condition = ready
+                .map(|c| format!("{}={}", c.type_, c.status))
+                .unwrap_or_default();
             problems.push(Problem {
                 status: Status::Err,
-                target: node_ref(cluster, node),
-                message: clause(NOT_READY, message),
+                target: target.clone(),
+                reason,
+                message,
+                condition,
                 age: since(ready.and_then(|c| c.last_transition_time.as_ref()), now),
+                events: target_events(&target, events, now),
             });
         }
         if !schedulable(node) {
@@ -395,9 +413,12 @@ pub fn node_problems(cluster: &ClusterId, nodes: &[Arc<Node>], now: Timestamp) -
                 .and_then(|taint| taint.time_added.as_ref());
             problems.push(Problem {
                 status: Status::Warn,
-                target: node_ref(cluster, node),
-                message: CORDONED.to_owned(),
+                target: target.clone(),
+                reason: SCHEDULING_DISABLED.to_owned(),
+                message: CORDONED_SPEC.to_owned(),
+                condition: String::new(),
                 age: since(added, now),
+                events: target_events(&target, events, now),
             });
         }
     }
@@ -408,10 +429,6 @@ pub fn connection_problem(cluster: &ClusterId, status: &ConnectionStatus) -> Opt
     let ConnectionStatus::AuthExpired(failure) = status else {
         return None;
     };
-    let message = match &failure.remedy {
-        Some(remedy) => format!("{} · {remedy}", failure.message),
-        None => failure.message.clone(),
-    };
     Some(Problem {
         status: Status::Err,
         target: ResourceRef {
@@ -420,8 +437,11 @@ pub fn connection_problem(cluster: &ClusterId, status: &ConnectionStatus) -> Opt
             namespace: None,
             name: cluster.to_string(),
         },
-        message,
+        reason: UNAUTHORIZED.to_owned(),
+        message: failure.message.clone(),
+        condition: CONNECTION.to_owned(),
         age: Duration::ZERO,
+        events: Vec::new(),
     })
 }
 
@@ -559,17 +579,36 @@ pub(crate) mod tests {
                 &ready_status(),
             ),
         ];
-        let problems = pod_problems(&cluster(), &pods, now());
+        let event = |kind: &str, name: &str, minutes: i64| -> Arc<Event> {
+            parse(json!({
+                "metadata": { "name": format!("{name}.1"), "namespace": "payments" },
+                "involvedObject": { "kind": kind, "name": name, "namespace": "payments" },
+                "reason": "BackOff", "type": "Warning", "lastTimestamp": at(minutes)
+            }))
+        };
+        let events = [
+            event("Pod", "checkout-api-7f9c6d-x2lqp", 2),
+            event("ReplicaSet", "checkout-api-7f9c6d", 30),
+            event("Pod", "checkout-api-7f9c6d-a1b2c", 1),
+            event("Pod", "someone-else", 1),
+        ];
+        let problems = pod_problems(&cluster(), &pods, &events, now());
         assert_eq!(problems.len(), 1);
         let problem = &problems[0];
         assert_eq!(problem.status, Status::Err);
         assert_eq!(problem.target.to_string(), "payments/checkout-api");
         assert_eq!(problem.target.kind, "Deployment");
         assert_eq!(
-            problem.message,
-            "2/3 ready · pod …x2lqp CrashLoopBackOff, 14 restarts, exit 1"
+            (
+                problem.reason.as_str(),
+                problem.message.as_str(),
+                problem.condition.as_str()
+            ),
+            ("CrashLoopBackOff", "back-off", "Ready=False")
         );
         assert_eq!(problem.age, Duration::from_hours(3));
+        let ages: Vec<Duration> = problem.events.iter().map(|e| e.age).collect();
+        assert_eq!(ages, [Duration::from_mins(2), Duration::from_mins(30)]);
     }
 
     #[test]
@@ -590,10 +629,11 @@ pub(crate) mod tests {
             "68bc",
             &status,
         )];
-        let problems = pod_problems(&cluster(), &pods, now());
+        let problems = pod_problems(&cluster(), &pods, &[], now());
+        assert_eq!(problems[0].reason, "CreateContainerConfigError");
         assert_eq!(
             problems[0].message,
-            "0/1 ready · pod …b2l6q CreateContainerConfigError: couldn't find key webhook_secret in Secret payments/stripe"
+            "couldn't find key webhook_secret in Secret payments/stripe"
         );
         assert_eq!(problems[0].age, Duration::from_mins(200));
     }
@@ -611,13 +651,17 @@ pub(crate) mod tests {
                 }]
             }
         }));
-        let problems = pod_problems(&cluster(), &[pod], now());
+        let problems = pod_problems(&cluster(), &[pod], &[], now());
         let problem = &problems[0];
         assert_eq!(problem.status, Status::Warn);
         assert_eq!(problem.target.kind, "Pod");
         assert_eq!(
+            (problem.reason.as_str(), problem.condition.as_str()),
+            ("FailedScheduling", "PodScheduled=False")
+        );
+        assert_eq!(
             problem.message,
-            "FailedScheduling: 0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector."
+            "0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector."
         );
         assert_eq!(problem.age, Duration::from_mins(6));
     }
@@ -634,7 +678,7 @@ pub(crate) mod tests {
             replica_pod("web-1-b", "web", "1", &starting),
             replica_pod("web-1-c", "web", "1", &done),
         ];
-        assert_eq!(pod_problems(&cluster(), &pods, now()), Vec::new());
+        assert_eq!(pod_problems(&cluster(), &pods, &[], now()), Vec::new());
     }
 
     #[test]
@@ -646,26 +690,39 @@ pub(crate) mod tests {
                 "taints": [{ "key": "node.kubernetes.io/unschedulable", "effect": "NoSchedule", "timeAdded": at(42) }]
             },
             "status": { "conditions": [{
-                "type": "Ready", "status": "Unknown", "message": "Kubelet stopped posting node status.",
+                "type": "Ready", "status": "Unknown", "reason": "NodeStatusUnknown",
+                "message": "Kubelet stopped posting node status.",
                 "lastTransitionTime": at(3)
             }] }
         }));
-        let problems = node_problems(&cluster(), &[node], now());
-        let summary: Vec<(Status, &str, Duration)> = problems
+        let problems = node_problems(&cluster(), &[node], &[], now());
+        let summary: Vec<(Status, &str, &str, &str, Duration)> = problems
             .iter()
-            .map(|p| (p.status, p.message.as_str(), p.age))
+            .map(|p| {
+                (
+                    p.status,
+                    p.reason.as_str(),
+                    p.message.as_str(),
+                    p.condition.as_str(),
+                    p.age,
+                )
+            })
             .collect();
         assert_eq!(
             summary,
             [
                 (
                     Status::Err,
-                    "NotReady: Kubelet stopped posting node status.",
+                    "NodeStatusUnknown",
+                    "Kubelet stopped posting node status.",
+                    "Ready=Unknown",
                     Duration::from_secs(180)
                 ),
                 (
                     Status::Warn,
-                    "Cordoned (SchedulingDisabled)",
+                    "SchedulingDisabled",
+                    "spec.unschedulable: true",
+                    "",
                     Duration::from_mins(42)
                 ),
             ]
@@ -682,8 +739,12 @@ pub(crate) mod tests {
         };
         let problem = connection_problem(&cluster(), &ConnectionStatus::AuthExpired(failure));
         assert_eq!(
-            problem.map(|p| p.message),
-            Some("Credentials expired · run gcloud auth login".into())
+            problem.map(|p| (p.reason, p.message, p.condition)),
+            Some((
+                "Unauthorized".into(),
+                "Credentials expired".into(),
+                "connection".into()
+            ))
         );
         assert_eq!(
             connection_problem(&cluster(), &ConnectionStatus::Connected),
@@ -701,8 +762,11 @@ pub(crate) mod tests {
                 namespace: None,
                 name: format!("{cluster}-{minutes}"),
             },
+            reason: String::new(),
             message: String::new(),
+            condition: String::new(),
             age: Duration::from_secs(minutes * 60),
+            events: Vec::new(),
         };
         let mut problems = vec![
             problem("a", Status::Warn, 5),

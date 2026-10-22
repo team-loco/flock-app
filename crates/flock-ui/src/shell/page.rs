@@ -22,11 +22,10 @@ use crate::screens::multilog::MultiLogsScreen;
 use crate::screens::namespace::NamespaceScreen;
 use crate::screens::workload::WorkloadScreen;
 use crate::theme::{
-    ActiveTheme, FONT_MONO, PAGE_HEADER, Palette, RULE, SPACE_2, SPACE_4, SPACE_5, SPACE_7,
-    SPACE_8, TEXT_LABEL, TEXT_SMALL, TEXT_TITLE,
+    ActiveTheme, FONT_MONO, PAGE_HEADER, Palette, RULE, SPACE_2, SPACE_5, SPACE_7, SPACE_8,
+    TEXT_LABEL, TEXT_SMALL, TEXT_TITLE,
 };
 
-const LIVE: &str = "live";
 const UNAVAILABLE_REASON: &str =
     "It was removed from Flock or its kubeconfig context is gone, so this tab has nothing to show.";
 const SHOW_ALL_CLUSTERS: &str = "Show all clusters";
@@ -459,32 +458,13 @@ impl Shell {
             screens.pages.header_note(location.page, has_detail, cx)
         };
         let cluster = self.cluster_of(location);
-        let noted = note.is_some();
-        let status: Option<Vec<(String, gpui::Hsla)>> = match (cluster, note) {
-            (Some(_), Some(text)) => Some(vec![(text, palette.mute)]),
-            (Some(_), None) => None,
-            (None, _) if location.page == Page::GitOps => None,
-            (None, _) => Some(vec![(LIVE.to_owned(), palette.mute)]),
-        };
-        let status = status.map(|parts| {
+        let status = cluster.and(note).map(|text| {
             div()
-                .debug_selector(move || {
-                    if noted {
-                        "page-note"
-                    } else {
-                        "page-cluster-state"
-                    }
-                    .to_owned()
-                })
-                .flex()
-                .gap(SPACE_4)
+                .debug_selector(|| "page-note".to_owned())
                 .font_family(FONT_MONO)
                 .text_size(TEXT_SMALL)
-                .children(
-                    parts
-                        .into_iter()
-                        .map(|(text, color)| div().text_color(color).child(status_symbols(text))),
-                )
+                .text_color(palette.mute)
+                .child(status_symbols(text))
         });
         let controls = cluster.and_then(|_| screens.pages.header_controls(location.page, cx));
         div()
@@ -538,7 +518,7 @@ impl Shell {
         let screens = self.screens(ix);
         match location.page {
             Page::Overview => screens.flock.clone().into_any_element(),
-            Page::Problems => screens.flock.clone().into_any_element(),
+            Page::Problems => screens.problems.clone().into_any_element(),
             Page::GitOps => screens.gitops.clone().into_any_element(),
             Page::FluxEvents => screens.flux_events.clone().into_any_element(),
             page => screens

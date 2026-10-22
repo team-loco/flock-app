@@ -1,9 +1,13 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use flock_core::home::{Problem, Revision};
 use flock_core::{ClusterId, Counts, ResourceRef, Status};
 use flock_flux::ObjectKind;
+use jiff::Timestamp;
+use k8s_openapi::api::core::v1::Event;
 
+use crate::problems::target_events;
 use crate::resources::CustomKind;
 
 const ROOT_NAME: &str = "flux-system";
@@ -21,7 +25,9 @@ pub struct FluxHealth {
     pub namespace: String,
     pub name: String,
     pub status: Status,
-    pub sentence: String,
+    pub reason: String,
+    pub message: String,
+    pub condition: String,
     pub suspended: bool,
     pub revision: Option<String>,
     pub since: Duration,
@@ -39,7 +45,12 @@ pub fn counts(objects: &[FluxHealth]) -> Counts {
         .with_sus(tally(Status::Suspended))
 }
 
-pub fn problems(cluster: &ClusterId, objects: &[FluxHealth]) -> Vec<Problem> {
+pub fn problems(
+    cluster: &ClusterId,
+    objects: &[FluxHealth],
+    events: &[Arc<Event>],
+    now: Timestamp,
+) -> Vec<Problem> {
     objects
         .iter()
         .filter(|object| {
@@ -48,16 +59,23 @@ pub fn problems(cluster: &ClusterId, objects: &[FluxHealth]) -> Vec<Problem> {
                 Status::Err | Status::Warn | Status::Suspended
             )
         })
-        .map(|object| Problem {
-            status: object.status,
-            target: ResourceRef {
+        .map(|object| {
+            let target = ResourceRef {
                 cluster: cluster.clone(),
                 kind: object.kind.as_str().to_owned(),
                 namespace: Some(object.namespace.clone()),
                 name: object.name.clone(),
-            },
-            message: object.sentence.clone(),
-            age: object.since,
+            };
+            let events = target_events(&target, events, now);
+            Problem {
+                status: object.status,
+                target,
+                reason: object.reason.clone(),
+                message: object.message.clone(),
+                condition: object.condition.clone(),
+                age: object.since,
+                events,
+            }
         })
         .collect()
 }
@@ -114,7 +132,9 @@ mod tests {
             namespace: namespace.into(),
             name: name.into(),
             status,
-            sentence: format!("{name} sentence"),
+            reason: format!("{name} reason"),
+            message: format!("{name} message"),
+            condition: "Ready=False".into(),
             suspended: status == Status::Suspended,
             revision: revision.map(str::to_owned),
             since: Duration::from_mins(4),
@@ -149,14 +169,20 @@ mod tests {
 
     #[test]
     fn failing_and_suspended_objects_become_problems() {
-        let problems = problems(&ClusterId::new("kind-fleet-a"), &objects());
-        let lines: Vec<(Status, String, &str, &str)> = problems
+        let problems = problems(
+            &ClusterId::new("kind-fleet-a"),
+            &objects(),
+            &[],
+            Timestamp::UNIX_EPOCH,
+        );
+        let lines: Vec<(Status, String, &str, &str, &str)> = problems
             .iter()
             .map(|p| {
                 (
                     p.status,
                     p.target.to_string(),
                     p.target.kind.as_str(),
+                    p.reason.as_str(),
                     p.message.as_str(),
                 )
             })
@@ -168,13 +194,15 @@ mod tests {
                     Status::Err,
                     "flux-system/broken-kustomization".into(),
                     "Kustomization",
-                    "broken-kustomization sentence"
+                    "broken-kustomization reason",
+                    "broken-kustomization message"
                 ),
                 (
                     Status::Suspended,
                     "search/search-indexer".into(),
                     "HelmRelease",
-                    "search-indexer sentence"
+                    "search-indexer reason",
+                    "search-indexer message"
                 ),
             ]
         );

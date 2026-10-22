@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::filter::{FilterSpec, TextFilter};
+use crate::pods::PodEvent;
 use crate::{ClusterId, Counts, ResourceRef, Status};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,8 +31,29 @@ pub struct Revision {
 pub struct Problem {
     pub status: Status,
     pub target: ResourceRef,
+    pub reason: String,
     pub message: String,
+    pub condition: String,
     pub age: Duration,
+    pub events: Vec<PodEvent>,
+}
+
+impl Problem {
+    pub const FILTER: FilterSpec<Self> = FilterSpec {
+        fields: &[
+            ("reason", |p, (), out| out.push(p.reason.as_str().into())),
+            ("object", |p, (), out| {
+                out.push(p.target.kind.as_str().into());
+                out.push(p.target.to_string().into());
+            }),
+        ],
+        namespace: true,
+        labels: false,
+    };
+
+    pub fn matches(&self, query: &TextFilter) -> bool {
+        Self::FILTER.matches(self, query, self.target.namespace.as_deref(), &[])
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -39,16 +62,19 @@ pub enum Severity {
     All,
     Errors,
     Warnings,
+    Suspended,
 }
 
 impl Severity {
-    pub const ALL: [Self; 3] = [Self::All, Self::Errors, Self::Warnings];
+    pub const ALL: [Self; 4] = [Self::All, Self::Errors, Self::Warnings, Self::Suspended];
+    pub const OVERVIEW: [Self; 3] = [Self::All, Self::Errors, Self::Warnings];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
             Self::Errors => "Errors",
             Self::Warnings => "Warnings",
+            Self::Suspended => "Suspended",
         }
     }
 
@@ -56,9 +82,21 @@ impl Severity {
         match self {
             Self::All => true,
             Self::Errors => status == Status::Err,
-            Self::Warnings => status != Status::Err,
+            Self::Warnings => status == Status::Warn,
+            Self::Suspended => status == Status::Suspended,
         }
     }
+}
+
+pub fn severity_counts(problems: &[Problem], query: &TextFilter) -> Vec<(Severity, usize)> {
+    let matching: Vec<&Problem> = problems.iter().filter(|p| p.matches(query)).collect();
+    Severity::ALL
+        .into_iter()
+        .map(|severity| {
+            let count = matching.iter().filter(|p| severity.keeps(p.status)).count();
+            (severity, count)
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,9 +131,15 @@ pub fn problems_badge(problems: &[Problem]) -> Counts {
         .with_warn(counts.warn)
 }
 
-pub fn group_problems(problems: &[Problem], severity: Severity) -> Vec<ProblemGroup<'_>> {
-    let mut groups: Vec<ProblemGroup<'_>> = Vec::new();
-    let kept = problems.iter().filter(|p| severity.keeps(p.status));
+pub fn group_problems<'a>(
+    problems: &'a [Problem],
+    severity: Severity,
+    query: &TextFilter,
+) -> Vec<ProblemGroup<'a>> {
+    let mut groups: Vec<ProblemGroup<'a>> = Vec::new();
+    let kept = problems
+        .iter()
+        .filter(|p| severity.keeps(p.status) && p.matches(query));
     for problem in kept {
         let cluster = &problem.target.cluster;
         match groups.iter_mut().find(|g| g.cluster == cluster) {
@@ -127,9 +171,16 @@ mod tests {
                 namespace: Some("ns".into()),
                 name: "p".into(),
             },
+            reason: "BackOff".into(),
             message: String::new(),
+            condition: String::new(),
             age: Duration::ZERO,
+            events: Vec::new(),
         }
+    }
+
+    fn all() -> TextFilter {
+        TextFilter::default()
     }
 
     fn sample() -> Vec<Problem> {
@@ -151,7 +202,7 @@ mod tests {
     #[test]
     fn groups_keep_first_appearance_order() {
         let problems = sample();
-        let groups = group_problems(&problems, Severity::All);
+        let groups = group_problems(&problems, Severity::All, &all());
         assert_eq!(
             shape(&groups),
             [("a".into(), 2), ("b".into(), 1), ("c".into(), 1)]
@@ -165,16 +216,40 @@ mod tests {
     #[test]
     fn errors_filter_drops_groups_without_errors() {
         let problems = sample();
-        let groups = group_problems(&problems, Severity::Errors);
+        let groups = group_problems(&problems, Severity::Errors, &all());
         assert_eq!(shape(&groups), [("a".into(), 1), ("c".into(), 1)]);
     }
 
     #[test]
-    fn warnings_filter_keeps_everything_but_errors() {
+    fn warnings_and_suspended_filters_keep_only_their_status() {
         let problems = sample();
-        let groups = group_problems(&problems, Severity::Warnings);
-        assert_eq!(shape(&groups), [("b".into(), 1), ("a".into(), 1)]);
-        assert_eq!(groups[0].counts(), Counts::default().with_sus(1));
+        let warnings = group_problems(&problems, Severity::Warnings, &all());
+        assert_eq!(shape(&warnings), [("a".into(), 1)]);
+        let suspended = group_problems(&problems, Severity::Suspended, &all());
+        assert_eq!(shape(&suspended), [("b".into(), 1)]);
+        assert_eq!(suspended[0].counts(), Counts::default().with_sus(1));
+    }
+
+    #[test]
+    fn search_matches_reason_object_and_namespace_and_narrows_the_counts() {
+        let mut problems = sample();
+        problems[1].reason = "Suspended".into();
+        problems[1].target.kind = "Kustomization".into();
+        problems[1].target.namespace = Some("flux-system".into());
+        problems[1].target.name = "apps".into();
+        let counts = |text: &str| -> Vec<usize> {
+            severity_counts(&problems, &TextFilter::parse(text))
+                .into_iter()
+                .map(|(_, n)| n)
+                .collect()
+        };
+        assert_eq!(counts(""), [4, 2, 1, 1]);
+        assert_eq!(counts("suspend"), [1, 0, 0, 1]);
+        assert_eq!(counts("flux-system/apps"), [1, 0, 0, 1]);
+        assert_eq!(counts("kustomization"), [1, 0, 0, 1]);
+        assert_eq!(counts("backoff"), [3, 2, 1, 0]);
+        let found = group_problems(&problems, Severity::All, &TextFilter::parse("apps"));
+        assert_eq!(shape(&found), [("b".into(), 1)]);
     }
 
     #[test]

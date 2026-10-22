@@ -24,7 +24,6 @@ const POD_OWNERS: [&str; 6] = [
     "Job",
     "ReplicaSet",
 ];
-const REASON_SPLIT: &str = ": ";
 const QUOTE: char = '"';
 const NAME: &str = "‹name›";
 const POD_SLOT: &str = "‹pod›";
@@ -203,11 +202,11 @@ impl Cause {
     }
 
     pub fn started(&self) -> String {
-        let since = format!("started {} ago", age(self.oldest()));
-        if self.oldest() >= WINDOW {
-            return format!("{since}{SEPARATOR}before this window");
+        let first = format!("first seen {} ago", age(self.oldest()));
+        match self.newest() {
+            Some(newest) => format!("{first}{SEPARATOR}last seen {} ago", age(newest.age)),
+            None => first,
         }
-        since
     }
 
     pub fn histogram(&self) -> [u32; BUCKETS] {
@@ -226,12 +225,12 @@ impl Cause {
 
     pub fn traits(&self) -> Vec<Trait> {
         let traits = [
-            self.shared("Image registry", |o| o.registry().map(str::to_owned)),
-            self.shared("Namespace", |o| o.target.namespace.clone()),
-            self.shared("Node", |o| o.node.clone()),
-            self.shared("Owner", |o| o.owner_kind().map(str::to_owned)),
-            self.shared("Memory limit", |o| o.memory_limit.clone()),
-            self.shared("Image", |o| o.image.as_deref().map(image_name)),
+            self.shared("registry", spread, |o| o.registry().map(str::to_owned)),
+            self.shared("namespace", spread, |o| o.target.namespace.clone()),
+            self.shared("node", distinct, |o| o.node.clone()),
+            self.shared("owner", spread, |o| o.owner_kind().map(str::to_owned)),
+            self.shared("limits.memory", spread, |o| o.memory_limit.clone()),
+            self.shared("image", spread, |o| o.image.as_deref().map(image_name)),
         ];
         let mut traits: Vec<Trait> = traits.into_iter().flatten().collect();
         traits.sort_by_key(|t| std::cmp::Reverse(t.shared));
@@ -241,6 +240,7 @@ impl Cause {
     fn shared(
         &self,
         name: &'static str,
+        summary: fn(&[(String, usize)]) -> String,
         value: impl Fn(&Occurrence) -> Option<String>,
     ) -> Option<Trait> {
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -253,7 +253,7 @@ impl Cause {
         let shared = *top;
         let value = match ranked.as_slice() {
             [(only, _)] => only.clone(),
-            many => spread(many),
+            many => summary(many),
         };
         Some(Trait {
             name,
@@ -293,10 +293,14 @@ fn spread(ranked: &[(String, usize)]) -> String {
     let shown = ranked
         .iter()
         .take(TOP_VALUES)
-        .map(|(value, n)| format!("{value} ({n})"));
+        .map(|(value, n)| format!("{value} {n}"));
     let rest = ranked.len().saturating_sub(TOP_VALUES);
     let more = (rest > 0).then(|| format!("+{rest}"));
     shown.chain(more).collect::<Vec<_>>().join(SEPARATOR)
+}
+
+fn distinct(ranked: &[(String, usize)]) -> String {
+    format!("{} distinct", ranked.len())
 }
 
 fn image_name(image: &str) -> String {
@@ -408,13 +412,12 @@ fn pod_occurrence(pod: &Pod) -> Option<(String, String, Occurrence)> {
 }
 
 fn problem_occurrence(problem: &Problem) -> (String, String, Occurrence) {
-    let message = problem.message.trim();
-    let (reason, rest) = match message.split_once(REASON_SPLIT) {
-        Some((reason, rest)) if !reason.contains(char::is_whitespace) => (reason, rest),
-        Some(_) => (problem.target.kind.as_str(), message),
-        None if !message.is_empty() && !message.contains(char::is_whitespace) => (message, ""),
-        None => (problem.target.kind.as_str(), message),
+    let reason = if problem.reason.is_empty() {
+        problem.target.kind.as_str()
+    } else {
+        problem.reason.as_str()
     };
+    let message = problem.message.trim();
     let mut names = vec![(problem.target.name.as_str(), NAME)];
     if let Some(namespace) = problem.target.namespace.as_deref() {
         names.push((namespace, NAMESPACE_SLOT));
@@ -429,7 +432,7 @@ fn problem_occurrence(problem: &Problem) -> (String, String, Occurrence) {
         memory_limit: None,
         age: problem.age,
     };
-    (reason.to_owned(), template(rest, &names), occurrence)
+    (reason.to_owned(), template(message, &names), occurrence)
 }
 
 pub fn template(message: &str, names: &[(&str, &str)]) -> String {
@@ -654,7 +657,7 @@ mod tests {
 
     #[test]
     fn problems_pods_already_explain_are_not_counted_twice() {
-        let problem = |kind: &str, name: &str, message: &str| Problem {
+        let problem = |kind: &str, name: &str, reason: &str, message: &str| Problem {
             status: Status::Warn,
             target: ResourceRef {
                 cluster: cluster(),
@@ -662,27 +665,38 @@ mod tests {
                 namespace: None,
                 name: name.into(),
             },
+            reason: reason.into(),
             message: message.into(),
+            condition: String::new(),
             age: Duration::from_secs(MINUTE),
+            events: Vec::new(),
         };
         let problems = vec![
             problem(
                 "Deployment",
                 "checkout",
-                "0/1 ready · pod …x2 ImagePullBackOff",
+                "ImagePullBackOff",
+                "Back-off pulling image",
             ),
             problem(
                 "Node",
                 "ip-10-4-31-12",
-                "NotReady: Kubelet stopped posting node status.",
+                "NodeStatusUnknown",
+                "Kubelet stopped posting node status.",
             ),
             problem(
                 "Node",
                 "ip-10-4-31-13",
-                "NotReady: Kubelet stopped posting node status.",
+                "NodeStatusUnknown",
+                "Kubelet stopped posting node status.",
             ),
-            problem("Node", "ip-10-4-31-14", "Cordoned"),
-            problem("Kustomization", "apps", "Health check failed for apps"),
+            problem("Node", "ip-10-4-31-14", "", "spec.unschedulable: true"),
+            problem(
+                "Kustomization",
+                "apps",
+                "HealthCheckFailed",
+                "Health check failed for apps",
+            ),
         ];
         let pods = vec![pull("payments", "checkout", 2)];
         let causes = causes(&cluster(), &pods, &problems);
@@ -698,9 +712,13 @@ mod tests {
                     "Back-off pulling image \"registry.acme.io/‹team›/‹app›:‹tag›\"",
                     1
                 ),
-                ("NotReady", "Kubelet stopped posting node status.", 2),
-                ("Cordoned", "", 1),
-                ("Kustomization", "Health check failed for ‹name›", 1),
+                (
+                    "NodeStatusUnknown",
+                    "Kubelet stopped posting node status.",
+                    2
+                ),
+                ("HealthCheckFailed", "Health check failed for ‹name›", 1),
+                ("Node", "spec.unschedulable: true", 1),
             ]
         );
         assert_eq!(causes[1].scope(), "2 objects · 2 nodes");
@@ -738,7 +756,7 @@ mod tests {
         assert_eq!(bars[BUCKETS - 2], 1);
         assert_eq!(bars[0], 1);
         assert_eq!(bars.iter().sum::<u32>(), 4);
-        assert_eq!(cause.started(), "started 6h ago · before this window");
+        assert_eq!(cause.started(), "first seen 6h ago · last seen 0s ago");
     }
 
     #[test]
@@ -757,25 +775,17 @@ mod tests {
         assert_eq!(
             traits,
             [
+                ("registry", "registry.acme.io".to_owned(), "3/3".to_owned()),
+                ("limits.memory", "512Mi".to_owned(), "3/3".to_owned()),
                 (
-                    "Image registry",
-                    "registry.acme.io".to_owned(),
-                    "3/3".to_owned()
-                ),
-                ("Memory limit", "512Mi".to_owned(), "3/3".to_owned()),
-                (
-                    "Namespace",
-                    "payments (2) · web (1)".to_owned(),
+                    "namespace",
+                    "payments 2 · web 1".to_owned(),
                     "2/3".to_owned()
                 ),
+                ("node", "2 distinct".to_owned(), "2/3".to_owned()),
                 (
-                    "Node",
-                    "node-payments (2) · node-web (1)".to_owned(),
-                    "2/3".to_owned()
-                ),
-                (
-                    "Image",
-                    "cart:1.2 (1) · checkout:1.1 (1) · +1".to_owned(),
+                    "image",
+                    "cart:1.2 1 · checkout:1.1 1 · +1".to_owned(),
                     "1/3".to_owned()
                 ),
             ]

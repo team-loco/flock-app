@@ -298,11 +298,6 @@ fn namespaces(template: &[Namespace], problems: &[&Problem], share: f32) -> Vec<
         .collect()
 }
 
-fn reason(message: &str) -> String {
-    let head = message.split([':', '·', '(']).next().unwrap_or(message);
-    head.trim().to_owned()
-}
-
 fn events(problems: &[&Problem], template: &[Event], present: &BTreeSet<&str>) -> Vec<Event> {
     let flagged = problems
         .iter()
@@ -315,7 +310,7 @@ fn events(problems: &[&Problem], template: &[Event], present: &BTreeSet<&str>) -
                 p.age,
             ),
             status: p.status,
-            reason: reason(&p.message),
+            reason: p.reason.clone(),
             object: format!("{}/{}", p.target.kind.to_lowercase(), p.target.name),
             namespace: p.target.namespace.clone(),
             message: p.message.clone(),
@@ -482,7 +477,7 @@ fn checkout_pod(base: &Pod, checkout: &Checkout, ix: usize) -> Pod {
 
 fn problem_pod(problem: &Problem, base: Option<&Pod>) -> Option<Pod> {
     let mut pod = base?.clone();
-    let reason = reason(&problem.message);
+    let reason = problem.reason.clone();
     pod.namespace = problem.target.namespace.clone().unwrap_or_default();
     pod.name.clone_from(&problem.target.name);
     pod.status = problem.status;
