@@ -6,10 +6,10 @@ use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
 use flock_ui::theme::{
-    ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SPACE_3, TAB_ENTER, TAB_LEAVE, TITLE_ROW,
-    TRAFFIC_LIGHTS_INSET,
+    FONT_MONO, FONT_STATUS, ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SPACE_3, SPACE_5, TAB_ENTER,
+    TAB_LEAVE, TEXT_MONO, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
 };
-use gpui::Pixels;
+use gpui::{Pixels, SharedString, TextRun, font, rgb};
 
 const EXPECTED_WIDTH: u32 = 2880;
 const EXPECTED_HEIGHT: u32 = 1800;
@@ -1024,6 +1024,50 @@ fn overview_sections_navigate_to_their_lists() -> anyhow::Result<()> {
         assert_eq!(ui.state().location().page, page);
         assert_eq!(ui.state().location().cluster, cluster);
     }
+    Ok(())
+}
+
+const SHAPING_TOLERANCE: f32 = 2.;
+const OVERVIEW_ERRORS: &str = "✕ 2";
+const OVERVIEW_WARNINGS: &str = "▲ 3";
+
+fn shaped_width(ui: &mut Ui, parts: &[(&str, &str)]) -> Pixels {
+    let text: String = parts.iter().map(|(_, part)| *part).collect();
+    let runs: Vec<TextRun> = parts
+        .iter()
+        .map(|(family, part)| TextRun {
+            len: part.len(),
+            font: font(*family),
+            color: rgb(0).into(),
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        })
+        .collect();
+    ui.read_in_window(|_, window, _| {
+        window
+            .text_system()
+            .shape_line(SharedString::from(text), TEXT_MONO, &runs, None)
+            .width
+    })
+}
+
+#[test]
+fn the_overview_problem_counts_draw_their_symbols_in_the_status_font() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let part = |text: &'static str| {
+        let (symbol, rest) =
+            text.split_at(text.char_indices().nth(1).map_or(text.len(), |(i, _)| i));
+        [(FONT_STATUS, symbol), (FONT_MONO, rest)]
+    };
+    let errors = shaped_width(&mut ui, &part(OVERVIEW_ERRORS));
+    let warnings = shaped_width(&mut ui, &part(OVERVIEW_WARNINGS));
+    let link = width(&mut ui, "overview-problems").context("no problems link")?;
+    let expected = errors + warnings + SPACE_5;
+    assert!(
+        (link - expected).abs() < gpui::px(SHAPING_TOLERANCE),
+        "{link:?} != {expected:?}"
+    );
     Ok(())
 }
 
