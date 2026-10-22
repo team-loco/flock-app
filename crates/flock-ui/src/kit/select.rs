@@ -9,8 +9,8 @@ use super::popover::{self, Dismissal, Step};
 use super::{InputEvent, TextField, TextFieldDown, TextFieldEscape, TextFieldState, TextFieldUp};
 use crate::assets::CHEVRON_DOWN;
 use crate::theme::{
-    ActiveTheme, CONTROL, CONTROL_COMPACT, FONT_MONO, ICON, MENU_MAX_HEIGHT, MENU_WIDTH, Palette,
-    RADIUS, ROW_TABLE, RULE, SPACE_4, SPACE_5, TEXT_CONTROL, TEXT_SMALL,
+    ActiveTheme, CONTROL, CONTROL_COMPACT, FONT_MONO, ICON, MENU_WIDTH, Palette, RADIUS, ROW_TABLE,
+    RULE, SPACE_4, SPACE_5, TEXT_CONTROL, TEXT_SMALL,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +36,7 @@ pub struct Select {
     restore: Option<FocusHandle>,
     editor: Option<Entity<TextFieldState>>,
     editor_events: Option<Subscription>,
+    fit: popover::Fit,
 }
 
 impl EventEmitter<SelectEvent> for Select {}
@@ -64,6 +65,7 @@ impl Select {
             restore: None,
             editor: None,
             editor_events: None,
+            fit: popover::Fit::default(),
         }
     }
 
@@ -430,35 +432,40 @@ impl Render for Select {
                         .into_any_element()
                 })
                 .collect();
-            let surface = popover::surface("options", &palette)
-                .w(self.width)
-                .max_h(MENU_MAX_HEIGHT)
-                .overflow_y_scroll()
-                .track_focus(&self.focus)
-                .on_key_down(cx.listener(Self::key_down))
-                .on_mouse_down_out(cx.listener(|this, _, window, cx| {
-                    this.dismissal.clicked_outside();
-                    this.close(window, cx);
-                }))
-                .capture_action(cx.listener(|this, _: &TextFieldUp, _, cx| {
-                    this.move_highlight(Step::Previous, cx);
-                    cx.stop_propagation();
-                }))
-                .capture_action(cx.listener(|this, _: &TextFieldDown, _, cx| {
-                    this.move_highlight(Step::Next, cx);
-                    cx.stop_propagation();
-                }))
-                .on_action(cx.listener(|this, _: &TextFieldEscape, window, cx| {
-                    this.close(window, cx);
-                    cx.stop_propagation();
-                }))
-                .children(self.editor.as_ref().map(|editor| {
-                    div()
-                        .debug_selector(|| format!("{}-filter", self.id))
-                        .p(SPACE_4)
-                        .child(TextField::new(editor))
-                }))
-                .children(rows);
+            let surface = popover::fitted_surface(
+                "options",
+                &palette,
+                cx.entity().downgrade(),
+                |select: &mut Self| &mut select.fit,
+            )
+            .w(self.width)
+            .max_h(self.fit.height())
+            .overflow_y_scroll()
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(Self::key_down))
+            .on_mouse_down_out(cx.listener(|this, _, window, cx| {
+                this.dismissal.clicked_outside();
+                this.close(window, cx);
+            }))
+            .capture_action(cx.listener(|this, _: &TextFieldUp, _, cx| {
+                this.move_highlight(Step::Previous, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|this, _: &TextFieldDown, _, cx| {
+                this.move_highlight(Step::Next, cx);
+                cx.stop_propagation();
+            }))
+            .on_action(cx.listener(|this, _: &TextFieldEscape, window, cx| {
+                this.close(window, cx);
+                cx.stop_propagation();
+            }))
+            .children(self.editor.as_ref().map(|editor| {
+                div()
+                    .debug_selector(|| format!("{}-filter", self.id))
+                    .p(SPACE_4)
+                    .child(TextField::new(editor))
+            }))
+            .children(rows);
             let key = ElementId::NamedInteger(self.id.clone(), self.generation);
             popover::below_left(height, popover::appear(surface, key))
         });

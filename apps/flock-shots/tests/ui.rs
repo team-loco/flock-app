@@ -3501,6 +3501,38 @@ fn shift_clicked_pods_open_one_merged_logs_tab_from_the_row_menu() -> anyhow::Re
 }
 
 #[test]
+fn a_scrolling_pod_menu_never_cuts_an_item_at_its_bottom_edge() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.click("pods-row-0")?;
+    ui.shift_click("pods-row-1")?;
+    ui.right_click("pods-row-1")?;
+    ui.settle()?;
+    let surface = ui
+        .bounds("pods-row-menu-surface")
+        .ok_or_else(|| anyhow::anyhow!("menu surface"))?;
+    assert!(surface.size.height <= flock_ui::theme::MENU_MAX_HEIGHT);
+    let edge = surface.origin.y + surface.size.height - flock_ui::theme::RULE;
+    let mut clipped = 0;
+    let mut whole = 0;
+    for item in POD_MENU_ITEMS {
+        let Some(bounds) = ui.bounds(item) else {
+            break;
+        };
+        let bottom = bounds.origin.y + bounds.size.height;
+        if bottom <= edge {
+            whole += 1;
+        } else if bounds.origin.y >= edge {
+            clipped += 1;
+        } else {
+            anyhow::bail!("{item} is cut by the menu edge {bounds:?} {surface:?}");
+        }
+    }
+    assert!(whole > 0);
+    assert!(clipped > 0, "the marked-pod menu no longer overflows");
+    Ok(())
+}
+
+#[test]
 fn a_label_filter_on_pods_offers_logs_for_the_selector_in_the_row_menu() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
     ui.press("/")?;

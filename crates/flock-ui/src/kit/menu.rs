@@ -3,14 +3,14 @@ use std::rc::Rc;
 use gpui::{
     App, Context, ElementId, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent,
     MouseButton, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, relative,
+    StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder, relative,
 };
 
 use super::button::{Button, IconButton};
 use super::popover::{self, Dismissal, Step};
 use crate::theme::{
-    ActiveTheme, CONTROL, FONT_MONO, MENU_MAX_HEIGHT, MENU_WIDTH, RADIUS, ROW_MENU_PAD_Y, SPACE_1,
-    SPACE_4, SPACE_5, TEXT_BODY, TEXT_LABEL, TEXT_SMALL,
+    ActiveTheme, CONTROL, FONT_MONO, MENU_WIDTH, RADIUS, ROW_MENU_PAD_Y, SPACE_1, SPACE_4, SPACE_5,
+    TEXT_BODY, TEXT_LABEL, TEXT_SMALL,
 };
 
 const MORE: &str = "⋯";
@@ -87,6 +87,7 @@ pub struct ActionMenu {
     focus: FocusHandle,
     restore: Option<FocusHandle>,
     scroll: ScrollHandle,
+    fit: popover::Fit,
 }
 
 impl ActionMenu {
@@ -104,6 +105,7 @@ impl ActionMenu {
             focus: cx.focus_handle(),
             restore: None,
             scroll: ScrollHandle::default(),
+            fit: popover::Fit::default(),
         }
     }
 
@@ -337,9 +339,31 @@ impl Render for ActionMenu {
                 .enumerate()
                 .map(|(ix, item)| self.render_item(ix, item, cx).into_any_element())
                 .collect();
+            let owner = cx.entity().downgrade();
+            let scroll = self.scroll.clone();
+            let count = self.items.len();
+            let measure = canvas(
+                move |_, _, cx| {
+                    let heights: Vec<Pixels> = (0..count)
+                        .filter_map(|ix| scroll.bounds_for_item(ix))
+                        .map(|bounds| bounds.size.height)
+                        .collect();
+                    owner
+                        .update(cx, |menu, cx| {
+                            if menu.fit.observe(&heights) {
+                                cx.notify();
+                            }
+                        })
+                        .ok();
+                },
+                |_, (), _, _| {},
+            )
+            .absolute()
+            .size_0();
             let surface = popover::surface("menu", &palette)
+                .debug_selector(|| format!("{}-surface", self.id))
                 .w(MENU_WIDTH)
-                .max_h(MENU_MAX_HEIGHT)
+                .max_h(self.fit.height())
                 .overflow_y_scroll()
                 .track_scroll(&self.scroll)
                 .track_focus(&self.focus)
@@ -348,7 +372,8 @@ impl Render for ActionMenu {
                     this.dismissal.clicked_outside();
                     this.close(window, cx);
                 }))
-                .children(items);
+                .children(items)
+                .child(measure);
             let key = ElementId::NamedInteger(self.id.clone(), self.generation);
             let shown = popover::appear(surface, key);
             match self.anchor {

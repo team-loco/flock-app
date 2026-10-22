@@ -16,8 +16,8 @@ use super::input::{
 };
 use super::{Kbd, popover};
 use crate::theme::{
-    ActiveTheme, CONTROL, FILTER_MIN, FILTER_WIDTH, FONT_MONO, MATCH_NOTE, MENU_MAX_HEIGHT,
-    Palette, RADIUS, ROW_TABLE, RULE, SPACE_4, SPACE_8, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, CONTROL, FILTER_MIN, FILTER_WIDTH, FONT_MONO, MATCH_NOTE, Palette, RADIUS,
+    ROW_TABLE, RULE, SPACE_4, SPACE_8, TEXT_MONO, TEXT_SMALL,
 };
 
 pub const FILTER_PLACEHOLDER: &str = "Filter";
@@ -74,6 +74,7 @@ pub struct FilterBar {
     candidates: FilterCandidates,
     suggestions: Vec<String>,
     highlighted: usize,
+    fit: popover::Fit,
     _subscription: Subscription,
 }
 
@@ -103,6 +104,7 @@ impl FilterBar {
             candidates: FilterCandidates::default(),
             suggestions: Vec::new(),
             highlighted: 0,
+            fit: popover::Fit::default(),
             _subscription: subscription,
         }
     }
@@ -368,16 +370,21 @@ impl FilterBar {
                     .child(suggestion.clone())
             })
             .collect::<Vec<_>>();
-        let surface = popover::surface("filter-suggestions", palette)
-            .w(FILTER_WIDTH)
-            .max_h(MENU_MAX_HEIGHT)
-            .overflow_y_scroll()
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                this.suggestions.clear();
-                cx.notify();
-            }))
-            .children(rows)
-            .into_any_element();
+        let surface = popover::fitted_surface(
+            "filter-suggestions",
+            palette,
+            cx.entity().downgrade(),
+            |bar: &mut Self| &mut bar.fit,
+        )
+        .w(FILTER_WIDTH)
+        .max_h(self.fit.height())
+        .overflow_y_scroll()
+        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+            this.suggestions.clear();
+            cx.notify();
+        }))
+        .children(rows)
+        .into_any_element();
         popover::below_left(CONTROL, surface)
     }
 
