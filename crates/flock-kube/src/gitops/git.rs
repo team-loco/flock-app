@@ -54,7 +54,6 @@ pub struct GitCommit {
     pub time: Timestamp,
     pub subject: String,
     pub files: Vec<FilePatch>,
-    pub truncated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -264,7 +263,7 @@ async fn fetch_log(dir: &Path, key: &RepoKey, timeout: Duration) -> Result<Vec<G
     if log.truncated {
         tracing::info!(url = %redact::credentials(&key.url), limit = MAX_OUTPUT_BYTES, "git log output truncated");
     }
-    Ok(parse_log(&log.text, log.truncated))
+    Ok(parse_log(&log.text))
 }
 
 struct Captured {
@@ -378,16 +377,14 @@ pub fn mirror_dir(cache: &Path, url: &str) -> PathBuf {
     cache.join(format!("{safe}-{:016x}.git", fnv1a(url)))
 }
 
-pub fn parse_log(text: &str, output_truncated: bool) -> Vec<GitCommit> {
+pub fn parse_log(text: &str) -> Vec<GitCommit> {
     let records: Vec<&str> = text
         .split(RECORD)
         .filter(|record| !record.trim().is_empty())
         .collect();
-    let last = records.len().saturating_sub(1);
     records
         .into_iter()
-        .enumerate()
-        .filter_map(|(ix, record)| {
+        .filter_map(|record| {
             let (header, patch) = record.split_once('\n').unwrap_or((record, ""));
             let mut fields = header.split(FIELD);
             let sha = fields.next()?.trim().to_owned();
@@ -396,14 +393,13 @@ pub fn parse_log(text: &str, output_truncated: bool) -> Vec<GitCommit> {
             let subject = fields.next().unwrap_or_default().to_owned();
             let time = Timestamp::from_second(seconds).ok()?;
             let valid = !sha.is_empty() && sha.chars().all(|c| c.is_ascii_hexdigit());
-            let (files, clipped) = parse_patch(patch);
+            let files = parse_patch(patch);
             valid.then_some(GitCommit {
                 sha,
                 author,
                 time,
                 subject,
                 files,
-                truncated: clipped || (output_truncated && ix == last),
             })
         })
         .collect()
@@ -425,24 +421,22 @@ fn hunk_start(line: &str) -> Option<Cursor> {
     })
 }
 
-fn clip(text: &str) -> (String, bool) {
+fn clip(text: &str) -> String {
     if text.len() <= MAX_LINE_BYTES {
-        return (text.to_owned(), false);
+        return text.to_owned();
     }
     let end = text.floor_char_boundary(MAX_LINE_BYTES);
-    (text.get(..end).unwrap_or_default().to_owned(), true)
+    text.get(..end).unwrap_or_default().to_owned()
 }
 
-pub fn parse_patch(text: &str) -> (Vec<FilePatch>, bool) {
+pub fn parse_patch(text: &str) -> Vec<FilePatch> {
     let mut files: Vec<FilePatch> = Vec::new();
     let mut cursor: Option<Cursor> = None;
-    let mut truncated = false;
     let mut skipping = false;
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("diff --git ") {
             cursor = None;
             if files.len() >= MAX_FILES {
-                truncated = true;
                 skipping = true;
                 continue;
             }
@@ -486,11 +480,9 @@ pub fn parse_patch(text: &str) -> (Vec<FilePatch>, bool) {
             continue;
         };
         if file.lines.len() >= MAX_FILE_LINES {
-            truncated = true;
             continue;
         }
-        let (text, clipped) = clip(text);
-        truncated |= clipped;
+        let text = clip(text);
         file.lines.push(PatchLine {
             change,
             number,
@@ -498,7 +490,7 @@ pub fn parse_patch(text: &str) -> (Vec<FilePatch>, bool) {
             note: None,
         });
     }
-    (files, truncated)
+    files
 }
 
 #[cfg(test)]
@@ -570,7 +562,7 @@ mod tests {
 
     #[test]
     fn log_parses_commits_and_numbered_patch_lines() {
-        let commits = parse_log(LOG, false);
+        let commits = parse_log(LOG);
         assert_eq!(commits.len(), 2);
         let release = &commits[0];
         assert_eq!(release.sha, "3e0ff8ae123b");
@@ -602,8 +594,7 @@ mod tests {
     #[test]
     fn every_hunk_keeps_its_header_so_skipped_lines_show() {
         let patch = "diff --git a/w.yml b/w.yml\n@@ -26,3 +26,3 @@ jobs:\n       a\n-      b\n+      c\n@@ -48,2 +48,3 @@ jobs:\n       d\n+      e\n";
-        let (files, truncated) = parse_patch(patch);
-        assert!(!truncated);
+        let files = parse_patch(patch);
         let lines: Vec<(LineChange, u32, &str)> = files
             .iter()
             .flat_map(|file| &file.lines)
@@ -667,7 +658,6 @@ mod tests {
             time: Timestamp::UNIX_EPOCH,
             subject: String::new(),
             files: Vec::new(),
-            truncated: false,
         };
         let ready = MirrorState::Ready {
             commits: vec![commit],
@@ -822,40 +812,27 @@ mod tests {
             .map(|ix| format!("diff --git a/f{ix} b/f{ix}\n@@ -1 +1 @@\n+x\n"))
             .collect::<Vec<_>>()
             .concat();
-        let (files, truncated) = parse_patch(&many);
+        let files = parse_patch(&many);
         assert_eq!(files.len(), MAX_FILES);
-        assert!(truncated);
 
         let mut long = String::from("diff --git a/big b/big\n@@ -1 +1 @@\n");
         for _ in 0..=MAX_FILE_LINES {
             long.push_str("+line\n");
         }
-        let (files, truncated) = parse_patch(&long);
+        let files = parse_patch(&long);
         assert_eq!(files.first().map(|f| f.lines.len()), Some(MAX_FILE_LINES));
-        assert!(truncated);
 
         let wide = format!(
             "diff --git a/w b/w\n@@ -1 +1 @@\n+{}\n",
             "é".repeat(MAX_LINE_BYTES)
         );
-        let (files, truncated) = parse_patch(&wide);
+        let files = parse_patch(&wide);
         let text = files
             .first()
             .and_then(|f| f.lines.first())
             .map(|l| l.text.clone())
             .unwrap_or_default();
         assert!(text.len() <= MAX_LINE_BYTES && !text.is_empty());
-        assert!(truncated);
-
-        let (_, small) = parse_patch("diff --git a/s b/s\n@@ -1 +1 @@\n+ok\n");
-        assert!(!small);
-    }
-
-    #[test]
-    fn truncated_output_marks_its_last_commit() {
-        let commits = parse_log(LOG, true);
-        let marks: Vec<bool> = commits.iter().map(|c| c.truncated).collect();
-        assert_eq!(marks, [false, true]);
     }
 
     #[tokio::test]

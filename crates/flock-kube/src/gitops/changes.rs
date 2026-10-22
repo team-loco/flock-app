@@ -440,7 +440,6 @@ mod tests {
                     .unwrap_or(Timestamp::UNIX_EPOCH),
                 subject: "Release v6.15.0".to_owned(),
                 files: Vec::new(),
-                truncated: false,
             },
             GitCommit {
                 sha: "1111111aaaa".to_owned(),
@@ -450,7 +449,6 @@ mod tests {
                     .unwrap_or(Timestamp::UNIX_EPOCH),
                 subject: "older".to_owned(),
                 files: Vec::new(),
-                truncated: false,
             },
         ];
         let repo = Repo {

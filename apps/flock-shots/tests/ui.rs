@@ -1542,6 +1542,19 @@ fn the_nodes_table_fits_beside_the_inspector_with_whole_request_headers() -> any
 }
 
 #[test]
+fn the_pods_table_fits_beside_the_inspector_with_its_row_menu_visible() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.click("pods-row-0")?;
+    let pane = bounds_of(&mut ui, "pod-inspector-pane")?;
+    let row = bounds_of(&mut ui, "pods-row-0")?;
+    assert!(row.right() <= pane.left(), "{row:?} {pane:?}");
+    let more = bounds_of(&mut ui, "pods-row-0-more")?;
+    assert!(more.right() <= row.right(), "{more:?} {row:?}");
+    assert!(more.left() >= row.left(), "{more:?} {row:?}");
+    Ok(())
+}
+
+#[test]
 fn node_filters_narrow_by_pool_and_status_chip() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Nodes)?;
     assert!(ui.bounds("nodes-row-13").is_some());
