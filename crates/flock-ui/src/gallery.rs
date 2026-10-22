@@ -165,8 +165,8 @@ const PODS: [Pod; 4] = [
         phase: "CrashLoopBackOff",
         restarts: 14,
         node: "ip-10-4-12-87",
-        cpu: "4m",
-        mem: "38Mi",
+        cpu: "<0.01 cores",
+        mem: "38 MiB",
         age: "3h",
     },
     Pod {
@@ -176,8 +176,8 @@ const PODS: [Pod; 4] = [
         phase: "Running",
         restarts: 0,
         node: "ip-10-4-14-201",
-        cpu: "212m",
-        mem: "301Mi",
+        cpu: "0.21 cores",
+        mem: "301 MiB",
         age: "3h",
     },
     Pod {
@@ -187,8 +187,8 @@ const PODS: [Pod; 4] = [
         phase: "Running",
         restarts: 0,
         node: "ip-10-4-22-63",
-        cpu: "187m",
-        mem: "288Mi",
+        cpu: "0.19 cores",
+        mem: "288 MiB",
         age: "3h",
     },
     Pod {
@@ -198,8 +198,8 @@ const PODS: [Pod; 4] = [
         phase: "Readiness failing",
         restarts: 2,
         node: "ip-10-4-22-63",
-        cpu: "96m",
-        mem: "120Mi",
+        cpu: "0.10 cores",
+        mem: "120 MiB",
         age: "12m",
     },
 ];
@@ -461,8 +461,8 @@ impl Gallery {
             KeyValue::new()
                 .text("image", "ghcr.io/acme/checkout-api:2.14.0")
                 .text("ports", "8080/TCP http")
-                .text("requests", "CPU 500m · memory 512Mi")
-                .text("limits", "CPU 1 · memory 1Gi")
+                .text("requests", "CPU 0.50 cores · memory 512Mi")
+                .text("limits", "CPU 1.00 cores · memory 1Gi")
                 .row(
                     "last exit",
                     div().text_color(palette.err).child("1 (Error) · 2m ago"),

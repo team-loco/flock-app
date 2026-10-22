@@ -1,5 +1,6 @@
 use flock_core::cluster::{Namespace, NamespaceSort};
 use flock_core::overview::{percent, thousands};
+use flock_core::units::Amount;
 use flock_core::{Page, ResourceRef, Status};
 use gpui::{
     AnyElement, Context, Div, Hsla, InteractiveElement, IntoElement, ParentElement, SharedString,
@@ -7,7 +8,7 @@ use gpui::{
 };
 
 use super::{OverviewData, OverviewScreen, mono, problem_link, row_link, section, section_head};
-use crate::kit::Link;
+use crate::kit::{AmountText, Link};
 use crate::theme::{
     FONT_MONO, OVERVIEW_COUNT_WIDTH, OVERVIEW_NAMESPACE_MIN, OVERVIEW_NAMESPACE_ROW,
     OVERVIEW_RESTARTS_WIDTH, OVERVIEW_USAGE_BAR, OVERVIEW_USAGE_MIN, OVERVIEW_USAGE_WEIGHT,
@@ -20,7 +21,7 @@ const RESTARTS_HIGH: u32 = 10;
 const FULL: f32 = 1.;
 const DESCENDING: &str = " ↓";
 const ASCENDING: &str = " ↑";
-const FOOTNOTE: &str = "CPU in cores (m below 1), memory in GiB (Mi below 1) · used / requested · bar fills at 100% of requests";
+const FOOTNOTE: &str = "used / requested · bar fills at 100% of requests";
 
 #[derive(Clone, Copy)]
 enum Cell {
@@ -103,14 +104,14 @@ fn share_color(share: Option<f32>, palette: &Palette) -> Hsla {
     }
 }
 
-fn usage(amount: String, share: Option<f32>, palette: &Palette) -> Div {
+fn usage(amount: Amount, share: Option<f32>, palette: &Palette) -> Div {
     let color = share_color(share, palette);
     let label = share.map_or_else(String::new, percent);
     let filled = share.map_or(0., |share| share.clamp(0., FULL));
     let figures = div()
         .flex()
         .gap(SPACE_4)
-        .child(mono(amount, palette.fg2))
+        .child(AmountText::new(amount).color(palette.fg2))
         .child(div().flex_1())
         .child(mono(label, color));
     let bar = div()

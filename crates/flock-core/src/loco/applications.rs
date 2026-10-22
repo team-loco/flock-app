@@ -5,7 +5,7 @@ use super::Workspace;
 use crate::filter::{FilterSpec, TextFilter};
 use crate::issue::{Issue, object_line};
 use crate::time::age;
-use crate::{ClusterId, ResourceRef, Seen, Status, Uid};
+use crate::{ClusterId, ResourceRef, Seen, Status, Uid, units};
 
 const MISSING: &str = "—";
 const SEPARATOR: &str = " · ";
@@ -143,7 +143,7 @@ impl Resources {
             format!("{}–{} replicas", self.min_replicas, self.max_replicas)
         };
         let mut parts = vec![
-            format!("CPU {}", self.cpu),
+            format!("CPU {}", units::written_cpu(&self.cpu)),
             format!("memory {}", self.memory),
             replicas,
         ];
@@ -479,7 +479,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             resources.summary(),
-            "CPU 500m · memory 512Mi · 2–6 replicas · scales at 70% CPU"
+            "CPU 0.50 cores · memory 512Mi · 2–6 replicas · scales at 70% CPU"
         );
         let check = HealthCheck {
             path: "/healthz".into(),

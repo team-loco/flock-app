@@ -1,4 +1,4 @@
-use crate::kit::SelectableText;
+use crate::kit::{SelectableText, Tooltip};
 mod dock;
 
 pub(crate) use dock::kit_line;
@@ -60,7 +60,7 @@ const STATUS_MIN: Pixels = px(90.);
 const STATUS_MAX: Pixels = px(260.);
 const RESTARTS_WIDTH: Pixels = px(58.);
 const NODE_WIDTH: Pixels = px(178.);
-const CPU_WIDTH: Pixels = px(52.);
+const CPU_WIDTH: Pixels = px(84.);
 const MEM_WIDTH: Pixels = px(76.);
 const AGE_WIDTH: Pixels = px(34.);
 
@@ -707,8 +707,22 @@ impl WorkloadScreen {
         let mut grid = KeyValue::new()
             .text("image", spec.image.clone())
             .text("ports", ports.join(", "))
-            .text("requests", spec.requests.label())
-            .text("limits", spec.limits.label());
+            .row(
+                "requests",
+                with_written(
+                    format!("spec-requests-{}", spec.name),
+                    Some(spec.requests.written()),
+                    div().child(SelectableText::new(spec.requests.label())),
+                ),
+            )
+            .row(
+                "limits",
+                with_written(
+                    format!("spec-limits-{}", spec.name),
+                    Some(spec.limits.written()),
+                    div().child(SelectableText::new(spec.limits.label())),
+                ),
+            );
         if let Some(readiness) = readiness {
             grid = grid.text("readiness", readiness);
         }
@@ -826,7 +840,9 @@ fn field_row(field: flock_core::workload::Field, palette: &Palette) -> AnyElemen
                 .truncate()
                 .child(field.label),
         )
-        .child(
+        .child(with_written(
+            format!("workload-field-{}", field.label),
+            field.written,
             div()
                 .flex_1()
                 .min_w_0()
@@ -834,8 +850,18 @@ fn field_row(field: flock_core::workload::Field, palette: &Palette) -> AnyElemen
                 .text_size(TEXT_MONO)
                 .text_color(color)
                 .child(field.value),
-        )
+        ))
         .into_any_element()
+}
+
+fn with_written(id: String, written: Option<String>, value: gpui::Div) -> AnyElement {
+    match written {
+        Some(written) => value
+            .id(SharedString::from(id))
+            .tooltip(Tooltip::text(written))
+            .into_any_element(),
+        None => value.into_any_element(),
+    }
 }
 
 fn compact_pod_columns() -> Vec<Column<Pod>> {
@@ -899,22 +925,14 @@ fn pod_columns() -> Vec<Column<Pod>> {
         )
         .mono()
         .fixed(NODE_WIDTH),
-        Column::colored_text(
-            "CPU",
-            |p: &Pod| p.cpu_label().into(),
-            |_, palette| palette.fg2,
-        )
-        .mono()
-        .end()
-        .fixed(CPU_WIDTH),
-        Column::colored_text(
-            "Memory",
-            |p: &Pod| p.memory_label().into(),
-            |_, palette| palette.fg2,
-        )
-        .mono()
-        .end()
-        .fixed(MEM_WIDTH),
+        Column::amount("CPU", Pod::cpu_label)
+            .mono()
+            .end()
+            .fixed(CPU_WIDTH),
+        Column::amount("Memory", Pod::memory_label)
+            .mono()
+            .end()
+            .fixed(MEM_WIDTH),
         Column::colored_text(
             "Age",
             |p: &Pod| p.age_label().into(),

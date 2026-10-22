@@ -1,9 +1,10 @@
 use crate::changes::{LineChange, PatchLine};
 use crate::tabs::short_name;
 use crate::workload::{ContainerSpec, EnvResolution, EnvSource, EnvVar, Resources, short_image};
-use crate::{ClusterId, ResourceRef, Seen, Status, Uid, Workload};
+use crate::{ClusterId, ResourceRef, Seen, Status, Uid, Workload, units};
 
 const MISSING: &str = "—";
+const BETWEEN: &str = " / ";
 const READY: &str = "Ready";
 const IMAGE: &str = "Image";
 const REPLICAS: &str = "Replicas · HPA";
@@ -203,7 +204,7 @@ fn pair(request: &Resources, limit: &Resources, pick: fn(&Resources) -> Option<&
             .cloned()
             .unwrap_or_else(|| MISSING.to_owned())
     };
-    format!("{} / {}", side(request), side(limit))
+    format!("{}{BETWEEN}{}", side(request), side(limit))
 }
 
 fn env_cell(var: Option<&EnvVar>) -> Cell {
@@ -335,7 +336,13 @@ fn fields(observed: &[&Observed]) -> Vec<Field> {
         CPU,
         each(&|o| {
             container_text(
-                |c| Some(pair(&c.requests, &c.limits, |r| r.cpu.as_ref())),
+                |c| {
+                    Some(units::written_cpus(
+                        c.requests.cpu.as_deref(),
+                        c.limits.cpu.as_deref(),
+                        BETWEEN,
+                    ))
+                },
                 &o.workload,
             )
         }),
@@ -581,7 +588,7 @@ mod tests {
         );
         assert_eq!(
             texts(&comparison.fields[4]),
-            [("500m / 1", None), ("500m / 1", None)]
+            [("0.50 / 1.00 cores", None), ("0.50 / 1.00 cores", None)]
         );
         assert_eq!(
             texts(&comparison.fields[5]),

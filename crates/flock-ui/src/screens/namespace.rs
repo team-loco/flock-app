@@ -9,6 +9,7 @@ use flock_core::resource::short_kind;
 use flock_core::resources::{EVENT_LIST, namespace_list};
 use flock_core::settings::NamespaceSelection;
 use flock_core::time::age;
+use flock_core::units::Amount;
 use flock_core::{Command, Page, Preferences, ResourceRef, Snapshot, Status};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
@@ -18,9 +19,9 @@ use gpui::{
 
 use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
 use crate::kit::{
-    ActionMenu, Activate, EmptyState, ErrorBlocks, EventRow, HealthTile, HealthTiles, InputEvent,
-    InspectorPane, Link, PageHeader, PanelSection, SectionLabel, Skeleton, StackedBar, TextField,
-    TextFieldState, TileNote, events_count, events_empty,
+    ActionMenu, Activate, AmountText, EmptyState, ErrorBlocks, EventRow, HealthTile, HealthTiles,
+    InputEvent, InspectorPane, Link, PageHeader, PanelSection, SectionLabel, Skeleton, StackedBar,
+    TextField, TextFieldState, TileNote, events_count, events_empty,
 };
 use crate::screens::edit::{EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{ScreenEvent, edit_item};
@@ -436,8 +437,8 @@ impl NamespaceScreen {
                     .into_any_element()
             });
             PanelSection::new(INSPECTOR_ID, USAGE)
-                .child(usage_row(CPU, &cpu, &cpu.cpu_label(), palette))
-                .child(usage_row(MEMORY, &memory, &memory.memory_label(), palette))
+                .child(usage_row(CPU, &cpu, cpu.cpu_label(), palette))
+                .child(usage_row(MEMORY, &memory, memory.memory_label(), palette))
                 .child(aside_row(QUOTA, quota, palette))
         });
         let labels = self.page.namespace.as_ref().map(|namespace| {
@@ -628,7 +629,7 @@ fn aside_row(label: &'static str, value: impl IntoElement, palette: &Palette) ->
 fn usage_row(
     label: &'static str,
     requested: &Requested,
-    text: &str,
+    amount: Amount,
     palette: &Palette,
 ) -> impl IntoElement {
     let bar = requested.share().map(|share| {
@@ -643,7 +644,7 @@ fn usage_row(
         .flex()
         .flex_col()
         .gap(SPACE_2)
-        .child(text.to_owned())
+        .child(AmountText::new(amount))
         .children(bar);
     aside_row(label, value, palette)
 }

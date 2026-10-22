@@ -5,7 +5,9 @@ use gpui::{
     RenderOnce, SharedString, Stateful, StatefulInteractiveElement, Styled, Window, div,
 };
 
-use super::{ClickableSection, SectionLabel};
+use flock_core::units::Amount;
+
+use super::{AmountText, ClickableSection, SectionLabel};
 use crate::theme::{
     ActiveTheme, FONT_MONO, RULE, SPACE_3, SPACE_4, SPACE_5, SPACE_8, TEXT_BODY, TEXT_SMALL,
 };
@@ -57,7 +59,7 @@ impl TileNote {
 pub struct HealthTile {
     id: SharedString,
     label: SharedString,
-    figure: SharedString,
+    figure: Amount,
     detail: Option<SharedString>,
     bar: AnyElement,
     notes: Vec<TileNote>,
@@ -74,12 +76,20 @@ impl HealthTile {
         Self {
             id: id.into(),
             label: label.into(),
-            figure: figure.into(),
+            figure: Amount {
+                figures: figure.into().to_string(),
+                unit: None,
+            },
             detail: None,
             bar: bar.into_any_element(),
             notes: Vec::new(),
             on_activate: None,
         }
+    }
+
+    pub fn amount(mut self, amount: Amount) -> Self {
+        self.figure = amount;
+        self
     }
 
     pub fn detail(mut self, detail: Option<impl Into<SharedString>>) -> Self {
@@ -145,7 +155,13 @@ impl RenderOnce for HealthTile {
             .gap(SPACE_4)
             .min_w_0()
             .child(SectionLabel::new(self.label))
-            .child(mono(self.figure, palette.fg).text_size(TEXT_BODY))
+            .child(
+                div()
+                    .font_family(FONT_MONO)
+                    .text_size(TEXT_BODY)
+                    .whitespace_nowrap()
+                    .child(AmountText::new(self.figure).color(palette.fg)),
+            )
             .children(detail);
         let notes = notes(self.notes, palette.mute);
         let Some(activate) = self.on_activate else {

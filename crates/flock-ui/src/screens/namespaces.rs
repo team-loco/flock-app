@@ -241,7 +241,7 @@ fn columns() -> Vec<Column<Namespace>> {
             .end()
             .fixed(PODS_WIDTH)
             .sort_by_key(|n: &Namespace| n.pods),
-        Column::colored_text("CPU", |n: &Namespace| n.cpu_label().into(), |_, p| p.fg2)
+        Column::amount("CPU", Namespace::cpu_label)
             .mono()
             .end()
             .fixed(CPU_WIDTH)
@@ -251,20 +251,16 @@ fn columns() -> Vec<Column<Namespace>> {
                     .unwrap_or_default()
                     .total_cmp(&b.cpu.unwrap_or_default())
             }),
-        Column::colored_text(
-            "Memory",
-            |n: &Namespace| n.memory_label().into(),
-            |_, p| p.fg2,
-        )
-        .mono()
-        .end()
-        .fixed(MEMORY_WIDTH)
-        .tooltip(|n: &Namespace| n.memory_note().into())
-        .sortable(|a: &Namespace, b: &Namespace| {
-            a.memory
-                .unwrap_or_default()
-                .total_cmp(&b.memory.unwrap_or_default())
-        }),
+        Column::amount("Memory", Namespace::memory_label)
+            .mono()
+            .end()
+            .fixed(MEMORY_WIDTH)
+            .tooltip(|n: &Namespace| n.memory_note().into())
+            .sortable(|a: &Namespace, b: &Namespace| {
+                a.memory
+                    .unwrap_or_default()
+                    .total_cmp(&b.memory.unwrap_or_default())
+            }),
         Column::colored_text("Age", |n: &Namespace| age(n.age).into(), |_, p| p.mute)
             .mono()
             .fixed(AGE_WIDTH)

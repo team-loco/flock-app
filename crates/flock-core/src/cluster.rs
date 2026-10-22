@@ -9,7 +9,7 @@ use crate::nodes::{Node, NodeSummary};
 use crate::overview::{Capacity, Overview, WorkloadHealth};
 use crate::related::Related;
 use crate::resources::{Resource, ResourceKind};
-use crate::units::{self, CPU_UNIT, MEMORY_UNIT, Metric, NOT_MEASURED, WAITING_FOR_METRICS};
+use crate::units::{self, Amount, CPU_UNIT, MEMORY_UNIT, WAITING_FOR_METRICS};
 use crate::{Counts, Page, ResourceRef, Status};
 
 const CPU_NOTE: &str = "CPU in use by the pods in this namespace";
@@ -51,14 +51,16 @@ impl Namespace {
         name_ok && Self::FILTER.matches(self, &rest, Some(&self.name), &[&self.labels])
     }
 
-    pub fn cpu_label(&self) -> String {
-        self.cpu
-            .map_or_else(|| NOT_MEASURED.into(), units::cpu_cores)
+    pub fn cpu_label(&self) -> Amount {
+        self.cpu.map_or_else(Amount::missing, |cpu| {
+            Amount::of(units::figure(cpu), CPU_UNIT)
+        })
     }
 
-    pub fn memory_label(&self) -> String {
-        self.memory
-            .map_or_else(|| NOT_MEASURED.into(), units::memory_gib)
+    pub fn memory_label(&self) -> Amount {
+        self.memory.map_or_else(Amount::missing, |memory| {
+            Amount::of(units::figure(memory), MEMORY_UNIT)
+        })
     }
 
     pub fn cpu_note(&self) -> &'static str {
@@ -81,12 +83,15 @@ impl Namespace {
         share(self.memory, self.memory_requests)
     }
 
-    pub fn cpu_against_requests(&self) -> String {
-        units::amounts(Metric::Cpu, &[self.cpu, Some(self.cpu_requests)]).figures
+    pub fn cpu_against_requests(&self) -> Amount {
+        Amount::of(units::against(self.cpu, self.cpu_requests), CPU_UNIT)
     }
 
-    pub fn memory_against_requests(&self) -> String {
-        units::amounts(Metric::Memory, &[self.memory, Some(self.memory_requests)]).figures
+    pub fn memory_against_requests(&self) -> Amount {
+        Amount::of(
+            units::against(self.memory, self.memory_requests),
+            MEMORY_UNIT,
+        )
     }
 }
 
@@ -263,13 +268,13 @@ mod tests {
     #[test]
     fn namespace_usage_reads_a_dash_until_metrics_arrive() {
         let mut ns = namespace("payments", Counts::default());
-        assert_eq!(ns.cpu_label(), "—");
-        assert_eq!(ns.memory_label(), "—");
+        assert_eq!(ns.cpu_label().labelled(), "—");
+        assert_eq!(ns.memory_label().labelled(), "—");
         assert_eq!(ns.cpu_note(), "Waiting for metrics");
         ns.cpu = Some(0.026);
         ns.memory = Some(0.25);
-        assert_eq!(ns.cpu_label(), "26m");
-        assert_eq!(ns.memory_label(), "256 MiB");
+        assert_eq!(ns.cpu_label().labelled(), "0.03 cores");
+        assert_eq!(ns.memory_label().labelled(), "0.25 GiB");
         assert_eq!(
             ns.memory_note(),
             "Memory in use by the pods in this namespace"
@@ -352,17 +357,25 @@ mod tests {
     #[test]
     fn namespace_usage_reads_against_its_requests() {
         let search = loaded("search", 312, (61.2, 43.1), 96);
-        assert_eq!(search.cpu_against_requests(), "61.2 / 43.1");
+        assert_eq!(
+            search.cpu_against_requests().labelled(),
+            "61.20 / 43.10 cores"
+        );
         assert_eq!(search.cpu_share().map(|s| (s * 100.).round()), Some(142.));
         let unmeasured = namespace("new", Counts::default());
-        assert_eq!(unmeasured.memory_against_requests(), "— / 0Mi");
+        assert_eq!(unmeasured.memory_against_requests(), Amount::missing());
         assert_eq!(unmeasured.memory_share(), None);
     }
 
     #[test]
-    fn small_namespace_usage_keeps_its_figures() {
+    fn small_namespace_usage_reads_in_cores() {
         let small = loaded("loco", 2, (0.004, 0.002), 0);
-        assert_eq!(small.cpu_against_requests(), "4m / 2m");
+        assert_eq!(
+            small.cpu_against_requests().labelled(),
+            "<0.01 / <0.01 cores"
+        );
+        let busy = loaded("web", 2, (0.028, 0.35), 0);
+        assert_eq!(busy.cpu_against_requests().labelled(), "0.03 / 0.35 cores");
         assert_eq!(small.cpu_share().map(|s| (s * 100.).round()), Some(200.));
     }
 
@@ -408,8 +421,8 @@ mod tests {
             allocatable: 8.,
         };
         let detail = detail(PodPhases::default(), vec![a, b]);
-        assert_eq!(detail.cpu().amount(), "4.0 / 16.0 cores");
-        assert_eq!(detail.memory().amount(), "0.0 / 0.0 GiB");
+        assert_eq!(detail.cpu().amount().labelled(), "4.00 / 16.00 cores");
+        assert_eq!(detail.memory().amount().labelled(), "0.00 / 0.00 GiB");
     }
 
     #[test]

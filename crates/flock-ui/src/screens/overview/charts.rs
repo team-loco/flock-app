@@ -46,7 +46,7 @@ fn chart(plot: Plot<'_>, range: TimeRange, palette: &Palette) -> AnyElement {
         .child(SectionLabel::new(plot.title))
         .children(now)
         .child(div().flex_1())
-        .child(mono(plot.capacity.amount(), palette.mute).text_size(TEXT_SMALL));
+        .child(mono(plot.capacity.amount().labelled(), palette.mute).text_size(TEXT_SMALL));
     section(palette)
         .gap(SPACE_4)
         .child(head)

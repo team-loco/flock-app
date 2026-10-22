@@ -9,6 +9,7 @@ pub const PROGRESS_DEADLINE: &str = "ProgressDeadlineExceeded";
 const NONE: &str = "—";
 const FIELD_SEPARATOR: &str = " · ";
 const LIMIT_SEPARATOR: &str = " / ";
+const CPU_FIELD: &str = "CPU request / limit";
 const NOT_IN: &str = "not in";
 const HAS: &str = "has";
 const NOT_FOUND: &str = "not found";
@@ -53,6 +54,7 @@ pub struct Field {
     pub label: &'static str,
     pub value: String,
     pub status: Option<Status>,
+    pub written: Option<String>,
 }
 
 impl Field {
@@ -61,6 +63,7 @@ impl Field {
             label,
             value,
             status: None,
+            written: None,
         }
     }
 }
@@ -175,10 +178,19 @@ impl Workload {
             let limit = limit.map_or(NONE, String::as_str);
             format!("{request}{LIMIT_SEPARATOR}{limit}")
         };
-        let cpu = pair(
+        let cpu_request = container.and_then(|c| c.requests.cpu.as_deref());
+        let cpu_limit = container.and_then(|c| c.limits.cpu.as_deref());
+        let cpu_written = pair(
             container.and_then(|c| c.requests.cpu.as_ref()),
             container.and_then(|c| c.limits.cpu.as_ref()),
         );
+        let cpu = Field {
+            written: Some(cpu_written),
+            ..Field::new(
+                CPU_FIELD,
+                units::written_cpus(cpu_request, cpu_limit, LIMIT_SEPARATOR),
+            )
+        };
         let memory = pair(
             container.and_then(|c| c.requests.memory.as_ref()),
             container.and_then(|c| c.limits.memory.as_ref()),
@@ -188,7 +200,7 @@ impl Workload {
             Field::new("Image", image),
             Field::new("Revision", revision),
             Field::new("Replicas", self.desired.to_string()),
-            Field::new("CPU request / limit", cpu),
+            cpu,
             Field::new("Memory request / limit", memory),
         ];
         if let Some(owner) = &self.managed_by {
@@ -239,14 +251,18 @@ impl Pod {
         self.containers.iter().find(|c| c.name == name)
     }
 
-    pub fn cpu_label(&self) -> String {
+    pub fn cpu_label(&self) -> units::Amount {
         self.cpu_millis
-            .map_or_else(|| NONE.to_owned(), units::cpu_millis)
+            .map_or_else(units::Amount::missing, |millis| {
+                units::Amount::of(units::millicores(millis), units::CPU_UNIT)
+            })
     }
 
-    pub fn memory_label(&self) -> String {
+    pub fn memory_label(&self) -> units::Amount {
         self.memory_bytes
-            .map_or_else(|| NONE.to_owned(), units::memory_bytes)
+            .map_or_else(units::Amount::missing, |bytes| {
+                units::Amount::of(units::mebibytes(bytes), units::POD_MEMORY_UNIT)
+            })
     }
 
     pub fn age_label(&self) -> String {
@@ -369,10 +385,17 @@ pub struct Resources {
 
 impl Resources {
     pub fn label(&self) -> String {
-        let parts: Vec<String> = [("CPU", &self.cpu), ("memory", &self.memory)]
-            .into_iter()
-            .filter_map(|(name, value)| value.as_ref().map(|v| format!("{name} {v}")))
-            .collect();
+        self.describe(units::written_cpu)
+    }
+
+    pub fn written(&self) -> String {
+        self.describe(str::to_owned)
+    }
+
+    fn describe(&self, cpu: fn(&str) -> String) -> String {
+        let cpu = self.cpu.as_deref().map(|v| format!("CPU {}", cpu(v)));
+        let memory = self.memory.as_ref().map(|v| format!("memory {v}"));
+        let parts: Vec<String> = [cpu, memory].into_iter().flatten().collect();
         if parts.is_empty() {
             "none".into()
         } else {
@@ -598,12 +621,14 @@ pub(crate) mod tests {
                 ("Image", "checkout-api:2.37"),
                 ("Revision", "37 · 1h ago"),
                 ("Replicas", "3"),
-                ("CPU request / limit", "500m / 1"),
+                ("CPU request / limit", "0.50 / 1.00 cores"),
                 ("Memory request / limit", "512Mi / —"),
                 ("Managed by", "apps-payments"),
             ]
         );
         assert_eq!(fields.first().and_then(|f| f.status), Some(Status::Err));
+        let cpu = fields.iter().find(|f| f.label == CPU_FIELD);
+        assert_eq!(cpu.and_then(|f| f.written.as_deref()), Some("500m / 1"));
         let healthy = workload(vec![running("a"), running("b"), running("c")], false);
         assert_eq!(healthy.fields().first().and_then(|f| f.status), None);
         assert_eq!(healthy.fields().len(), 6);
@@ -665,7 +690,8 @@ pub(crate) mod tests {
             cpu: Some("500m".into()),
             memory: Some("512Mi".into()),
         };
-        assert_eq!(requests.label(), "CPU 500m · memory 512Mi");
+        assert_eq!(requests.label(), "CPU 0.50 cores · memory 512Mi");
+        assert_eq!(requests.written(), "CPU 500m · memory 512Mi");
         assert_eq!(Resources::default().label(), "none");
         let probe = Probe {
             action: ProbeAction::HttpGet {
@@ -765,11 +791,15 @@ pub(crate) mod tests {
     fn pods_without_metrics_show_a_dash() {
         let mut p = pod("a", "Running", Status::Ok, true);
         assert_eq!(
-            (p.cpu_label().as_str(), p.memory_label().as_str()),
-            ("—", "—")
+            (p.cpu_label().labelled(), p.memory_label().labelled()),
+            ("—".to_owned(), "—".to_owned())
         );
         p.cpu_millis = Some(120);
-        assert_ne!(p.cpu_label(), "—");
+        p.memory_bytes = Some(64 * 1024 * 1024);
+        assert_eq!(
+            (p.cpu_label().labelled(), p.memory_label().labelled()),
+            ("0.12 cores".to_owned(), "64 MiB".to_owned())
+        );
     }
 
     #[test]

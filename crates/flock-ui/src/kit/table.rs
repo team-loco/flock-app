@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use flock_core::Status;
 use flock_core::filter::highlights;
+use flock_core::units::Amount;
 use gpui::{
     Animation, AnimationExt, AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle,
     Div, ElementId, Entity, EventEmitter, FocusHandle, Focusable, HighlightStyle, Hsla,
@@ -21,7 +22,7 @@ use super::list_keys::{Nav, TypeAhead, find, typed};
 use super::menu::{ActionMenu, MenuItem};
 use super::selectable::{SelectableText, is_text_drag};
 use super::status::StatusGlyph;
-use super::text::Highlighted;
+use super::text::{AmountText, Highlighted};
 use super::tooltip::Tooltip;
 use crate::prefs::{self, ColumnWidths, FLOCK_SCOPE};
 use crate::theme::{
@@ -198,6 +199,14 @@ impl<R: 'static> Column<R> {
             fit_extra,
             ..Self::build(title, cell)
         }
+    }
+
+    pub fn amount(title: impl Into<SharedString>, amount: impl Fn(&R) -> Amount + 'static) -> Self {
+        Self::new(title, move |row, palette| {
+            AmountText::new(amount(row))
+                .color(palette.fg2)
+                .into_any_element()
+        })
     }
 
     pub fn text(

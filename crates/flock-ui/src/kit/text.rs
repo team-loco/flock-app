@@ -7,6 +7,8 @@ use gpui::{
     Styled, StyledText, Window, div, prelude::FluentBuilder,
 };
 
+use flock_core::units::Amount;
+
 use super::selectable::SelectableText;
 use crate::theme::{
     ActiveTheme, FONT_MONO, KV_LABEL, RADIUS, RULE, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_7,
@@ -14,6 +16,43 @@ use crate::theme::{
 };
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+#[derive(IntoElement)]
+pub struct AmountText {
+    amount: Amount,
+    color: Option<Hsla>,
+}
+
+impl AmountText {
+    pub fn new(amount: Amount) -> Self {
+        Self {
+            amount,
+            color: None,
+        }
+    }
+
+    pub fn color(mut self, color: Hsla) -> Self {
+        self.color = Some(color);
+        self
+    }
+}
+
+impl RenderOnce for AmountText {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let mute = cx.palette().mute;
+        let text = self.amount.labelled();
+        let unit = self.amount.unit.as_ref().map(|_| {
+            let style = HighlightStyle {
+                color: Some(mute),
+                ..HighlightStyle::default()
+            };
+            (self.amount.figures.len()..text.len(), style)
+        });
+        div()
+            .when_some(self.color, Styled::text_color)
+            .child(StyledText::new(text).with_highlights(unit))
+    }
+}
 
 #[derive(IntoElement)]
 pub struct SectionLabel {
