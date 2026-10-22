@@ -89,6 +89,7 @@ pub const PAGE_HEADER: Pixels = px(44.);
 pub const TAB_CLOSE: Pixels = px(14.);
 pub const SPLIT_BUTTON: Pixels = px(32.);
 pub const ICON_SPLIT: Pixels = px(14.);
+pub const ICON_LINK: Pixels = px(14.);
 pub const STATUS_BAR: Pixels = px(26.);
 pub const STATUS_REFRESH: Pixels = px(32.);
 pub const ASIDE_WIDTH: Pixels = px(300.);

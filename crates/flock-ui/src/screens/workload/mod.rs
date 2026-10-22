@@ -23,7 +23,7 @@ use crate::kit::{
     EVENTS, EmptyState, Entrance, ErrorBlocks, ErrorState, EventList, FILTER_PLACEHOLDER,
     InspectorPane, KeyValue, Link, LogView, MenuItem, PageHeader, PanelSection, Rule,
     SectionHeader, SectionLabel, Segmented, SelectableWords, Skeleton, Table, TableEvent, Terminal,
-    TextFieldState, Toast, Width, confirm, issue_stack, min_row_width, slide_in, toast,
+    TextFieldState, Toast, Width, YamlRow, confirm, issue_stack, min_row_width, slide_in, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section, related_count};
@@ -665,6 +665,7 @@ impl WorkloadScreen {
             .selected_container()
             .map(|spec| env_section(&spec.env, &palette));
         let related = self.related_section(cx);
+        let screen = cx.weak_entity();
         let events = PanelSection::new(INSPECTOR_ID, EVENTS)
             .count(workload.events.len().to_string())
             .child(EventList::new(workload.events.clone()));
@@ -686,7 +687,10 @@ impl WorkloadScreen {
             .children(spec)
             .children(env)
             .child(related)
-            .child(events);
+            .child(events)
+            .child(YamlRow::new(INSPECTOR_ID, move |_, cx| {
+                screen.update(cx, WorkloadScreen::toggle_yaml).ok();
+            }));
         InspectorPane::new(INSPECTOR_ID, content).width(INSPECTOR_WIDTH)
     }
 

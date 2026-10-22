@@ -12,6 +12,7 @@ use crate::kit::{
     Button, Column, EmptyState, FilterBar, FilterEvent, Inspector, KeyValue, PanelSection,
     StatusGlyph, Table, TableEvent, chip_label, status_symbols,
 };
+use crate::screens::edit::edit_command;
 use crate::screens::{ListShape, empty_list};
 use crate::theme::{
     FONT_MONO, INSPECTOR, Palette, ROW_TABLE, SPACE_3, SPACE_5, SPACE_8, TEXT_BODY, TEXT_SMALL,
@@ -165,6 +166,8 @@ impl FleetProblemsScreen {
             .small()
             .on_click(cx.listener(move |_, _, _, cx| cx.emit(command.clone())));
         let target = &problem.target;
+        let screen = cx.weak_entity();
+        let yaml_target = target.clone();
         let issue = Issue::new(
             problem.status,
             problem.reason.clone(),
@@ -188,6 +191,9 @@ impl FleetProblemsScreen {
             .issues([issue])
             .panel(PanelSection::new(INSPECTOR_ID, DETAILS).child(details))
             .panel(PanelSection::events(INSPECTOR_ID, problem.events.clone()))
+            .yaml(move |_, cx| {
+                let _ = screen.update(cx, |_, cx| cx.emit(edit_command(yaml_target.clone())));
+            })
             .width(INSPECTOR)
             .into_any_element()
     }

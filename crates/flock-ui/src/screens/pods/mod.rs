@@ -34,8 +34,9 @@ use crate::kit::{
     Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, Entrance, ErrorBlocks,
     FILTER_PLACEHOLDER, FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue, Link, LogView,
     MenuItem, PanelHeader, PanelSection, Select, SelectEvent, ShowAll, StatusText, Table,
-    TableEvent, Terminal, TextFieldState, chip_label, confirm, swap_in,
+    TableEvent, Terminal, TextFieldState, YamlRow, chip_label, confirm, swap_in,
 };
+use crate::screens::edit::edit_command;
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section, related_count};
 use crate::screens::{
     ALL_NAMESPACES, ListShape, chosen_namespace, edit_item, empty_list, new_tab_item,
@@ -597,11 +598,19 @@ impl PodsScreen {
                 .child(inspector_section(Some(loaded), &pick, cx)),
             None => section.pending(),
         };
+        let yaml_screen = cx.weak_entity();
+        let yaml_target = self.selected_pod().map(Pod::resource);
+        let yaml = YamlRow::new(INSPECTOR_ID, move |_, cx| {
+            if let Some(target) = yaml_target.clone() {
+                let _ = yaml_screen.update(cx, |_, cx| cx.emit(edit_command(target)));
+            }
+        });
         let (header, body) = match self.selected_pod() {
             Some(pod) => (
                 Some(Self::pod_header(pod, cx)),
                 Self::pod_details(pod, &palette, cx)
                     .child(related)
+                    .child(yaml)
                     .into_any_element(),
             ),
             None => (

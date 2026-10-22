@@ -8,7 +8,7 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder,
 };
 
-use super::panel::{ErrorBlocks, PanelHeader, PanelSection};
+use super::panel::{ErrorBlocks, PanelHeader, PanelSection, YamlRow};
 use crate::theme::{
     ActiveTheme, INSPECTOR, INSPECTOR_MAX, INSPECTOR_MIN, RULE, SPACE_5, SPACE_6, SPLITTER,
     TEXT_BODY,
@@ -29,6 +29,7 @@ pub struct Inspector {
 enum Part {
     Plain(AnyElement),
     Section(PanelSection),
+    Row(AnyElement),
 }
 
 impl Inspector {
@@ -86,6 +87,12 @@ impl Inspector {
         self
     }
 
+    pub fn yaml(mut self, on_click: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        let row = YamlRow::new(&self.panel_id(), on_click);
+        self.sections.push(Part::Row(row.into_any_element()));
+        self
+    }
+
     pub fn panel_id(&self) -> String {
         self.id.to_string()
     }
@@ -104,6 +111,7 @@ impl RenderOnce for Inspector {
         let header = self.actions.into_iter().fold(header, PanelHeader::action);
         let sections = self.sections.into_iter().map(|part| match part {
             Part::Section(section) => section.into_any_element(),
+            Part::Row(row) => row,
             Part::Plain(content) => div()
                 .px(SPACE_6)
                 .py(SPACE_5)
