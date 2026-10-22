@@ -542,7 +542,6 @@ pub(crate) mod tests {
         );
     }
 
-    #[cfg(not(feature = "loco"))]
     #[test]
     fn connection_words_come_from_reachability_not_health() {
         let reachable = |status: Status| ClusterSummary {
@@ -579,6 +578,7 @@ pub(crate) mod tests {
         );
     }
 
+    #[cfg(not(feature = "loco"))]
     #[test]
     fn clusters_show_the_whole_cluster_nav() {
         let snapshot = sample();
