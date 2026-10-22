@@ -9,7 +9,7 @@ use flock_ui::theme::{
     FONT_MONO, FONT_STATUS, ICON_BUTTON, INSPECTOR_IN, SIDEBAR, SPACE_3, SPACE_5, TAB_ENTER,
     TAB_LEAVE, TEXT_MONO, TITLE_ROW, TRAFFIC_LIGHTS_INSET,
 };
-use gpui::{Pixels, SharedString, TextRun, font, px, rgb};
+use gpui::{Pixels, SharedString, TextRun, font, rgb};
 
 const EXPECTED_WIDTH: u32 = 2880;
 const EXPECTED_HEIGHT: u32 = 1800;
@@ -1065,7 +1065,7 @@ fn the_overview_problem_counts_draw_their_symbols_in_the_status_font() -> anyhow
     let link = width(&mut ui, "overview-problems").context("no problems link")?;
     let expected = errors + warnings + SPACE_5;
     assert!(
-        (link - expected).abs() < px(SHAPING_TOLERANCE),
+        (link - expected).abs() < gpui::px(SHAPING_TOLERANCE),
         "{link:?} != {expected:?}"
     );
     Ok(())
