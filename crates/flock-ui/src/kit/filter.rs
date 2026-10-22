@@ -20,6 +20,7 @@ use crate::theme::{
     Palette, RADIUS, ROW_TABLE, RULE, SPACE_4, SPACE_8, TEXT_MONO, TEXT_SMALL,
 };
 
+pub const FILTER_PLACEHOLDER: &str = "Filter";
 const CLEAR: &str = "Clear";
 const REMOVE_TOKEN: &str = "×";
 const WIDEST_DIGIT: char = '0';
@@ -79,12 +80,7 @@ pub struct FilterBar {
 impl EventEmitter<FilterEvent> for FilterBar {}
 
 impl FilterBar {
-    pub fn new(
-        id: impl Into<SharedString>,
-        placeholder: impl Into<SharedString>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(id: impl Into<SharedString>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let field = cx.new(|cx| TextFieldState::new(window, cx));
         let subscription =
             cx.subscribe_in(&field, window, |this, _, event: &InputEvent, window, cx| {
@@ -94,7 +90,7 @@ impl FilterBar {
             });
         Self {
             id: id.into(),
-            placeholder: placeholder.into(),
+            placeholder: FILTER_PLACEHOLDER.into(),
             field,
             scope: None,
             aside: None,
@@ -223,6 +219,10 @@ impl FilterBar {
 
     pub fn query(&self) -> &TextFilter {
         &self.query
+    }
+
+    pub fn placeholder(&self) -> &str {
+        &self.placeholder
     }
 
     pub fn words(&self) -> Vec<String> {

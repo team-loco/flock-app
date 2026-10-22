@@ -68,14 +68,7 @@ impl GitOpsScreen {
                 .headerless()
                 .fit_content()
         });
-        let filter = cx.new(|cx| {
-            FilterBar::new(
-                "gitops-filter",
-                Source::page_scope().placeholder(),
-                window,
-                cx,
-            )
-        });
+        let filter = cx.new(|cx| FilterBar::new("gitops-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })

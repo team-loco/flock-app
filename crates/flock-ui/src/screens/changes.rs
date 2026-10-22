@@ -58,10 +58,8 @@ impl ChangesScreen {
                 .mono()
                 .width(CLUSTER_MENU)
         });
-        let filter = cx.new(|cx| {
-            FilterBar::new("changes-filter", Commit::FILTER.placeholder(), window, cx)
-                .scope(clusters.clone())
-        });
+        let filter =
+            cx.new(|cx| FilterBar::new("changes-filter", window, cx).scope(clusters.clone()));
         let commits = cx.new(|cx| {
             Table::new("changes-commits", commit_columns(&[]), cx)
                 .row_height(ROW_COMMIT)

@@ -47,8 +47,7 @@ impl EventEmitter<Command> for BuildsScreen {}
 
 impl BuildsScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter = cx
-            .new(|cx| FilterBar::new("loco-build-filter", Build::FILTER.placeholder(), window, cx));
+        let filter = cx.new(|cx| FilterBar::new("loco-build-filter", window, cx));
         let table = cx.new(|cx| {
             Table::new("loco-builds", build_columns(), cx)
                 .row_height(ROW_TABLE_MAX)

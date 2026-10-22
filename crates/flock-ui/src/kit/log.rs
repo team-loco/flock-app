@@ -18,7 +18,6 @@ use crate::theme::{
 };
 
 pub const LOG_CAPACITY: usize = 10_000;
-pub const LOG_FILTER_PLACEHOLDER: &str = "Filter log lines";
 const NO_LINES: &str = "No log lines yet.";
 const ESC: char = '\u{1b}';
 const BEL: char = '\u{7}';

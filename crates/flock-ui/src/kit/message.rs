@@ -2,7 +2,7 @@ use gpui::{App, Hsla, IntoElement, ParentElement, RenderOnce, SharedString, Styl
 
 use super::selectable::SelectableWords;
 use crate::theme::{
-    ActiveTheme, FONT_MONO, LINE_PROSE, RADIUS_SMALL, RULE, SPACE_1, SPACE_3, TEXT_SMALL,
+    ActiveTheme, FONT_MONO, LINE_PROSE, RADIUS_SMALL, RULE, SPACE_1, SPACE_3, TEXT_MONO,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,7 +51,7 @@ impl RenderOnce for RawMessage {
             .border_color(palette.line2)
             .bg(palette.raise)
             .font_family(FONT_MONO)
-            .text_size(TEXT_SMALL)
+            .text_size(TEXT_MONO)
             .line_height(gpui::relative(LINE_PROSE))
             .text_color(self.color.unwrap_or(palette.fg2));
         match self.layout {

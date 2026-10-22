@@ -11,7 +11,7 @@ use gpui::{
 
 use crate::highlight::{SOURCE_COLORS, source_colors};
 use crate::kit::{
-    Button, InputEvent, LOG_FILTER_PLACEHOLDER, LogLine, LogView, MetaLine, PageHeader, TextField,
+    Button, FILTER_PLACEHOLDER, InputEvent, LogLine, LogView, MetaLine, PageHeader, TextField,
     TextFieldState, find_matches,
 };
 use crate::screens::workload::kit_line;
@@ -81,8 +81,7 @@ impl MultiLogs {
     ) -> Self {
         let id: SharedString = id.into();
         let logs = cx.new(|_| LogView::new(id.clone()));
-        let filter =
-            cx.new(|cx| TextFieldState::new(window, cx).placeholder(LOG_FILTER_PLACEHOLDER));
+        let filter = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
         let subscription = cx.subscribe(&filter, |this, filter, event: &InputEvent, cx| {
             if let InputEvent::Change = event {
                 let query = filter.read(cx).value().to_string();

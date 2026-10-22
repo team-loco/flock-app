@@ -74,14 +74,7 @@ impl EventEmitter<Command> for ApplicationsScreen {}
 
 impl ApplicationsScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter = cx.new(|cx| {
-            FilterBar::new(
-                "loco-app-filter",
-                Application::FILTER.placeholder(),
-                window,
-                cx,
-            )
-        });
+        let filter = cx.new(|cx| FilterBar::new("loco-app-filter", window, cx));
         let screen = cx.weak_entity();
         let list = cx.new(|cx| {
             Table::new("loco-apps", app_columns(), cx)

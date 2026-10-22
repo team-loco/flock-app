@@ -200,7 +200,7 @@ clears it. The text is parsed into `flock_core::filter::TextFilter`: plain words
 `ns:<part>` matches the namespace, `l:key=value` / `label:key` match labels, as in the palette,
 and `node:<name>` matches the whole node name on lists whose `FilterSpec` has a `node` field (Pods).
 
-The field says “Filter by name, namespace or label”; its separate `/` key cap disappears while
+The field says “Filter”; its separate `/` key cap disappears while
 entering a query. `ns:` completes cluster namespaces, `label:` / `l:` completes keys and then
 values from the current list. ↑ / ↓ moves through suggestions, Tab or Enter completes, and Esc
 closes suggestions before clearing the query. Completed tokens become removable chips; Backspace

@@ -84,10 +84,8 @@ impl CustomResourcesScreen {
                 .mono()
                 .width(SELECT_WIDTH)
         });
-        let filter = cx.new(|cx| {
-            FilterBar::new("custom-filter", Resource::FILTER.placeholder(), window, cx)
-                .scope(namespaces.clone())
-        });
+        let filter =
+            cx.new(|cx| FilterBar::new("custom-filter", window, cx).scope(namespaces.clone()));
         let definitions = cx.new(|cx| DefinitionsScreen::new(window, cx));
         let subscriptions = vec![
             cx.subscribe(&definitions, |_, _, event: &ScreenEvent, cx| {

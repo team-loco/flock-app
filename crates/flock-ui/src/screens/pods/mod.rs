@@ -32,8 +32,8 @@ use streams::{LogSession, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
     Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, Entrance, ErrorBlocks,
-    FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue, LOG_FILTER_PLACEHOLDER, Link,
-    LogView, MenuItem, PanelHeader, PanelSection, Select, SelectEvent, ShowAll, StatusText, Table,
+    FILTER_PLACEHOLDER, FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue, Link, LogView,
+    MenuItem, PanelHeader, PanelSection, Select, SelectEvent, ShowAll, StatusText, Table,
     TableEvent, Terminal, TextFieldState, chip_label, confirm, swap_in,
 };
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
@@ -139,8 +139,7 @@ impl PodsScreen {
                 .click_opens()
                 .column_gap(SPACE_6)
         });
-        let search =
-            cx.new(|cx| TextFieldState::new(window, cx).placeholder(LOG_FILTER_PLACEHOLDER));
+        let search = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
         let namespace = cx.new(|cx| {
             Select::new("pod-namespace", vec![ALL_NAMESPACES.into()], cx)
                 .mono()
@@ -1125,7 +1124,7 @@ fn filter_bar(
         screen,
     });
     let filter = cx.new(|cx| {
-        FilterBar::new("pod-filter", Pod::FILTER.placeholder(), window, cx)
+        FilterBar::new("pod-filter", window, cx)
             .scope(namespace.clone())
             .aside(elsewhere.clone())
     });

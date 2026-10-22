@@ -4907,6 +4907,26 @@ fn filter_placeholder_stays_left_of_the_shortcut_hint_and_leaves_when_typing() -
 }
 
 #[test]
+fn every_filter_field_reads_filter() -> anyhow::Result<()> {
+    for screen in [
+        Screen::Nodes,
+        Screen::Pods,
+        Screen::Resources,
+        Screen::Namespaces,
+        Screen::Events,
+    ] {
+        let ui = Ui::open(screen)?;
+        let placeholder = ui.read(|shell, cx| {
+            shell
+                .filter_bar(cx)
+                .map(|bar| bar.read(cx).placeholder().to_owned())
+        });
+        assert_eq!(placeholder.as_deref(), Some("Filter"));
+    }
+    Ok(())
+}
+
+#[test]
 fn a_nav_row_with_three_badges_keeps_its_full_label() -> anyhow::Result<()> {
     let (mut ui, updates) = Ui::scripted(Screen::Cluster)?;
     let mut snapshot = flock_demo::snapshot();

@@ -47,14 +47,7 @@ impl FluxEventsScreen {
             }
         })
         .detach();
-        let filter = cx.new(|cx| {
-            FilterBar::new(
-                "flux-events-filter",
-                ClusterEvent::FILTER.placeholder(),
-                window,
-                cx,
-            )
-        });
+        let filter = cx.new(|cx| FilterBar::new("flux-events-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh(cx);
         })
@@ -166,6 +159,7 @@ fn columns() -> Vec<Column<ClusterEvent>> {
             |_, p| p.fg2,
         )
         .highlight()
+        .mono()
         .tooltip(|e: &ClusterEvent| e.event.message.clone().into())
         .flex(EVENT_MESSAGE_WEIGHT, EVENT_MESSAGE_MIN),
         Column::colored_text(

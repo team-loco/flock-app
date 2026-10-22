@@ -60,8 +60,7 @@ impl ClusterProblemsScreen {
             }
         })
         .detach();
-        let placeholder = Occurrence::FILTER.placeholder();
-        let filter = cx.new(|cx| FilterBar::new("problem-filter", placeholder, window, cx));
+        let filter = cx.new(|cx| FilterBar::new("problem-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh_rows(cx);
         })
