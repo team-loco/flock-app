@@ -2029,8 +2029,9 @@ fn live_keyboard_reaches_yaml_and_an_edit_draft_survives_a_tab_switch() -> anyho
 }
 
 const RELATED_SCROLL: f32 = 400.;
-const WORKLOAD_BODY: &str = "workload-main";
+const WORKLOAD_INSPECTOR: &str = "workload-inspector-pane";
 const DETAIL_BODY: &str = "detail-body";
+const WORKLOAD_RELATED: &str = "workload-inspector-related";
 const AUTOSCALED: (&str, &str) = ("web", "podinfo");
 const QA_VOLUME: &str = "flock-qa-volume";
 const QA_CLAIM: &str = "flock-qa-claim";
@@ -2149,33 +2150,50 @@ fn related_titles(state: &AppState) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn follow(ui: &mut Ui, page: &'static str, group: &str, name: &str) -> anyhow::Result<ResourceRef> {
-    let link = selector(format!("related-{group}-{name}"));
+fn open_section(ui: &mut Ui, body: &'static str, id: &str) -> anyhow::Result<()> {
+    let toggle = selector(format!("{id}-toggle"));
+    scroll_into(ui, body, toggle)?;
+    if ui.bounds(selector(format!("{id}-body"))).is_none() {
+        ui.click(toggle)?;
+    }
+    Ok(())
+}
+
+fn scroll_into(ui: &mut Ui, body: &'static str, target: &'static str) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
     loop {
-        let shown = ui.bounds(link);
-        let body = ui.bounds(page);
-        if let (Some(shown), Some(body)) = (shown, body)
-            && body.contains(&shown.center())
+        let shown = ui.bounds(target);
+        let bounds = ui.bounds(body);
+        if let (Some(shown), Some(bounds)) = (shown, bounds)
+            && bounds.contains(&shown.center())
         {
-            break;
+            return Ok(());
         }
         anyhow::ensure!(
             start.elapsed() < PAGE_TIMEOUT,
-            "Related never showed a {group} {name} link inside {page}; it shows {:?}",
-            related_titles(&ui.state())
+            "{target} never showed inside {body}"
         );
-        if let Some(body) = body {
-            let above = shown.is_some_and(|shown| shown.top() < body.top());
+        if let Some(bounds) = bounds {
+            let above = shown.is_some_and(|shown| shown.top() < bounds.top());
             let step = if above {
                 RELATED_SCROLL
             } else {
                 -RELATED_SCROLL
             };
-            ui.scroll(page, gpui::point(gpui::px(0.), gpui::px(step)))?;
+            ui.scroll(body, gpui::point(gpui::px(0.), gpui::px(step)))?;
         }
         ui.pause(Duration::from_millis(500))?;
     }
+}
+
+fn follow(ui: &mut Ui, page: &'static str, group: &str, name: &str) -> anyhow::Result<ResourceRef> {
+    let link = selector(format!("related-{group}-{name}"));
+    scroll_into(ui, page, link).with_context(|| {
+        format!(
+            "Related never showed a {group} {name} link; it shows {:?}",
+            related_titles(&ui.state())
+        )
+    })?;
     let from = ui.state().location().resource.clone();
     ui.click(link)?;
     ui.wait_until(PAGE_TIMEOUT, |state| {
@@ -2209,7 +2227,8 @@ fn live_related_sections_link_autoscalers_volumes_and_routes() -> anyhow::Result
     let (mut ui, before) = opened(&make, Screen::Flock)?;
     switch_to(&mut ui, cluster)?;
     open_row(&mut ui, Page::Deployments, AUTOSCALED.0, AUTOSCALED.1)?;
-    let autoscaler = follow(&mut ui, WORKLOAD_BODY, "Autoscalers", AUTOSCALED.1)?;
+    open_section(&mut ui, WORKLOAD_INSPECTOR, WORKLOAD_RELATED)?;
+    let autoscaler = follow(&mut ui, WORKLOAD_INSPECTOR, "Autoscalers", AUTOSCALED.1)?;
     anyhow::ensure!(
         ui.state().location().detail() == Some(&autoscaler),
         "the autoscaler link did not open its detail page"
