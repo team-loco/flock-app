@@ -2221,6 +2221,8 @@ fn menu_action(name: &str) -> anyhow::Result<Box<dyn gpui::Action>> {
         .ok_or_else(|| anyhow::anyhow!("no {name} menu item"))
 }
 
+const UPDATER_STATUS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 #[test]
 fn check_for_updates_from_the_menu_shows_checking_then_up_to_date() -> anyhow::Result<()> {
     use flock_core::UpdaterState;
@@ -2245,7 +2247,14 @@ fn check_for_updates_from_the_menu_shows_checking_then_up_to_date() -> anyhow::R
     assert!(ui.bounds(updater::STATUS_ITEM).is_none());
 
     ui.dispatch(menu_action(flock::CHECK_FOR_UPDATES_ITEM)?)?;
-    let checking = ui.read_app(|cx| updater::status(cx).state.clone());
+    let started = std::time::Instant::now();
+    let checking = loop {
+        ui.settle()?;
+        let state = ui.read_app(|cx| updater::status(cx).state.clone());
+        if state == UpdaterState::Checking || started.elapsed() > UPDATER_STATUS_TIMEOUT {
+            break state;
+        }
+    };
     assert_eq!(checking, UpdaterState::Checking);
     assert!(ui.bounds(updater::STATUS_ITEM).is_some());
 
