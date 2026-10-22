@@ -31,7 +31,7 @@ struct Plot<'a> {
 fn chart(plot: Plot<'_>, range: TimeRange, palette: &Palette) -> AnyElement {
     let now = plot.values.last().map(|v| percent(v / PERCENT));
     let requests = plot.capacity.requests * PERCENT;
-    let threshold = format!("requests {}", percent(plot.capacity.requests));
+    let threshold = format!("requested {}", percent(plot.capacity.requests));
     let line = LineChart::new(CHART_MAX)
         .height(OVERVIEW_CHART_HEIGHT)
         .y_labels(labels(&Y_LABELS))

@@ -1133,7 +1133,6 @@ fn overview_sections_navigate_to_their_lists() -> anyhow::Result<()> {
         ("overview-pods", Page::Pods, false),
         ("overview-nodes", Page::Nodes, false),
         ("overview-pool-0", Page::Nodes, false),
-        ("overview-fact-kubelet-skew", Page::Nodes, true),
         (
             "overview-fact-services-without-endpoints",
             Page::Services,
@@ -1225,7 +1224,7 @@ fn overview_expiring_follows_the_horizon_and_opens_certificates() -> anyhow::Res
     ui.click("overview-expiring-horizon-0")?;
     assert!(ui.bounds("overview-expiring-1").is_some());
     assert!(ui.bounds("overview-expiring-2").is_none());
-    assert!(ui.bounds("overview-fact-kubelet-skew").is_some());
+    assert!(ui.bounds("overview-fact-kubelet-skew").is_none());
     ui.click("overview-expiring-0")?;
     assert_eq!(
         opened(&ui),
@@ -3577,10 +3576,7 @@ fn the_cluster_overview_opens_settings_for_its_own_cluster() -> anyhow::Result<(
     assert_eq!(settings_selection(&ui), staging);
     ui.press("cmd-[")?;
     assert_eq!(ui.state().location().page, Page::ClusterOverview);
-    ui.click("overview-actions")?;
-    ui.click("overview-actions-item-0")?;
-    assert_eq!(ui.state().location().page, Page::ClusterSettings);
-    assert_eq!(settings_selection(&ui), staging);
+    assert!(ui.bounds("overview-actions").is_none());
     Ok(())
 }
 

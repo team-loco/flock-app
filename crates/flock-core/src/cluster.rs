@@ -125,8 +125,8 @@ impl NamespaceSort {
             Self::Name => "Namespace",
             Self::Pods => "Pods",
             Self::Failing => "Failing",
-            Self::Cpu => "CPU used / req",
-            Self::Memory => "Memory used / req",
+            Self::Cpu => "CPU used / requested",
+            Self::Memory => "Memory used / requested",
             Self::Restarts => "Restarts",
         }
     }
