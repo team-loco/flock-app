@@ -10,13 +10,14 @@ use super::Shell;
 use crate::assets::REFRESH;
 use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, ICON, Palette, RADIUS_SMALL, RULE, SPACE_2, SPACE_5, SPACE_6, SPACE_8,
-    STATUS_BAR, STATUS_BUTTON, TEXT_SMALL,
+    ActiveTheme, FONT_MONO, ICON, Palette, RULE, SPACE_5, SPACE_8, STATUS_BAR, STATUS_REFRESH,
+    TEXT_SMALL,
 };
 
 const PROBLEMS: &str = "status-problems";
 const VERSION: &str = "status-version";
 const VERSION_TOOLTIP: &str = "Kubernetes version";
+const PROBLEMS_TOOLTIP: &str = "Problems";
 const REFRESH_TOOLTIP: &str = "Refresh";
 pub const REFRESH_SELECTOR: &str = "status-refresh";
 const REFRESH_KEY: &str = "⌥⌘R";
@@ -26,13 +27,45 @@ impl Shell {
         let palette = *cx.palette();
         let snapshot = &self.state.snapshot;
         let problems = snapshot.problems();
+        let hover = palette.hover;
+        let counts = div()
+            .debug_selector(|| PROBLEMS.to_owned())
+            .id(PROBLEMS)
+            .flex()
+            .items_center()
+            .gap(SPACE_5)
+            .h_full()
+            .px(SPACE_5)
+            .border_l(RULE)
+            .border_color(palette.line)
+            .cursor_pointer()
+            .hover(move |style| style.bg(hover))
+            .tooltip(Tooltip::text(PROBLEMS_TOOLTIP))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.dispatch(Command::SelectPage(Page::Problems), cx);
+            }))
+            .child(div().text_color(palette.err).child(status_symbols(format!(
+                "{} {}",
+                Status::Err.glyph(),
+                problems.err
+            ))))
+            .child(div().text_color(palette.warn).child(status_symbols(format!(
+                "{} {}",
+                Status::Warn.glyph(),
+                problems.warn
+            ))));
+        let notices = div()
+            .flex()
+            .items_center()
+            .gap(SPACE_8)
+            .px(SPACE_5)
+            .children(crate::updater::status_item(cx))
+            .children(self.forwards(cx));
         div()
             .flex()
             .items_center()
             .flex_none()
-            .gap(SPACE_8)
             .h(STATUS_BAR)
-            .pl(SPACE_6)
             .border_t(RULE)
             .border_color(palette.line)
             .bg(palette.chrome)
@@ -41,33 +74,12 @@ impl Shell {
             .text_color(palette.mute)
             .whitespace_nowrap()
             .overflow_hidden()
-            .child(
-                div()
-                    .debug_selector(|| PROBLEMS.to_owned())
-                    .id(PROBLEMS)
-                    .flex()
-                    .gap(SPACE_5)
-                    .cursor_pointer()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.dispatch(Command::SelectPage(Page::Problems), cx);
-                    }))
-                    .child(div().text_color(palette.err).child(status_symbols(format!(
-                        "{} {}",
-                        Status::Err.glyph(),
-                        problems.err
-                    ))))
-                    .child(div().text_color(palette.warn).child(status_symbols(format!(
-                        "{} {}",
-                        Status::Warn.glyph(),
-                        problems.warn
-                    )))),
-            )
+            .child(self.switcher.clone())
             .children(self.kubernetes_version())
             .child(div().flex_1())
+            .child(notices)
+            .child(counts)
             .child(Self::refresh_button(&palette, cx))
-            .children(crate::updater::status_item(cx))
-            .children(self.forwards(cx))
-            .child(self.switcher.clone())
             .into_any_element()
     }
 
@@ -81,6 +93,7 @@ impl Shell {
         let element = div()
             .debug_selector(|| VERSION.to_owned())
             .id(VERSION)
+            .px(SPACE_5)
             .tooltip(Tooltip::text(VERSION_TOOLTIP))
             .child(version)
             .into_any_element();
@@ -94,9 +107,12 @@ impl Shell {
             .debug_selector(|| REFRESH_SELECTOR.to_owned())
             .flex()
             .items_center()
-            .h(STATUS_BUTTON)
-            .px(SPACE_2)
-            .rounded(RADIUS_SMALL)
+            .justify_center()
+            .flex_none()
+            .w(STATUS_REFRESH)
+            .h_full()
+            .border_l(RULE)
+            .border_color(palette.line)
             .cursor_pointer()
             .hover(move |style| style.bg(hover))
             .tooltip(Tooltip::text(format!("{REFRESH_TOOLTIP}  {REFRESH_KEY}")))

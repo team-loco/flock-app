@@ -1,14 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::history::{History, Location};
+use crate::switcher::ALL_CLUSTERS;
 use crate::{ClusterId, Page, Snapshot, Status};
 
-pub const LOGS_KIND: &str = "Logs";
-pub const COMPARE_KIND: &str = "Compare";
-pub const EDIT_KIND: &str = "Edit";
-pub const CLUSTER_KIND: &str = "Cluster";
-pub const CRD_KIND: &str = "Custom";
-pub const HELM_KIND: &str = "Helm";
 pub const MAX_PANES: usize = 2;
 const PER_MILLE: u16 = 1000;
 const EVEN: u16 = PER_MILLE / 2;
@@ -586,68 +581,50 @@ mod lenient {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TabTitle {
     pub status: Option<Status>,
-    pub kind: String,
     pub label: String,
-    pub cluster: Option<String>,
+    pub context: String,
 }
 
 pub fn title(location: &Location, snapshot: &Snapshot) -> TabTitle {
-    let names: Vec<&str> = snapshot.clusters.iter().map(|c| c.name.as_str()).collect();
-    let cluster = location.cluster.as_ref().map(|id| {
-        let name = snapshot
-            .cluster(id)
-            .map_or(id.as_str(), |c| c.name.as_str());
-        short_name(name, &names)
-    });
-    let (status, kind, label) = describe(location, snapshot);
-    let cluster = cluster.filter(|_| !location.page.is_flock());
+    let context = location
+        .cluster
+        .as_ref()
+        .filter(|_| !location.page.is_flock())
+        .map_or_else(|| ALL_CLUSTERS.to_owned(), |id| cluster_name(id, snapshot));
+    let (status, label) = describe(location, snapshot);
     TabTitle {
         status,
-        kind,
         label,
-        cluster,
+        context,
     }
 }
 
-fn describe(location: &Location, snapshot: &Snapshot) -> (Option<Status>, String, String) {
+fn describe(location: &Location, snapshot: &Snapshot) -> (Option<Status>, String) {
     if let Some(key) = &location.flux_object {
         let status = snapshot.flux_object(key).map(crate::FluxObject::status);
-        return (status, key.kind.label().to_owned(), key.name.clone());
+        return (status, key.name.clone());
     }
     if location.page.is_flock() {
-        return (None, String::new(), location.page.label().to_owned());
+        return (None, location.page.label().to_owned());
     }
-    if let Some(target) = &location.logs {
-        return (None, LOGS_KIND.to_owned(), target.label());
+    if location.page == Page::Logs {
+        return (None, location.page.label().to_owned());
     }
     let Some(resource) = &location.resource else {
         if let Some(crd) = &location.crd {
-            return (None, CRD_KIND.to_owned(), crd.kind.clone());
+            return (None, crd.kind.clone());
         }
         if let Some(key) = &location.helm {
             let status = snapshot.helm_release(key).map(|release| release.status);
-            return (status, HELM_KIND.to_owned(), key.name.clone());
+            return (status, key.name.clone());
         }
-        return (
-            None,
-            page_kind(location.page),
-            location.page.label().to_owned(),
-        );
+        return (None, location.page.label().to_owned());
     };
     let status = resource_status(resource, snapshot);
     match location.page {
-        Page::Logs => (
-            None,
-            LOGS_KIND.to_owned(),
-            pod_suffix(&resource.name).to_owned(),
-        ),
-        Page::Compare => (None, COMPARE_KIND.to_owned(), resource.name.clone()),
-        Page::EditYaml => (None, EDIT_KIND.to_owned(), resource.name.clone()),
-        _ => (
-            status,
-            crate::crd::display_kind(&resource.kind).to_owned(),
-            resource.name.clone(),
-        ),
+        Page::Compare => (None, resource.name.clone()),
+        Page::EditYaml => (None, resource.name.clone()),
+        _ => (status, resource.name.clone()),
     }
 }
 
@@ -661,14 +638,6 @@ fn resource_status(resource: &crate::ResourceRef, snapshot: &Snapshot) -> Option
         .iter()
         .find(|summary| &summary.resource == resource)
         .and_then(|summary| summary.status)
-}
-
-fn page_kind(page: Page) -> String {
-    crate::CLUSTER_NAV
-        .iter()
-        .find(|section| section.pages.contains(&page))
-        .and_then(|section| section.label)
-        .map_or_else(|| CLUSTER_KIND.to_owned(), str::to_owned)
 }
 
 pub fn pod_suffix(name: &str) -> &str {
@@ -1090,21 +1059,18 @@ mod tests {
     }
 
     #[test]
-    fn titles_follow_the_design_kinds() {
+    fn titles_name_the_object_and_the_real_cluster() {
         let snapshot = crate::flock::tests::sample();
         let flock = title(&Location::flock(Page::GitOps), &snapshot);
         assert_eq!(
-            (flock.kind.as_str(), flock.label.as_str(), flock.cluster),
-            ("", "GitOps", None)
+            (flock.label.as_str(), flock.context.as_str()),
+            ("GitOps", ALL_CLUSTERS)
         );
         let nodes = title(&at(Page::Nodes), &snapshot);
         assert_eq!(
-            (nodes.kind.as_str(), nodes.label.as_str()),
-            (CLUSTER_KIND, "Nodes")
+            (nodes.label.as_str(), nodes.context.as_str()),
+            ("Nodes", "a")
         );
-        assert_eq!(nodes.cluster.as_deref(), Some("a"));
-        let deployments = title(&at(Page::Deployments), &snapshot);
-        assert_eq!(deployments.kind, "Workloads");
         let pod = crate::ResourceRef {
             cluster: ClusterId::new("a"),
             kind: "Pod".into(),
@@ -1116,11 +1082,7 @@ mod tests {
             container: Some("cart".into()),
             ..at(Page::Logs)
         };
-        let logs = title(&logs, &snapshot);
-        assert_eq!(
-            (logs.kind.as_str(), logs.label.as_str()),
-            (LOGS_KIND, "x2lqp")
-        );
+        assert_eq!(title(&logs, &snapshot).label, "Logs");
         let workload = Location {
             resource: Some(crate::ResourceRef {
                 kind: "Deployment".into(),
@@ -1129,10 +1091,19 @@ mod tests {
             }),
             ..at(Page::Deployments)
         };
-        let workload = title(&workload, &snapshot);
-        assert_eq!(
-            (workload.kind.as_str(), workload.label.as_str()),
-            ("Deployment", "checkout-api")
-        );
+        assert_eq!(title(&workload, &snapshot).label, "checkout-api");
+    }
+
+    #[test]
+    fn the_context_is_the_full_cluster_name_even_with_a_shared_prefix() {
+        let snapshot = Snapshot {
+            clusters: vec![
+                crate::flock::tests::cluster("prod-us-east", Status::Ok, crate::Counts::default()),
+                crate::flock::tests::cluster("prod-eu-west", Status::Ok, crate::Counts::default()),
+            ],
+            ..crate::flock::tests::sample()
+        };
+        let east = Location::page_on(ClusterId::new("prod-us-east"), Page::Nodes);
+        assert_eq!(title(&east, &snapshot).context, "prod-us-east");
     }
 }

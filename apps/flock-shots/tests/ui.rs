@@ -2055,7 +2055,7 @@ fn the_switcher_gear_and_right_click_open_the_cluster_menu_beside_the_list() -> 
         .bounds("switcher-menu")
         .context("right-click opens the menu")?;
     let list = ui.bounds(staging).context("the list stays open")?;
-    assert!(menu.right() < list.left());
+    assert!(menu.left() > list.right());
     assert!(ui.bounds("switcher-action-4").is_some());
     assert!(ui.bounds("switcher-action-5").is_none());
     ui.press("escape escape")?;
@@ -4717,15 +4717,25 @@ fn cluster_problems_group_by_cause_and_rows_open_the_object() -> anyhow::Result<
 }
 
 #[test]
-fn the_status_bar_shows_only_the_problem_counts_and_the_kubernetes_version() -> anyhow::Result<()> {
+fn the_status_bar_puts_the_switcher_left_and_the_problem_counts_by_refresh() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
-    let problems = ui
-        .bounds("status-problems")
-        .context("the problem counts render")?;
+    let switcher = ui
+        .bounds("cluster-switcher")
+        .context("the switcher renders")?;
     let version = ui
         .bounds("status-version")
         .context("a cluster page shows its Kubernetes version")?;
-    assert_eq!(version.left() - problems.right(), flock_ui::theme::SPACE_8);
+    let problems = ui
+        .bounds("status-problems")
+        .context("the problem counts render")?;
+    let refresh = ui
+        .bounds("status-refresh")
+        .context("the refresh button renders")?;
+    assert_eq!(switcher.left(), gpui::px(0.));
+    assert_eq!(version.left(), switcher.right());
+    assert!(problems.left() > version.right());
+    assert_eq!(problems.right(), refresh.left());
+    assert_eq!(refresh.size.width, flock_ui::theme::STATUS_REFRESH);
     let mut ui = Ui::open(Screen::Flock)?;
     assert!(ui.bounds("status-problems").is_some());
     assert!(ui.bounds("status-version").is_none());

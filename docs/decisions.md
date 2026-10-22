@@ -528,3 +528,12 @@ Settled; change only with a new entry that says why.
     traffic-light inset of empty, draggable row. The width (`sidebar_width`, absent for the default) and whether it is closed
     (`sidebar_closed`) live in `AppSettings`, next to the inspector widths; each window starts
     from them and every drag or ⌘B writes them, so the width is shared by all windows.
+53. **v5 status bar and pane-tab context** (design v5 `StatusBar`, `PaneTabs`, `Split`; amends 25,
+    49 and 51): the cluster switcher moves back to the start of the status bar, with a 1px rule on
+    its right, followed by the Kubernetes version; the problem counts and a 32px icon-only Refresh
+    sit at the right end, each after a 1px rule and with a hover background. The counts still open
+    the fleet Problems page. The switcher list opens above the trigger anchored to its left edge,
+    and the gear, right-click and ⌘. menu (Settings…, Rename…, Switch context…, Connect or
+    Disconnect, Remove) opens to the right of the list. Pane tabs drop the kind text before the
+    label; the context after it is the cluster's full name (no shortened environment prefix), or
+    All clusters for Flock pages, and every logs tab reads Logs.
