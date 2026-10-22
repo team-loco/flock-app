@@ -44,9 +44,6 @@ const NOTIFY: &str = "Notify about new problems";
 const NAMESPACE_PLACEHOLDER: &str = "default";
 const LABELS_PLACEHOLDER: &str = "env=prod team=platform";
 const LABELS_HINT: &str = "Space-separated. Press Return to save.";
-const SYNC_FOLDER: &str = "Sync a folder…";
-const SYNC_FOLDER_DESCRIPTION: &str =
-    "Watch a folder of kubeconfig files and list new contexts here. Not available yet.";
 pub(crate) const DISCONNECT: &str = "Disconnect";
 pub(crate) const DISCONNECT_DESCRIPTION: &str =
     "Stop watching this cluster until you connect again. Nothing changes on the cluster.";
@@ -69,7 +66,6 @@ pub struct SettingsScreen {
     labels: Entity<TextFieldState>,
     metrics: Entity<Select>,
     menu: Entity<ActionMenu>,
-    page_menu: Entity<ActionMenu>,
     _subscriptions: [Subscription; 4],
 }
 
@@ -106,12 +102,6 @@ impl SettingsScreen {
                 .width(SETTINGS_FIELD)
         });
         let menu = cx.new(|cx| ActionMenu::new("cluster-actions", cx));
-        let page_menu = cx.new(|cx| {
-            let sync = MenuItem::new(SYNC_FOLDER, |_, _| {})
-                .description(SYNC_FOLDER_DESCRIPTION)
-                .disabled(true);
-            ActionMenu::new("cluster-settings-actions", cx).items(vec![sync])
-        });
         let subscriptions = [
             cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
                 let TableEvent::Selected(ix) = *event else {
@@ -142,7 +132,6 @@ impl SettingsScreen {
             labels,
             metrics,
             menu,
-            page_menu,
             _subscriptions: subscriptions,
         }
     }
@@ -355,8 +344,6 @@ impl SettingsScreen {
                     .text_color(palette.mute)
                     .child(self.clusters.len().to_string()),
             )
-            .child(div().flex_1())
-            .child(self.page_menu.clone())
     }
 
     fn inspector(&self, palette: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
