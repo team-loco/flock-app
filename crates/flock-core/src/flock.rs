@@ -45,7 +45,10 @@ impl Connection {
 
 impl ClusterSummary {
     pub fn is_connected(&self) -> bool {
-        self.status != Status::Offline
+        matches!(
+            self.connection(),
+            Connection::Connected | Connection::Connecting
+        )
     }
 
     pub fn connection(&self) -> Connection {
@@ -295,10 +298,26 @@ pub(crate) mod tests {
         }
     }
 
+    pub(crate) fn reachable(name: &str, status: Status, problems: Counts) -> ClusterSummary {
+        ClusterSummary {
+            metrics: Some(ClusterMetrics {
+                pods: Counts::default(),
+                cpu_percent: None,
+                memory_percent: None,
+                flux: Counts::default(),
+                revision: crate::home::Revision {
+                    sha: String::new(),
+                    held: false,
+                },
+            }),
+            ..cluster(name, status, problems)
+        }
+    }
+
     pub(crate) fn sample() -> Snapshot {
         Snapshot {
             clusters: vec![
-                cluster("a", Status::Err, Counts::default().with_err(2).with_warn(3)),
+                reachable("a", Status::Err, Counts::default().with_err(2).with_warn(3)),
                 cluster("b", Status::Ok, Counts::default().with_sus(1)),
                 cluster("c", Status::Offline, Counts::default()),
             ],
@@ -544,19 +563,7 @@ pub(crate) mod tests {
 
     #[test]
     fn connection_words_come_from_reachability_not_health() {
-        let reachable = |status: Status| ClusterSummary {
-            metrics: Some(ClusterMetrics {
-                pods: Counts::default(),
-                cpu_percent: None,
-                memory_percent: None,
-                flux: Counts::default(),
-                revision: crate::home::Revision {
-                    sha: String::new(),
-                    held: false,
-                },
-            }),
-            ..cluster("c", status, Counts::default())
-        };
+        let reachable = |status: Status| reachable("c", status, Counts::default());
         let unreachable = |status: Status| cluster("c", status, Counts::default());
         let labels = [
             reachable(Status::Err),

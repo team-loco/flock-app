@@ -59,6 +59,7 @@ fn item(cluster: &ClusterSummary) -> ClusterItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flock::tests::reachable;
     use crate::{Counts, Status};
     use std::collections::BTreeMap;
 
@@ -82,9 +83,9 @@ mod tests {
         let none = Counts::default();
         Snapshot {
             clusters: vec![
-                cluster("prod-us-east", Status::Err, none.with_err(2).with_warn(3)),
-                cluster("prod-eu-west", Status::Ok, none),
-                cluster("staging", Status::Warn, none.with_warn(2)),
+                reachable("prod-us-east", Status::Err, none.with_err(2).with_warn(3)),
+                reachable("prod-eu-west", Status::Ok, none),
+                reachable("staging", Status::Warn, none.with_warn(2)),
                 cluster("edge-k3s", Status::Offline, none),
             ],
             ..Snapshot::default()
@@ -128,6 +129,20 @@ mod tests {
         assert!(menu.dimmed());
         assert_eq!(menu.accessibility_label(), "Flock, 0 clusters connected");
         assert!(MenuBar::new(&Snapshot::default(), false).dimmed());
+    }
+
+    #[test]
+    fn auth_expired_cluster_is_not_counted_and_its_row_is_dimmed() {
+        let mut snapshot = design_fleet();
+        snapshot.clusters.push(cluster(
+            "qa-gke",
+            Status::Err,
+            Counts::default().with_err(1),
+        ));
+        let menu = MenuBar::new(&snapshot, false);
+        assert_eq!(menu.badge(), "3");
+        let expired = menu.clusters.iter().find(|c| c.name == "qa-gke");
+        assert_eq!(expired.map(|c| c.available), Some(false));
     }
 
     #[test]
