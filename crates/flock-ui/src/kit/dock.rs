@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use gpui::{
     Animation, AnimationExt, AnyElement, App, Context, ElementId, Entity, InteractiveElement,
     IntoElement, ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement,
@@ -11,6 +13,7 @@ use crate::theme::{
     SPACE_6, TEXT_CONTROL, TEXT_LABEL,
 };
 
+const CLOSE_TOOLTIP: &str = "Close";
 const COLLAPSE_TOOLTIP: &str = "Hide dock";
 const EXPAND_TOOLTIP: &str = "Show dock";
 
@@ -40,7 +43,12 @@ impl DockState {
     }
 
     pub fn collapsed() -> Self {
+        Self::collapsed_on(0)
+    }
+
+    pub fn collapsed_on(tab: usize) -> Self {
         Self {
+            active: tab,
             open: false,
             ..Self::new()
         }
@@ -60,6 +68,17 @@ impl DockState {
             self.toggle(cx);
         }
         cx.notify();
+    }
+
+    pub fn close_on(&mut self, tab: usize, cx: &mut Context<Self>) {
+        self.active = tab;
+        self.close(cx);
+    }
+
+    pub fn close(&mut self, cx: &mut Context<Self>) {
+        if self.open {
+            self.toggle(cx);
+        }
     }
 
     pub fn toggle(&mut self, cx: &mut Context<Self>) {
@@ -91,7 +110,11 @@ pub struct DockTab {
     detail: Option<SharedString>,
     tools: Option<AnyElement>,
     content: Option<AnyElement>,
+    on_close: Option<CloseHandler>,
+    hidden: bool,
 }
+
+type CloseHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 
 impl DockTab {
     pub fn new(label: impl Into<SharedString>) -> Self {
@@ -100,7 +123,19 @@ impl DockTab {
             detail: None,
             tools: None,
             content: None,
+            on_close: None,
+            hidden: false,
         }
+    }
+
+    pub fn closable(mut self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.on_close = Some(Rc::new(handler));
+        self
+    }
+
+    pub fn hidden(mut self, hidden: bool) -> Self {
+        self.hidden = hidden;
+        self
     }
 
     pub fn detail(mut self, detail: impl Into<SharedString>) -> Self {
@@ -152,6 +187,7 @@ fn render_tab(
     detail: Option<SharedString>,
     joined: bool,
     state: &Entity<DockState>,
+    on_close: Option<CloseHandler>,
     palette: &Palette,
 ) -> impl IntoElement {
     let state = state.clone();
@@ -185,6 +221,12 @@ fn render_tab(
                     .child(detail),
             )
         })
+        .when_some(on_close, |tab, close| {
+            tab.child(
+                IconButton::glyph(format!("dock-tab-close-{ix}"), "×", CLOSE_TOOLTIP)
+                    .on_click(move |_, window, cx| close(window, cx)),
+            )
+        })
 }
 
 impl RenderOnce for Dock {
@@ -202,6 +244,9 @@ impl RenderOnce for Dock {
         let mut active_content = None;
         let mut tabs = Vec::with_capacity(self.tabs.len());
         for (ix, tab) in self.tabs.into_iter().enumerate() {
+            if tab.hidden {
+                continue;
+            }
             let selected = ix == active;
             if selected {
                 active_tools = tab.tools;
@@ -213,6 +258,7 @@ impl RenderOnce for Dock {
                 tab.detail,
                 selected && open,
                 &self.state,
+                tab.on_close,
                 &palette,
             );
             tabs.push(element.into_any_element());

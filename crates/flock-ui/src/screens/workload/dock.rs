@@ -5,21 +5,22 @@ use flock_core::{
     Sink, Source, TermSize, Workload,
 };
 use gpui::{
-    AnyElement, AppContext as _, Context, Entity, Focusable, InteractiveElement, IntoElement,
+    AnyElement, App, AppContext as _, Context, Entity, Focusable, InteractiveElement, IntoElement,
     ParentElement, StatefulInteractiveElement, Styled, Subscription, Window, div,
 };
 
 use super::{WorkloadScreen, logs_tab_label};
 use crate::kit::confirm;
 use crate::kit::{
-    Button, Dock, DockState, DockTab, EventList, InputEvent, Level, LogLine, LogView, Segmented,
-    Terminal, TerminalEvent, TextField, TextFieldState,
+    Button, Dock, DockState, DockTab, EventList, InputEvent, Level, LogLine, LogView, MenuItem,
+    Segmented, Terminal, TerminalEvent, TextField, TextFieldState,
 };
 use crate::screens::multilog::MultiLogs;
 use crate::screens::no_shell::{DEBUG_IMAGE, confirm_debug, no_shell_state, start_debug_button};
 use crate::theme::{ActiveTheme, SPACE_3, SPACE_4, SPACE_6};
 
 pub const LOGS: usize = 0;
+pub const EVENTS: usize = 1;
 pub const TERMINAL: usize = 2;
 
 const LOGS_LABEL: &str = "Logs";
@@ -27,10 +28,8 @@ const EVENTS_LABEL: &str = "Events";
 const TERMINAL_LABEL: &str = "Terminal";
 const DEBUG: &str = "debug container";
 const EXEC: &str = "shell";
-const FOLLOW: &str = "follow";
-const WRAP: &str = "wrap";
 const OPEN_IN_TAB: &str = "Open logs in tab";
-const ALL_PODS: &str = "all pods";
+const ALL_PODS_ITEM: &str = "All pods";
 const ALL_PODS_DETAIL: &str = "all pods";
 const NO_SHELL_ID: &str = "workload-no-shell";
 const START_DEBUG_ID: &str = "workload-start-debug";
@@ -81,6 +80,16 @@ pub fn subscribe(
             }
         }),
     ]
+}
+
+fn close_with(
+    cx: &Context<WorkloadScreen>,
+    close: fn(&mut WorkloadScreen, &mut Context<WorkloadScreen>),
+) -> impl Fn(&mut Window, &mut App) + 'static {
+    let screen = cx.weak_entity();
+    move |_, cx| {
+        screen.update(cx, close).ok();
+    }
 }
 
 pub fn kit_line(line: flock_core::LogLine) -> LogLine {
@@ -148,6 +157,41 @@ impl WorkloadScreen {
 
     pub(super) fn show_logs(&mut self, cx: &mut Context<Self>) {
         self.dock.update(cx, |dock, cx| dock.select(LOGS, cx));
+        if self.log_task.is_none() {
+            self.follow_logs(cx);
+        }
+    }
+
+    fn close_logs_tab(&mut self, cx: &mut Context<Self>) {
+        self.log_task = None;
+        self.all_pods = None;
+        self.logs.update(cx, |logs, cx| {
+            logs.clear(cx);
+            logs.set_query("", cx);
+        });
+        self.clear_filter = true;
+        self.leave_closed_tab(cx);
+    }
+
+    fn close_terminal_tab(&mut self, cx: &mut Context<Self>) {
+        self.discard_shell(cx);
+        self.leave_closed_tab(cx);
+    }
+
+    fn leave_closed_tab(&mut self, cx: &mut Context<Self>) {
+        self.dock.update(cx, |dock, cx| dock.select(EVENTS, cx));
+        cx.notify();
+    }
+
+    pub(super) fn reset_dock(&mut self, cx: &mut Context<Self>) {
+        self.discard_shell(cx);
+        self.log_task = None;
+        self.logs.update(cx, |logs, cx| {
+            logs.clear(cx);
+            logs.set_query("", cx);
+        });
+        self.clear_filter = true;
+        self.dock.update(cx, |dock, cx| dock.close_on(EVENTS, cx));
     }
 
     pub(super) fn open_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -309,68 +353,54 @@ impl WorkloadScreen {
         view: &Entity<MultiLogs>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        let tools = view.update(cx, |view, cx| view.tools(cx).into_any_element());
         let target = LogTarget::Workload(self.target.clone());
-        div()
-            .flex()
-            .items_center()
-            .gap(SPACE_3)
-            .child(tools)
-            .child(
-                Button::new("logs-all-pods", ALL_PODS)
-                    .small()
-                    .selected(true)
-                    .on_click(cx.listener(|this, _, window, cx| this.toggle_all_pods(window, cx))),
-            )
-            .child(
-                Button::new("logs-open-tab", OPEN_IN_TAB)
-                    .small()
-                    .on_click(cx.listener(move |_, _, _, cx| {
-                        let open = Command::FollowLogs(target.clone());
-                        cx.emit(Command::NewTab(Box::new(open)));
-                    })),
-            )
+        let screen = cx.weak_entity();
+        let extra = vec![
+            MenuItem::new(ALL_PODS_ITEM, move |window, cx| {
+                screen
+                    .update(cx, |this, cx| this.toggle_all_pods(window, cx))
+                    .ok();
+            })
+            .checked(true),
+            MenuItem::new(OPEN_IN_TAB, {
+                let screen = cx.weak_entity();
+                move |_, cx| {
+                    let open = Command::FollowLogs(target.clone());
+                    screen
+                        .update(cx, |_, cx| cx.emit(Command::NewTab(Box::new(open.clone()))))
+                        .ok();
+                }
+            }),
+        ];
+        view.update(cx, |view, cx| view.tools(extra, cx).into_any_element())
     }
 
     fn log_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let follow = self.logs.read(cx).follow();
-        let wrap = self.logs.read(cx).wrap();
+        let mut items = LogView::option_items(&self.logs, false, cx);
+        let screen = cx.weak_entity();
+        items.push(MenuItem::new(ALL_PODS_ITEM, {
+            let screen = screen.clone();
+            move |window, cx| {
+                screen
+                    .update(cx, |this, cx| this.toggle_all_pods(window, cx))
+                    .ok();
+            }
+        }));
+        let openable = self.selected_pod().is_some() && self.container_name().is_some();
+        items.push(
+            MenuItem::new(OPEN_IN_TAB, move |_, cx| {
+                screen.update(cx, WorkloadScreen::open_logs_tab).ok();
+            })
+            .disabled(!openable),
+        );
+        self.log_options
+            .update(cx, |menu, cx| menu.set_items(items, cx));
         div()
             .flex()
             .items_center()
             .gap(SPACE_3)
             .child(TextField::search(&self.filter))
-            .child(
-                Button::new("logs-follow", FOLLOW)
-                    .small()
-                    .selected(follow)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.logs
-                            .update(cx, |logs, cx| logs.set_follow(!follow, cx));
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("logs-wrap", WRAP)
-                    .small()
-                    .selected(wrap)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.logs.update(cx, |logs, cx| logs.set_wrap(!wrap, cx));
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("logs-all-pods", ALL_PODS)
-                    .small()
-                    .selected(false)
-                    .on_click(cx.listener(|this, _, window, cx| this.toggle_all_pods(window, cx))),
-            )
-            .child(
-                Button::new("logs-open-tab", OPEN_IN_TAB)
-                    .small()
-                    .disabled(self.selected_pod().is_none() || self.container_name().is_none())
-                    .on_click(cx.listener(|this, _, _, cx| this.open_logs_tab(cx))),
-            )
+            .child(self.log_options.clone())
     }
 
     fn open_logs_tab(&mut self, cx: &mut Context<Self>) {
@@ -387,10 +417,7 @@ impl WorkloadScreen {
         let button = if open {
             Button::new("workload-close-shell", "Close shell")
                 .small()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.close_shell(cx);
-                    cx.notify();
-                }))
+                .on_click(cx.listener(|this, _, _, cx| this.close_terminal_tab(cx)))
         } else {
             Button::new("workload-open-shell", "Open shell")
                 .small()
@@ -443,10 +470,13 @@ impl WorkloadScreen {
         let events = Self::events_pane(workload.events.clone(), cx);
         let logs_tab = match self.all_pods.as_ref().map(|(view, _)| view.clone()) {
             Some(view) => DockTab::new(LOGS_LABEL)
+                .closable(close_with(cx, Self::close_logs_tab))
                 .detail(ALL_PODS_DETAIL)
                 .tools(self.all_pods_tools(&view, cx).into_any_element())
                 .content(view),
             None => DockTab::new(LOGS_LABEL)
+                .hidden(self.log_task.is_none())
+                .closable(close_with(cx, Self::close_logs_tab))
                 .detail(logs_detail)
                 .tools(self.log_tools(cx).into_any_element())
                 .content(self.logs.clone()),
@@ -460,6 +490,8 @@ impl WorkloadScreen {
             )
             .tab(
                 DockTab::new(TERMINAL_LABEL)
+                    .hidden(self.exec.is_none())
+                    .closable(close_with(cx, Self::close_terminal_tab))
                     .detail(self.terminal_detail())
                     .tools(self.terminal_tools(cx))
                     .content(self.terminal_content(cx)),

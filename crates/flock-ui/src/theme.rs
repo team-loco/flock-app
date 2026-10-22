@@ -135,6 +135,7 @@ pub const COLUMN_MIN: Pixels = px(32.);
 pub const COLUMN_HANDLE: Pixels = px(8.);
 pub const COLUMN_DIVIDER: Pixels = px(12.);
 pub const MENU_WIDTH: Pixels = px(300.);
+pub const CHECK_SLOT: Pixels = px(14.);
 pub const MENU_MAX_HEIGHT: Pixels = px(360.);
 pub const DIALOG_WIDTH: Pixels = px(440.);
 pub const DIALOG_TOP: Pixels = px(84.);
