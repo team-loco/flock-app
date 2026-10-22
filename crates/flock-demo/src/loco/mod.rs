@@ -189,7 +189,7 @@ fn application(seed: &AppSeed, namespace: &str) -> Application {
     };
     let degraded = failing.then(|| Degraded {
         reason: "CreateContainerConfigError".into(),
-        message: "The image runs as root. Loco runs containers as a non-root user; use an image that sets a non-root USER.".into(),
+        message: "container has runAsNonRoot and image will run as root (pod: \"checkout-6c9d7f-2xk4p_ws-0192c3e7\", container: app)".into(),
         since: Some(Duration::from_secs(6 * MINUTE)),
     });
     let replicas = format!("{}/{}", seed.ready, seed.desired);

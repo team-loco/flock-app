@@ -537,3 +537,11 @@ Settled; change only with a new entry that says why.
     Disconnect, Remove) opens to the right of the list. Pane tabs drop the kind text before the
     label; the context after it is the cluster's full name (no shortened environment prefix), or
     All clusters for Flock pages, and every logs tab reads Logs.
+54. **v5 restores inspector problem cards** (design v5 `Namespace`, `Kustomization`, `LocoApps`;
+    reverts the v4 parts of 50): the Namespace page has no Needs attention table, the Flux object
+    header has no condition line, and each shows its problems as `kit::ErrorBlocks` at the top of
+    the inspector (Loco applications put them under the header, above Deployment). Namespace cards
+    open the object; Labels start open as gray chips. A Flux card stays while the object
+    reconciles and goes when the object turns healthy, so Reconcile does not move the sections
+    below it. A Loco card shows the controller's own reason and message, and its object line is
+    built from fields (`Application checkout · Degraded=True · 6m`).

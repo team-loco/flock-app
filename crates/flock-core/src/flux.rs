@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::filter::{FilterSpec, TextFilter};
 
-use crate::issue::{Issue, failing_condition, headline_condition, object_line};
+use crate::issue::{Issue, failing_condition, object_line};
 use crate::{
     ClusterId, Condition, Diagnosis, Page, ResourceRef, Snapshot, Status, Uid, time, units,
 };
@@ -487,10 +487,6 @@ impl FluxObject {
             condition.and_then(|c| c.age).map(time::age),
         ]);
         vec![Issue::from_diagnosis(self.status(), diagnosis, object)]
-    }
-
-    pub fn headline_condition(&self) -> Option<&Condition> {
-        headline_condition(&self.conditions)
     }
 
     pub fn current_diagnosis(&self) -> Option<&Diagnosis> {

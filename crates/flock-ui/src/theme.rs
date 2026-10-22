@@ -558,9 +558,6 @@ pub const EVENT_COUNT_WIDTH: Pixels = px(56.);
 pub const EVENT_AGE_WIDTH: Pixels = px(44.);
 pub const FLUX_EVENT_CLUSTER_WIDTH: Pixels = px(130.);
 
-pub const NAMESPACE_KIND_WIDTH: Pixels = px(110.);
-pub const NAMESPACE_NAME_WIDTH: Pixels = px(190.);
-pub const NAMESPACE_AGE_WIDTH: Pixels = px(40.);
 pub const NAMESPACE_CONTENT_NAME: Pixels = px(220.);
 pub const NAMESPACE_CONTENT_AGE: Pixels = px(60.);
 pub const NAMESPACE_FILTER_WIDTH: Pixels = px(200.);

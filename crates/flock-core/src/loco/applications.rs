@@ -10,6 +10,7 @@ use crate::{ClusterId, ResourceRef, Seen, Status, Uid, units};
 const MISSING: &str = "—";
 const SEPARATOR: &str = " · ";
 const APPLICATION: &str = "Application";
+const DEGRADED_CONDITION: &str = "Degraded=True";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppPhase {
@@ -96,7 +97,8 @@ impl Degraded {
     pub fn issue(&self, status: Status, application: &str) -> Issue {
         let object = object_line([
             Some(format!("{APPLICATION} {application}")),
-            self.since.map(|since| format!("since {}", age(since))),
+            Some(DEGRADED_CONDITION.to_owned()),
+            self.since.map(age),
         ]);
         Issue::new(status, self.reason.clone(), self.message.clone(), object)
     }
@@ -504,7 +506,7 @@ pub(crate) mod tests {
         };
         let issue = degraded.issue(Status::Err, "checkout");
         assert_eq!(issue.reason, "CreateContainerConfigError");
-        assert_eq!(issue.object, "Application checkout · since 6m");
+        assert_eq!(issue.object, "Application checkout · Degraded=True · 6m");
     }
 
     #[test]

@@ -1,8 +1,9 @@
 use crate::kit::SelectableText;
 use flock_core::flux::{
-    FluxDetail, HelmDetail, HelmRevision, HistoryEntry, InventoryFilter, ManagedObject, SpecRow,
-    peer_summary,
+    FluxDetail, HelmDetail, HelmRevision, HistoryEntry, InventoryFilter, ManagedObject, Phase,
+    SpecRow, peer_summary,
 };
+use flock_core::issue::Issue;
 use flock_core::{Command, FluxAction, FluxKind, FluxObject, FluxPage, Page, Status, time};
 use gpui::{
     AnyElement, App, AppContext, ClipboardItem, Context, Entity, EventEmitter, FocusHandle,
@@ -13,7 +14,7 @@ use gpui::{
 
 use crate::kit::{
     ActionMenu, Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, DiffView,
-    InspectorPane, KeyValue, Link, MenuItem, PageHeader, PanelSection, Prose, RawMessage,
+    ErrorBlocks, InspectorPane, KeyValue, Link, MenuItem, PageHeader, PanelSection, Prose,
     SectionHeader, Segmented, StatusGlyph, Table, TableEvent, Toast, confirm, issue_stack,
     parse_unified, toast,
 };
@@ -21,8 +22,8 @@ use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::{EDIT_DESCRIPTION, EDIT_YAML};
 use crate::screens::{FullView, full_view_link};
 use crate::theme::{
-    ASIDE_WIDTH, ActiveTheme, CONTROL, FONT_MONO, FONT_SANS, Palette, ROW_DOCUMENT, ROW_TABLE_MIN,
-    RULE, SPACE_2, SPACE_3, SPACE_5, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
+    ASIDE_WIDTH, ActiveTheme, FONT_MONO, FONT_SANS, Palette, ROW_DOCUMENT, ROW_TABLE_MIN, RULE,
+    SPACE_2, SPACE_3, SPACE_5, SPACE_8, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
 };
 
 pub(crate) const FLUX_CONTEXT: &str = "FluxObject";
@@ -58,7 +59,6 @@ const OTHER_CLUSTERS: &str = "Other clusters";
 const DEPENDS_ON: &str = "Depends on";
 const VALUES: &str = "Values";
 const SPEC: &str = "Spec";
-const CONDITION_LINE: &str = "flux-condition";
 const READ_ONLY: &str = "read-only";
 
 gpui::actions!(
@@ -80,6 +80,7 @@ pub struct FluxObjectPage {
     releases: Entity<Table<HelmRevision>>,
     dependents: Entity<Table<FluxObject>>,
     compact: Option<FullView>,
+    issues: Vec<Issue>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -151,6 +152,7 @@ impl FluxObjectPage {
             releases,
             dependents,
             compact: None,
+            issues: Vec::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -172,10 +174,23 @@ impl FluxObjectPage {
             .leading(self.navigation.clone())
             .mono()
             .status(object.status(), object.phase.label())
-            .detail(issue_stack(object.issues()))
+            .detail(issue_stack(self.issues.clone()))
             .meta(Self::meta(object, cx))
             .footer(full_view_link("flux-full-view", open))
             .into_any_element()
+    }
+
+    fn keep_issues(&mut self, opened: bool) {
+        let Some(object) = self.object() else {
+            self.issues.clear();
+            return;
+        };
+        let fresh = object.issues();
+        let reconciling = matches!(object.phase, Phase::Reconciling);
+        if fresh.is_empty() && reconciling && !opened {
+            return;
+        }
+        self.issues = fresh;
     }
 
     pub fn set_page(&mut self, page: Option<FluxPage>, cx: &mut Context<Self>) {
@@ -189,6 +204,7 @@ impl FluxObjectPage {
             self.wants_focus = next.is_some();
         }
         self.page = page;
+        self.keep_issues(opened);
         let Some(page) = self.page.clone() else {
             cx.notify();
             return;
@@ -388,7 +404,6 @@ impl FluxObjectPage {
             .status(object.status(), object.phase.label())
             .action(primary.primary())
             .action(self.menu.clone())
-            .detail(Some(condition_line(object, cx.palette())))
             .meta(Self::meta(object, cx))
             .into_any_element()
     }
@@ -568,7 +583,7 @@ impl FluxObjectPage {
             .into_any_element()
     }
 
-    fn aside(page: &FluxPage, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn aside(&self, page: &FluxPage, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let object = &page.object;
         let this = cx.weak_entity();
         let peers: Vec<AnyElement> = page
@@ -639,6 +654,7 @@ impl FluxObjectPage {
             .border_color(palette.line)
             .bg(palette.panel)
             .text_size(TEXT_BODY)
+            .child(ErrorBlocks::new(self.issues.clone()))
             .children(peers)
             .children(dependencies)
             .children(values)
@@ -665,7 +681,7 @@ impl Render for FluxObjectPage {
                     .size_full()
                     .child(self.compact_header(&page.object, open, cx));
             }
-            let aside = Self::aside(&page, &palette, cx);
+            let aside = self.aside(&page, &palette, cx);
             let aside = InspectorPane::new(ASIDE_ID, aside).width(ASIDE_WIDTH);
             div()
                 .flex()
@@ -738,37 +754,6 @@ fn suspend_item(this: &WeakEntity<FluxObjectPage>, object: &FluxObject) -> MenuI
         });
         described(suspend, object.key.cli(FluxAction::Suspend))
     }
-}
-
-fn condition_line(object: &FluxObject, palette: &Palette) -> impl IntoElement + use<> {
-    let line = div()
-        .debug_selector(|| CONDITION_LINE.to_owned())
-        .flex()
-        .items_center()
-        .gap(SPACE_3)
-        .h(CONTROL)
-        .min_w_0()
-        .font_family(FONT_MONO)
-        .text_size(TEXT_MONO);
-    let Some(condition) = object.headline_condition() else {
-        return line;
-    };
-    let state = format!("{}={}", condition.kind, condition.value);
-    let message: Vec<&str> = [condition.reason.as_str(), condition.message.as_str()]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect();
-    let message = (!message.is_empty()).then(|| {
-        div()
-            .flex_1()
-            .min_w_0()
-            .child(RawMessage::new(message.join(PHRASE_SEPARATOR)).line())
-    });
-    let state = div()
-        .flex_none()
-        .text_color(palette.status(condition.status()))
-        .child(state);
-    line.child(state).children(message)
 }
 
 fn force_item(this: &WeakEntity<FluxObjectPage>, object: &FluxObject) -> Option<MenuItem> {
