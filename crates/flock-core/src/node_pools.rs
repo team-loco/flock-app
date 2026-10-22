@@ -2,14 +2,12 @@ use std::collections::BTreeMap;
 
 use crate::Status;
 use crate::nodes::Node;
-use crate::overview::plural;
 use crate::units::{self, CPU_UNIT};
 
 const PRESSURE_WARN: f32 = 0.9;
 const PRESSURE_ERR: f32 = 0.95;
 const VERSION_PREFIX: char = 'v';
 const VERSION_SEPARATOR: char = '.';
-const LIST_SEPARATOR: &str = ", ";
 const NO_FIT: &str = "no room";
 const WHOLE_FROM: f32 = 10.;
 
@@ -172,13 +170,6 @@ impl Version {
         format!("{VERSION_PREFIX}{}.{}", self.major, self.minor)
     }
 
-    fn label(self) -> String {
-        match self.patch {
-            Some(patch) => format!("{}.{patch}", self.minor_label()),
-            None => self.minor_label(),
-        }
-    }
-
     fn same_minor(self, other: Self) -> bool {
         (self.major, self.minor) == (other.major, other.minor)
     }
@@ -194,66 +185,6 @@ fn leading_number(text: &str) -> Option<u32> {
 pub fn kubelet_skewed(kubelet: &str, control_plane: &str) -> bool {
     let versions = Version::parse(kubelet).zip(Version::parse(control_plane));
     versions.is_some_and(|(kubelet, server)| !kubelet.same_minor(server))
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct KubeletSkew {
-    pub control_plane: String,
-    pub nodes: usize,
-    pub versions: Vec<String>,
-    pub pools: Vec<String>,
-}
-
-impl KubeletSkew {
-    pub fn of(nodes: &[Node], control_plane: &str) -> Option<Self> {
-        let server = Version::parse(control_plane)?;
-        let skewed: Vec<(&Node, Version)> = nodes
-            .iter()
-            .filter_map(|node| Some((node, Version::parse(&node.version)?)))
-            .filter(|(_, version)| !version.same_minor(server))
-            .collect();
-        let mut versions: Vec<Version> = skewed.iter().map(|(_, version)| *version).collect();
-        versions.sort_unstable();
-        versions.dedup();
-        let mut pools: Vec<String> = skewed
-            .iter()
-            .map(|(node, _)| node.pool().to_owned())
-            .collect();
-        pools.sort_unstable();
-        pools.dedup();
-        Some(Self {
-            control_plane: server.minor_label(),
-            nodes: skewed.len(),
-            versions: versions.into_iter().map(Version::label).collect(),
-            pools,
-        })
-    }
-
-    pub fn status(&self) -> Status {
-        if self.nodes == 0 {
-            Status::Ok
-        } else {
-            Status::Warn
-        }
-    }
-
-    pub fn detail(&self) -> String {
-        if self.nodes == 0 {
-            return format!("all kubelets on {}", self.control_plane);
-        }
-        let nodes = plural(self.nodes, "node", "nodes");
-        let pools = if self.pools.len() == 1 {
-            "pool"
-        } else {
-            "pools"
-        };
-        format!(
-            "{nodes} on {} · {pools} {} · control plane {}",
-            self.versions.join(LIST_SEPARATOR),
-            self.pools.join(LIST_SEPARATOR),
-            self.control_plane
-        )
-    }
 }
 
 #[cfg(test)]
@@ -341,55 +272,10 @@ mod tests {
         assert_eq!(pressure(0.95), Some(Status::Err));
     }
 
-    fn versioned(name: &str, pool: &str, version: &str) -> Node {
-        let mut node = pooled(name, pool, "m6i", (0., 0.));
-        node.version = version.into();
-        node
-    }
-
     #[test]
     fn a_kubelet_is_skewed_only_on_another_minor() {
         assert!(kubelet_skewed("v1.30.4-eks-a737599", "v1.31.2"));
         assert!(!kubelet_skewed("v1.31.0", "v1.31.2-eks-7f9249a"));
         assert!(!kubelet_skewed("", "v1.31.2"));
-    }
-
-    #[test]
-    fn kubelet_skew_counts_nodes_off_the_control_plane_minor() {
-        let nodes = [
-            versioned("a", "general", "v1.31.2-eks-7f9249a"),
-            versioned("b", "memory", "v1.30.4-eks-1a2b3c4"),
-            versioned("c", "memory", "v1.30.4-eks-1a2b3c4"),
-            versioned("d", "gpu", "v1.29.10"),
-            versioned("e", "gpu", "unknown"),
-        ];
-        let skew = KubeletSkew::of(&nodes, "v1.31.2-eks-abcdef0");
-        let skew = skew.unwrap_or_default();
-        assert_eq!(skew.control_plane, "v1.31");
-        assert_eq!(skew.nodes, 3);
-        assert_eq!(skew.versions, ["v1.29.10", "v1.30.4"]);
-        assert_eq!(skew.pools, ["gpu", "memory"]);
-        assert_eq!(skew.status(), Status::Warn);
-        assert_eq!(
-            skew.detail(),
-            "3 nodes on v1.29.10, v1.30.4 · pools gpu, memory · control plane v1.31"
-        );
-    }
-
-    #[test]
-    fn matching_kubelets_and_unknown_servers() {
-        let nodes = [versioned("a", "general", "v1.31.0")];
-        let skew = KubeletSkew::of(&nodes, "v1.31.2").unwrap_or_default();
-        assert_eq!(skew.nodes, 0);
-        assert_eq!(skew.status(), Status::Ok);
-        assert_eq!(skew.detail(), "all kubelets on v1.31");
-        let one = KubeletSkew::of(&[versioned("b", "memory-x86", "v1.30.4")], "v1.31.2")
-            .unwrap_or_default();
-        assert_eq!(
-            one.detail(),
-            "1 node on v1.30.4 · pool memory-x86 · control plane v1.31"
-        );
-        assert_eq!(KubeletSkew::of(&nodes, ""), None);
-        assert_eq!(KubeletSkew::of(&nodes, "v1"), None);
     }
 }

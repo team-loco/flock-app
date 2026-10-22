@@ -14,9 +14,8 @@ use crate::theme::{
 
 const UNKNOWN: &str = "—";
 const CHEVRON: &str = "›";
-const NO_SERVER_VERSION: &str = "control plane version unknown";
 const NO_ENDPOINT_SLICES: &str = "EndpointSlices are not readable";
-const EXPIRING_TITLE: &str = "Expiring & drift";
+const EXPIRING_TITLE: &str = "Expiring";
 const WITHIN: &str = "within";
 const HORIZON: &str = "overview-expiring-horizon";
 const EXPIRED: &str = "expired";
@@ -259,19 +258,6 @@ fn horizon_control(horizon: Horizon, palette: &Palette, cx: &Context<OverviewScr
         .child(control)
 }
 
-fn skew(data: &OverviewData) -> Fact {
-    let id = "overview-fact-kubelet-skew";
-    let key = "Kubelet version skew";
-    data.skew.as_ref().map_or_else(
-        || Fact::unknown(id, key, NO_SERVER_VERSION, Page::Nodes),
-        |skew| Fact {
-            sub: Some(skew.detail()),
-            glyph: Some(skew.status()),
-            ..Fact::counted(id, key, skew.nodes, Page::Nodes)
-        },
-    )
-}
-
 fn expiring(data: &OverviewData, horizon: Horizon) -> Vec<Fact> {
     let shown: Vec<&Expiring> = data
         .expiring
@@ -292,10 +278,9 @@ fn expiring(data: &OverviewData, horizon: Horizon) -> Vec<Fact> {
     let support = data.support.as_ref().filter(|end| end.shown(horizon));
     facts.extend(support.map(Fact::support));
     if facts.is_empty() {
-        let key = format!("Nothing expires within {}", horizon.label());
-        facts.push(Fact::note("overview-expiring-none", key, Some(Status::Ok)));
+        let key = format!("0 {WITHIN} {}", horizon.label());
+        facts.push(Fact::note("overview-expiring-none", key, None));
     }
-    facts.push(skew(data));
     facts
 }
 

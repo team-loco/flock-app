@@ -95,13 +95,13 @@ fn capacity(label: &'static str, capacity: &Capacity, palette: &Palette) -> Heal
         .limit(capacity.limits)
         .color(palette.acc);
     let parts = vec![
-        TileNote::new(format!("used {}", percent(used)), palette.mute),
+        TileNote::new(format!("{} used", percent(used)), palette.mute),
         TileNote::new(
-            format!("{REQUEST_GLYPH} req {}", percent(capacity.requests)),
+            format!("{REQUEST_GLYPH}{} requested", percent(capacity.requests)),
             palette.fg2,
         ),
         TileNote::new(
-            format!("{LIMIT_GLYPH} lim {}", percent(capacity.limits)),
+            format!("{LIMIT_GLYPH}{} limits", percent(capacity.limits)),
             palette.warn,
         ),
     ];

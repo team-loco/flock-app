@@ -16,7 +16,7 @@ use flock_core::cluster::{Namespace, NamespaceSort};
 use flock_core::cluster_changes::{ClusterChange, newest_first};
 use flock_core::control_plane::ControlPlane;
 use flock_core::expiry::{Expiring, Horizon, SupportEnd};
-use flock_core::node_pools::{KubeletSkew, NodePool};
+use flock_core::node_pools::NodePool;
 use flock_core::nodes::NodeSummary;
 use flock_core::overview::{
     Capacity, NetworkFacts, PodPhases, TimeRange, Utilization, UtilizationSource, WorkloadHealth,
@@ -26,27 +26,21 @@ use flock_core::{
     ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Page, ResourceRef, Status,
 };
 use gpui::{
-    AnyElement, App, AppContext, Context, Div, ElementId, Entity, EventEmitter, FocusHandle,
+    AnyElement, App, Context, Div, ElementId, Entity, EventEmitter, FocusHandle,
     InteractiveElement, IntoElement, KeyDownEvent, ParentElement, Render, SharedString, Stateful,
     StatefulInteractiveElement, Styled, Window, div, relative,
 };
 
 use super::ScreenEvent;
-use crate::kit::{
-    ActionMenu, Activate, Link, MenuItem, SectionLabel, Segmented, problem_link, status_symbols,
-};
+use crate::kit::{Activate, Link, SectionLabel, Segmented, problem_link, status_symbols};
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, RULE, SPACE_3, SPACE_4, SPACE_5, SPACE_7, SPACE_8,
     TEXT_CONTROL, TEXT_SMALL,
 };
 
 const CHANGES_BAND_WEIGHTS: [f32; 2] = [3., 2.];
-const ACTIONS: &str = "overview-actions";
 const SCROLL: &str = "overview-scroll";
 const ESCAPE: &str = "escape";
-const CLUSTER_SETTINGS: &str = "Cluster settings";
-const CLUSTER_SETTINGS_DESCRIPTION: &str =
-    "Change this cluster's default namespace, metrics source and labels.";
 
 #[derive(Clone, Debug, PartialEq)]
 struct OverviewData {
@@ -60,7 +54,6 @@ struct OverviewData {
     nodes: NodeSummary,
     node_health: Counts,
     pools: Vec<NodePool>,
-    skew: Option<KubeletSkew>,
     network: NetworkFacts,
     expiring: Vec<Expiring>,
     support: Option<SupportEnd>,
@@ -87,10 +80,6 @@ impl OverviewData {
             nodes: detail.node_summary(),
             node_health: Counts::of(detail.nodes.iter().map(|n| n.status)),
             pools: NodePool::of(&detail.nodes),
-            skew: cluster
-                .version
-                .as_deref()
-                .and_then(|version| KubeletSkew::of(&detail.nodes, version)),
             network: detail.overview.network,
             expiring: detail.overview.expiring.clone(),
             support: detail.overview.support.clone(),
@@ -112,14 +101,12 @@ pub struct OverviewScreen {
     drill: bool,
     code: Option<String>,
     focus: FocusHandle,
-    menu: Entity<ActionMenu>,
 }
 
 impl EventEmitter<ScreenEvent> for OverviewScreen {}
 
 impl OverviewScreen {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let menu = cx.new(|cx| ActionMenu::new(ACTIONS, cx));
         Self {
             data: None,
             range: TimeRange::default(),
@@ -128,7 +115,6 @@ impl OverviewScreen {
             drill: false,
             code: None,
             focus: cx.focus_handle(),
-            menu,
         }
     }
 
@@ -151,26 +137,11 @@ impl OverviewScreen {
             .as_ref()
             .is_none_or(|shown| shown.cluster != data.cluster)
         {
-            self.set_actions(data.cluster.clone(), cx);
             self.drill = false;
             self.code = None;
         }
         self.data = Some(data);
         cx.notify();
-    }
-
-    fn set_actions(&self, cluster: ClusterId, cx: &mut Context<Self>) {
-        let screen = cx.entity().downgrade();
-        let settings = MenuItem::new(CLUSTER_SETTINGS, move |_, cx| {
-            let command = Command::ShowClusterSettings(cluster.clone());
-            let sent = screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
-            if sent.is_err() {
-                tracing::debug!("overview closed before opening cluster settings");
-            }
-        })
-        .description(CLUSTER_SETTINGS_DESCRIPTION);
-        self.menu
-            .update(cx, |menu, cx| menu.set_items(vec![settings], cx));
     }
 
     pub fn header_controls(screen: &Entity<Self>, cx: &App) -> impl IntoElement {
@@ -189,12 +160,7 @@ impl OverviewScreen {
             .on_select(move |ix, _, cx| {
                 ranges_screen.update(cx, |screen, cx| screen.select_range(*ix, cx));
             });
-        div()
-            .flex()
-            .items_center()
-            .gap(SPACE_4)
-            .child(ranges)
-            .child(this.menu.clone())
+        div().flex().items_center().gap(SPACE_4).child(ranges)
     }
 
     fn select_range(&mut self, ix: usize, cx: &mut Context<Self>) {
