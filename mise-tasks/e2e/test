@@ -15,8 +15,21 @@ teardown() {
     "${ROOT}/mise-tasks/e2e/down"
   fi
 }
+stop_tree() {
+  local child
+  for child in $(pgrep -P "$1"); do
+    stop_tree "${child}"
+  done
+  kill "$1" 2>/dev/null || true
+}
+
+stop_build() {
+  if [[ -n "${build_pid:-}" ]] && kill -0 "${build_pid}" 2>/dev/null; then
+    stop_tree "${build_pid}"
+  fi
+}
 work_dir="$(mktemp -d)"
-trap 'teardown; rm -rf "${work_dir}"' EXIT
+trap 'stop_build; teardown; rm -rf "${work_dir}"' EXIT
 
 cd "${ROOT}"
 test_scope=(--workspace)
