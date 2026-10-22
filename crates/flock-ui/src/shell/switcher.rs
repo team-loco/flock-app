@@ -35,6 +35,8 @@ const ENTER: &str = "enter";
 const ESCAPE: &str = "escape";
 const MENU_ID: &str = "switcher-menu";
 const SETTINGS: &str = "Settings…";
+const RENAME: &str = "Rename…";
+const SWITCH_CONTEXT: &str = "Switch context…";
 const REMOVE: &str = "Remove";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,33 +45,49 @@ pub enum SwitcherEvent {
     AddCluster,
     Run(Command),
     Remove(ClusterId),
+    Rename(ClusterId),
+    SwitchContext(ClusterId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Action {
     Settings,
+    Rename,
+    SwitchContext,
     Connect,
     Disconnect,
     Remove,
 }
 
 impl Action {
-    pub(super) fn for_cluster(cluster: &ClusterSummary) -> [Self; 3] {
+    pub(super) fn for_cluster(cluster: &ClusterSummary) -> [Self; 5] {
         let connection = if cluster.is_connected() {
             Self::Disconnect
         } else {
             Self::Connect
         };
-        [Self::Settings, connection, Self::Remove]
+        [
+            Self::Settings,
+            Self::Rename,
+            Self::SwitchContext,
+            connection,
+            Self::Remove,
+        ]
     }
 
     const fn label(self) -> &'static str {
         match self {
             Self::Settings => SETTINGS,
+            Self::Rename => RENAME,
+            Self::SwitchContext => SWITCH_CONTEXT,
             Self::Connect => ClusterAction::Connect.label(),
             Self::Disconnect => DISCONNECT,
             Self::Remove => REMOVE,
         }
+    }
+
+    const fn opens_dialog(self) -> bool {
+        matches!(self, Self::Rename | Self::SwitchContext)
     }
 
     pub(super) fn event(self, id: &ClusterId) -> SwitcherEvent {
@@ -77,6 +95,8 @@ impl Action {
             Self::Settings => SwitcherEvent::Run(Command::ShowClusterSettings(id.clone())),
             Self::Connect => SwitcherEvent::Run(Command::Connect(id.clone())),
             Self::Disconnect => SwitcherEvent::Run(Command::Disconnect(id.clone())),
+            Self::Rename => SwitcherEvent::Rename(id.clone()),
+            Self::SwitchContext => SwitcherEvent::SwitchContext(id.clone()),
             Self::Remove => SwitcherEvent::Remove(id.clone()),
         }
     }
@@ -98,6 +118,7 @@ fn remove_dialog(id: ClusterId, run: Run) -> ConfirmDialog {
 pub(crate) fn cluster_items(cluster: &ClusterSummary, run: &Run) -> Vec<MenuItem> {
     Action::for_cluster(cluster)
         .into_iter()
+        .filter(|action| !action.opens_dialog())
         .map(|action| {
             let id = cluster.id.clone();
             let run = run.clone();
@@ -106,10 +127,14 @@ pub(crate) fn cluster_items(cluster: &ClusterSummary, run: &Run) -> Vec<MenuItem
                 SwitcherEvent::Remove(id) => confirm(remove_dialog(id, run.clone()), window, cx),
                 SwitcherEvent::Select(_) => {}
                 SwitcherEvent::AddCluster => {}
+                SwitcherEvent::Rename(_) => {}
+                SwitcherEvent::SwitchContext(_) => {}
             });
             match action {
                 Action::Remove => item.destructive(),
                 Action::Settings => item,
+                Action::Rename => item,
+                Action::SwitchContext => item,
                 Action::Connect => item,
                 Action::Disconnect => item,
             }
@@ -246,7 +271,7 @@ impl ClusterSwitcher {
         switcher::initial_highlight(&self.rows, self.selected.as_ref())
     }
 
-    fn actions(&self) -> Option<(ClusterId, [Action; 3])> {
+    fn actions(&self) -> Option<(ClusterId, [Action; 5])> {
         let id = self.actions_for.as_ref()?;
         let cluster = self.cluster(id)?;
         Some((id.clone(), Action::for_cluster(cluster)))
@@ -519,7 +544,7 @@ impl ClusterSwitcher {
     fn render_menu(
         &self,
         id: &ClusterId,
-        actions: [Action; 3],
+        actions: [Action; 5],
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -698,6 +723,8 @@ impl Shell {
             }
             SwitcherEvent::Run(command) => self.dispatch(command.clone(), cx),
             SwitcherEvent::Remove(id) => Self::confirm_remove(id.clone(), window, cx),
+            SwitcherEvent::Rename(id) => self.open_rename(id.clone(), window, cx),
+            SwitcherEvent::SwitchContext(id) => self.open_switch_context(id.clone(), window, cx),
         }
     }
 
@@ -740,8 +767,17 @@ mod tests {
     fn connected_clusters_offer_disconnect_and_offline_ones_connect() {
         let live = Action::for_cluster(&cluster("a", Status::Warn));
         let offline = Action::for_cluster(&cluster("b", Status::Offline));
-        assert_eq!(live, [Action::Settings, Action::Disconnect, Action::Remove]);
-        assert_eq!(offline, [Action::Settings, Action::Connect, Action::Remove]);
+        let expected = |connection| {
+            [
+                Action::Settings,
+                Action::Rename,
+                Action::SwitchContext,
+                connection,
+                Action::Remove,
+            ]
+        };
+        assert_eq!(live, expected(Action::Disconnect));
+        assert_eq!(offline, expected(Action::Connect));
     }
 
     #[test]
@@ -758,6 +794,11 @@ mod tests {
         assert_eq!(
             Action::Connect.event(&id),
             SwitcherEvent::Run(Command::Connect(id.clone()))
+        );
+        assert_eq!(Action::Rename.event(&id), SwitcherEvent::Rename(id.clone()));
+        assert_eq!(
+            Action::SwitchContext.event(&id),
+            SwitcherEvent::SwitchContext(id.clone())
         );
         assert_eq!(Action::Remove.event(&id), SwitcherEvent::Remove(id));
     }

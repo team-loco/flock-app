@@ -39,6 +39,7 @@ pub mod pod_tops;
 pub mod pods;
 pub mod problem_groups;
 pub mod related;
+pub mod rename;
 pub mod resource;
 pub mod resources;
 pub mod settings;

@@ -2046,8 +2046,8 @@ fn the_switcher_gear_and_right_click_open_the_cluster_menu_beside_the_list() -> 
         .context("right-click opens the menu")?;
     let list = ui.bounds(staging).context("the list stays open")?;
     assert!(menu.right() < list.left());
-    assert!(ui.bounds("switcher-action-2").is_some());
-    assert!(ui.bounds("switcher-action-3").is_none());
+    assert!(ui.bounds("switcher-action-4").is_some());
+    assert!(ui.bounds("switcher-action-5").is_none());
     ui.press("escape escape")?;
     assert!(!ui.read(Shell::switcher_open));
     ui.click("cluster-switcher")?;
@@ -2059,6 +2059,70 @@ fn the_switcher_gear_and_right_click_open_the_cluster_menu_beside_the_list() -> 
     assert_eq!(ui.state().location().page, Page::ClusterSettings);
     assert_eq!(settings_selection(&ui), Some(ClusterId::new("staging")));
     assert!(!ui.read(Shell::switcher_open));
+    Ok(())
+}
+
+fn open_staging_action(ui: &mut Ui, action: &'static str) -> anyhow::Result<()> {
+    ui.click("cluster-switcher")?;
+    let staging = switcher_row(ui, "staging")?;
+    ui.hover(staging)?;
+    let gear: &'static str = staging.replace("row", "gear").leak();
+    ui.click(gear)?;
+    ui.click(action)
+}
+
+fn staging_name(ui: &Ui) -> Option<String> {
+    let clusters = ui.state().snapshot.clusters;
+    clusters
+        .iter()
+        .find(|c| c.id.as_str() == "staging")
+        .map(|c| c.name.clone())
+}
+
+#[test]
+fn the_gear_menu_renames_a_cluster_and_an_empty_name_resets_it() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Flock)?;
+    open_staging_action(&mut ui, "switcher-action-1")?;
+    assert!(ui.bounds("rename-cluster").is_some());
+    ui.press("cmd-a")?;
+    ui.type_text("Stage")?;
+    ui.press("escape")?;
+    assert!(ui.bounds("rename-cluster").is_none());
+    assert_eq!(staging_name(&ui).as_deref(), Some("staging"));
+    open_staging_action(&mut ui, "switcher-action-1")?;
+    ui.press("cmd-a")?;
+    ui.type_text("Stage")?;
+    ui.press("enter")?;
+    assert!(ui.bounds("rename-cluster").is_none());
+    assert_eq!(staging_name(&ui).as_deref(), Some("Stage"));
+    assert_eq!(
+        ui.state()
+            .snapshot
+            .cluster(&ClusterId::new("staging"))
+            .map(|c| c.id.clone()),
+        Some(ClusterId::new("staging"))
+    );
+    open_staging_action(&mut ui, "switcher-action-1")?;
+    ui.press("cmd-a backspace enter")?;
+    assert_eq!(staging_name(&ui).as_deref(), Some("staging"));
+    Ok(())
+}
+
+#[test]
+fn the_gear_menu_switches_a_cluster_to_another_context() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Flock)?;
+    open_staging_action(&mut ui, "switcher-action-2")?;
+    assert!(ui.bounds("switch-context").is_some());
+    assert!(ui.bounds("switch-context-row-2").is_some());
+    assert!(ui.bounds("switch-context-row-3").is_none());
+    ui.click("switch-context-row-0")?;
+    assert!(ui.bounds("switch-context").is_none());
+    assert_eq!(staging_name(&ui).as_deref(), Some("staging"));
+    open_staging_action(&mut ui, "switcher-action-2")?;
+    assert!(ui.bounds("switch-context-row-1").is_some());
+    assert!(ui.bounds("switch-context-row-2").is_none());
+    ui.press("escape")?;
+    assert!(ui.bounds("switch-context").is_none());
     Ok(())
 }
 

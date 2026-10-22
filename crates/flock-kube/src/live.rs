@@ -1057,14 +1057,10 @@ impl Live {
             Command::SaveKubeconfig { name, yaml } => self.save_kubeconfig(name, yaml),
             Command::WatchFolder(folder) => self.watch_folder(folder),
             Command::CheckContexts(ids) => self.check(ids),
-            Command::AddClusters(added) => {
-                self.add(added);
-                return true;
-            }
-            Command::RemoveCluster(id) => {
-                self.remove(id);
-                return true;
-            }
+            Command::AddClusters(added) => return self.add(added),
+            Command::RemoveCluster(id) => return self.remove(id),
+            Command::RenameCluster(id, name) => return self.rename(id, name),
+            Command::SwitchContext(id, to) => return self.switch_context(id, to),
             Command::WatchWorkload { target, sink } => self.watch_workload(target, sink),
             Command::StreamLogs(_) => self.act(command),
             Command::StreamPodLogs(_) => self.act(command),
@@ -1153,11 +1149,12 @@ impl Live {
         }
     }
 
-    fn add(&mut self, added: &[NewCluster]) {
+    fn add(&mut self, added: &[NewCluster]) -> bool {
         if let Err(error) = self.store.add(added) {
             tracing::error!(%error, path = %self.store.path().display(), "saving clusters failed");
         }
         self.reconcile();
+        true
     }
 
     fn reconnect(&mut self, id: &ClusterId) {
@@ -1207,7 +1204,31 @@ impl Live {
         }
     }
 
-    fn remove(&mut self, id: &ClusterId) {
+    fn rename(&mut self, id: &ClusterId, name: &str) -> bool {
+        match self.store.rename(id, name) {
+            Ok(changed) => changed,
+            Err(error) => {
+                tracing::error!(%error, path = %self.store.path().display(), "saving the cluster name failed");
+                false
+            }
+        }
+    }
+
+    fn switch_context(&mut self, id: &ClusterId, to: &ContextRef) -> bool {
+        match self.store.rebind(id, to) {
+            Ok(true) => {
+                self.reconnect(id);
+                true
+            }
+            Ok(false) => false,
+            Err(error) => {
+                tracing::error!(%error, path = %self.store.path().display(), "saving the cluster's context failed");
+                false
+            }
+        }
+    }
+
+    fn remove(&mut self, id: &ClusterId) -> bool {
         if let Err(error) = self.store.remove(id) {
             tracing::error!(%error, path = %self.store.path().display(), "saving clusters failed");
         }
@@ -1216,6 +1237,7 @@ impl Live {
             self.navigation.page = Page::Overview;
         }
         self.reconcile();
+        true
     }
 
     fn check(&self, ids: &[ContextRef]) {
@@ -1434,10 +1456,15 @@ impl Live {
                 .handle
                 .objects::<k8s_openapi::api::core::v1::Event>();
             let flux = crate::detail::flux_events(&events, now).into_iter();
-            rows.extend(flux.map(|event| flock_core::events::ClusterEvent {
-                cluster: cluster.id.clone(),
-                cluster_name: cluster.id.to_string(),
-                event,
+            rows.extend(flux.map(|event| {
+                flock_core::events::ClusterEvent {
+                    cluster: cluster.id.clone(),
+                    cluster_name: self
+                        .store
+                        .get(&cluster.id)
+                        .map_or_else(|| cluster.id.to_string(), |saved| saved.label().to_owned()),
+                    event,
+                }
             }));
         }
         flock_core::events::newest_first(&mut rows);
@@ -1497,7 +1524,7 @@ impl Live {
                 inspected: &inspected,
             });
             let health = self.gitops.health(&cluster.id, now);
-            let built = assemble::cluster(
+            let mut built = assemble::cluster(
                 &cluster.id,
                 &cluster.handle,
                 &cluster.extras,
@@ -1505,6 +1532,9 @@ impl Live {
                 selection.as_ref(),
                 now,
             );
+            if let Some(saved) = self.store.get(&cluster.id) {
+                saved.label().clone_into(&mut built.summary.name);
+            }
             connected.push(built.summary);
             pods.extend(built.pods);
             problems.extend(built.problems);
@@ -1828,7 +1858,7 @@ fn set_aside_notice(store: &ClusterStore) -> Option<Notice> {
 fn offline_summary(saved: &SavedCluster, state: &str) -> ClusterSummary {
     ClusterSummary {
         id: saved.id(),
-        name: saved.name.clone(),
+        name: saved.label().to_owned(),
         status: Status::Offline,
         state: state.to_owned(),
         distro: String::new(),
@@ -2578,9 +2608,11 @@ mod tests {
             file: PathBuf::from("/gone"),
             context: "old".to_owned(),
             name: "old".to_owned(),
+            display_name: Some("Old lab".to_owned()),
             preferences: SavedPreferences::default(),
         };
         let summary = offline_summary(&saved, MISSING_STATE);
+        assert_eq!(summary.name, "Old lab");
         assert_eq!(summary.status, Status::Offline);
         assert_eq!(summary.state, MISSING_STATE);
     }

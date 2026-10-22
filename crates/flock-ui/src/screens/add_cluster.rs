@@ -645,11 +645,11 @@ fn check_mark(status: CheckStatus, palette: &Palette) -> (SharedString, Hsla) {
     }
 }
 
-fn body() -> gpui::Div {
+pub(super) fn body() -> gpui::Div {
     div().flex().flex_col().flex_1().min_h_0()
 }
 
-fn footer(palette: &Palette) -> gpui::Div {
+pub(super) fn footer(palette: &Palette) -> gpui::Div {
     div()
         .flex()
         .flex_none()
@@ -660,7 +660,7 @@ fn footer(palette: &Palette) -> gpui::Div {
         .bg(palette.chrome)
 }
 
-fn file_label(label: &str, palette: &Palette) -> AnyElement {
+pub(super) fn file_label(label: &str, palette: &Palette) -> AnyElement {
     div()
         .px(SPACE_7)
         .pt(SPACE_6)
@@ -672,7 +672,7 @@ fn file_label(label: &str, palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
-fn note(text: &'static str, palette: &Palette) -> AnyElement {
+pub(super) fn note(text: &'static str, palette: &Palette) -> AnyElement {
     div()
         .px(SPACE_7)
         .py(SPACE_6)

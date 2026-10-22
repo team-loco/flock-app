@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
+use flock_core::rename::display_name;
 use flock_core::{
     CheckLine, CheckStatus, ClusterId, ClusterSummary, Command, ContextChoice, ContextRef, Counts,
     KubeconfigFile, NewCluster, Page, Sender, Snapshot, Status, Update, Verdict,
@@ -85,6 +86,17 @@ impl AddClusters {
             Command::RemoveCluster(id) => {
                 self.added.remove(id);
                 flock.remove_cluster(id);
+                send(updates, Update::Snapshot(Box::new(flock.clone())));
+            }
+            Command::RenameCluster(id, input) => {
+                if let Some(cluster) = flock.clusters.iter_mut().find(|c| &c.id == id) {
+                    let fallback = id.to_string();
+                    cluster.name = display_name(input).unwrap_or(fallback);
+                }
+                send(updates, Update::Snapshot(Box::new(flock.clone())));
+            }
+            Command::SwitchContext(id, to) => {
+                self.added.insert(id.clone(), to.clone());
                 send(updates, Update::Snapshot(Box::new(flock.clone())));
             }
             _ => return false,
@@ -335,5 +347,34 @@ mod tests {
         let remaining: usize = adding.files().iter().map(|f| f.contexts.len()).sum();
         assert_eq!(remaining, 3);
         assert!(!adding.handle(&Command::ToggleSidebar, &mut flock, &tx));
+    }
+
+    #[test]
+    fn renaming_and_switching_context_keep_the_entry() {
+        let (tx, rx) = async_channel::unbounded();
+        let mut adding = AddClusters::default();
+        let mut flock = Snapshot::default();
+        assert!(adding.handle(&Command::AddClusters(vec![analytics()]), &mut flock, &tx));
+        let id = ClusterId::new("analytics");
+        let rename = Command::RenameCluster(id.clone(), " Data ".to_owned());
+        assert!(adding.handle(&rename, &mut flock, &tx));
+        assert_eq!(
+            flock.clusters.first().map(|c| c.name.as_str()),
+            Some("Data")
+        );
+        let reset = Command::RenameCluster(id.clone(), String::new());
+        assert!(adding.handle(&reset, &mut flock, &tx));
+        assert_eq!(
+            flock.clusters.first().map(|c| c.name.as_str()),
+            Some("analytics")
+        );
+        let minikube = context_ref(&SEEDS[1]);
+        let switch = Command::SwitchContext(id.clone(), minikube.clone());
+        assert!(adding.handle(&switch, &mut flock, &tx));
+        assert_eq!(adding.added.get(&id), Some(&minikube));
+        assert_eq!(flock.clusters.len(), 1);
+        let remaining: usize = adding.files().iter().map(|f| f.contexts.len()).sum();
+        assert_eq!(remaining, 2);
+        assert_eq!(rx.len(), 4);
     }
 }

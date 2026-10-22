@@ -30,6 +30,7 @@ use crate::actions::{
 use crate::kit::{FilterBar, Split, Toast, toast};
 use crate::screens::ScreenEvent;
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
+use crate::screens::cluster_edit::{ClusterEditEvent, RenameDialog, SwitchContextDialog};
 use crate::screens::command::{CommandPalette, PaletteEvent};
 use crate::screens::workload::WorkloadScreen;
 use crate::theme::{self, ActiveTheme, TEXT_UI};
@@ -59,6 +60,8 @@ pub struct Shell {
     panes: Vec<PaneScreens>,
     loaded: bool,
     add_cluster: Option<(Entity<AddClusterDialog>, Subscription)>,
+    rename: Option<(Entity<RenameDialog>, Subscription)>,
+    switch_context: Option<(Entity<SwitchContextDialog>, Subscription)>,
     switcher: Entity<ClusterSwitcher>,
     tab_menu: Entity<crate::kit::ActionMenu>,
     _switcher_events: Subscription,
@@ -125,6 +128,8 @@ impl Shell {
             panes: vec![first],
             loaded: false,
             add_cluster: None,
+            rename: None,
+            switch_context: None,
             switcher,
             tab_menu,
             _switcher_events: switcher_events,
@@ -216,6 +221,9 @@ impl Shell {
     fn receive(&mut self, update: Update, window: &mut Window, cx: &mut Context<Self>) {
         if let Some((dialog, _)) = &self.add_cluster {
             dialog.update(cx, |dialog, cx| dialog.receive(&update, window, cx));
+        }
+        if let Some((dialog, _)) = &self.switch_context {
+            dialog.update(cx, |dialog, cx| dialog.receive(&update, cx));
         }
         if let Update::Snapshot(_) = update {
             self.loaded = true;
@@ -425,6 +433,60 @@ impl Shell {
         cx.notify();
     }
 
+    pub(super) fn open_rename(
+        &mut self,
+        id: ClusterId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(cluster) = self.state.snapshot.cluster(&id) else {
+            return;
+        };
+        let current = cluster.name.clone();
+        let dialog = cx.new(|cx| RenameDialog::new(id, &current, window, cx));
+        let subscription = cx.subscribe_in(
+            &dialog,
+            window,
+            Self::cluster_edit_event(|this| {
+                this.rename = None;
+            }),
+        );
+        self.rename = Some((dialog, subscription));
+        cx.notify();
+    }
+
+    pub(super) fn open_switch_context(
+        &mut self,
+        id: ClusterId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let dialog = cx.new(|cx| SwitchContextDialog::new(id, window, cx));
+        let subscription = cx.subscribe_in(
+            &dialog,
+            window,
+            Self::cluster_edit_event(|this| {
+                this.switch_context = None;
+            }),
+        );
+        self.switch_context = Some((dialog, subscription));
+        self.send(Command::OpenAddCluster(AddClusterStep::Pick));
+        cx.notify();
+    }
+
+    fn cluster_edit_event<T>(
+        clear: fn(&mut Self),
+    ) -> impl Fn(&mut Self, &Entity<T>, &ClusterEditEvent, &mut Window, &mut Context<Self>) {
+        move |this, _, event, window, cx| match event {
+            ClusterEditEvent::Send(command) => this.dispatch(command.clone(), cx),
+            ClusterEditEvent::Close => {
+                clear(this);
+                window.focus(&this.focus, cx);
+                cx.notify();
+            }
+        }
+    }
+
     pub fn dispatch(&mut self, command: Command, cx: &mut Context<Self>) {
         let command = self.with_gesture(command);
         let before = self.state.location().clone();
@@ -610,6 +672,8 @@ impl Shell {
             Command::SaveKubeconfig { .. } => {}
             Command::WatchFolder(_) => {}
             Command::RemoveCluster(_) => {}
+            Command::RenameCluster(..) => {}
+            Command::SwitchContext(..) => {}
             Command::WatchWorkload { .. } => {}
             Command::StreamLogs(_) => {}
             Command::StreamPodLogs(_) => {}
@@ -936,6 +1000,12 @@ impl Render for Shell {
             .child(self.palette.clone())
             .child(self.tab_menu.clone())
             .children(self.add_cluster.as_ref().map(|(dialog, _)| dialog.clone()))
+            .children(self.rename.as_ref().map(|(dialog, _)| dialog.clone()))
+            .children(
+                self.switch_context
+                    .as_ref()
+                    .map(|(dialog, _)| dialog.clone()),
+            )
             .child(crate::kit::overlay_layer(cx))
     }
 }
