@@ -16,7 +16,7 @@ use crate::kit::{
 use crate::theme::{
     ActiveTheme, FONT_MONO, MONO_ADVANCE, PAGE_HEADER, Palette, ROW_COMMIT, ROW_ROLLOUT, RULE,
     SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_6, SPACE_7, SPACE_8, TEXT_AXIS, TEXT_BODY,
-    TEXT_CONTROL, TEXT_LABEL, TEXT_MONO, TEXT_SMALL, TEXT_SUBHEADING, TEXT_TITLE,
+    TEXT_LABEL, TEXT_MONO, TEXT_SMALL, TEXT_SUBHEADING, TEXT_TITLE,
 };
 
 const COMMIT_LIST: Pixels = px(360.);
@@ -222,7 +222,7 @@ impl ChangesScreen {
                     .children(commit.rollout.iter().map(|r| rollout_row(r, palette))),
             )
             .child(diff_header(commit, view, cx))
-            .children(view.map(|v| diff_body(commit, v, palette)))
+            .children(view.map(diff_body))
             .into_any_element()
     }
 }
@@ -452,7 +452,7 @@ fn rollout_row(rollout: &Rollout, palette: &Palette) -> impl IntoElement {
         )
 }
 
-fn diff_body(commit: &Commit, view: &Rendering, palette: &Palette) -> impl IntoElement {
+fn diff_body(view: &Rendering) -> impl IntoElement {
     let files = view.files.iter().map(diff_file).collect();
     div()
         .flex()
@@ -460,12 +460,6 @@ fn diff_body(commit: &Commit, view: &Rendering, palette: &Palette) -> impl IntoE
         .gap(SPACE_4)
         .px(SPACE_8)
         .pb(SPACE_7)
-        .child(
-            div()
-                .text_size(TEXT_CONTROL)
-                .text_color(palette.mute)
-                .child(commit.view_label(view)),
-        )
         .child(DiffView::new("changes-diff", files))
 }
 

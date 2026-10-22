@@ -9,10 +9,6 @@ const SHORT_SHA: usize = 7;
 const ADDED: &str = "+";
 const REMOVED: &str = "−";
 const SEPARATOR: &str = " · ";
-const SOURCE_LABEL: &str = "source";
-const RENDERED_LABEL: &str = "rendered for";
-const VS_LIVE: &str = "vs live";
-const TRUNCATED_LABEL: &str = "truncated";
 const UNAVAILABLE: &str = "source unavailable";
 const NO_GIT_SOURCE: &str = "No Kustomization on a connected cluster builds from a git source.";
 const HISTORY_FAILED: &str = "Could not read the git history";
@@ -121,7 +117,6 @@ impl ViewKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rendering {
     pub kind: ViewKind,
-    pub truncated: bool,
     pub files: Vec<FilePatch>,
 }
 
@@ -176,21 +171,6 @@ pub struct Commit {
 impl Commit {
     pub fn short_sha(&self) -> &str {
         self.sha.get(..SHORT_SHA).unwrap_or(&self.sha)
-    }
-
-    pub fn view_label(&self, view: &Rendering) -> String {
-        let sha = self.short_sha();
-        let label = match &view.kind {
-            ViewKind::Source => format!("{SOURCE_LABEL}{SEPARATOR}{sha}"),
-            ViewKind::Rendered(cluster) => {
-                format!("{RENDERED_LABEL} {cluster}{SEPARATOR}{sha} {VS_LIVE}")
-            }
-        };
-        if view.truncated {
-            format!("{label}{SEPARATOR}{TRUNCATED_LABEL}")
-        } else {
-            label
-        }
     }
 
     pub fn age_label(&self) -> String {
@@ -336,11 +316,7 @@ mod tests {
     }
 
     fn view(kind: ViewKind, files: Vec<FilePatch>) -> Rendering {
-        Rendering {
-            kind,
-            truncated: false,
-            files,
-        }
+        Rendering { kind, files }
     }
 
     fn commit(sha: &str, rollout: Vec<Rollout>, views: Vec<Rendering>) -> Commit {
@@ -393,26 +369,6 @@ mod tests {
                 vec![file("infrastructure/monitoring/staging/release.yaml", 1, 1)],
             )],
         )
-    }
-
-    #[test]
-    fn view_labels_name_the_view_and_the_commit() {
-        let commit = payments();
-        let east = view(
-            ViewKind::Rendered(ClusterId::new("prod-us-east")),
-            Vec::new(),
-        );
-        let source = view(ViewKind::Source, Vec::new());
-        let cut = Rendering {
-            truncated: true,
-            ..view(ViewKind::Source, Vec::new())
-        };
-        assert_eq!(commit.view_label(&source), "source · a41e07c");
-        assert_eq!(
-            commit.view_label(&east),
-            "rendered for prod-us-east · a41e07c vs live"
-        );
-        assert_eq!(commit.view_label(&cut), "source · a41e07c · truncated");
     }
 
     #[test]
