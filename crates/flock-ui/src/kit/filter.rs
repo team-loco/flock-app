@@ -85,8 +85,7 @@ impl FilterBar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let placeholder: SharedString = placeholder.into();
-        let field = cx.new(|cx| TextFieldState::new(window, cx).placeholder(placeholder.clone()));
+        let field = cx.new(|cx| TextFieldState::new(window, cx));
         let subscription =
             cx.subscribe_in(&field, window, |this, _, event: &InputEvent, window, cx| {
                 if let InputEvent::Change = event {
@@ -95,7 +94,7 @@ impl FilterBar {
             });
         Self {
             id: id.into(),
-            placeholder,
+            placeholder: placeholder.into(),
             field,
             scope: None,
             aside: None,
@@ -147,19 +146,11 @@ impl FilterBar {
         }
         self.suggestions = self.candidates.suggest(&self.field.read(cx).value());
         self.highlighted = 0;
-        self.refresh_query(window, cx);
+        self.refresh_query(cx);
     }
 
-    fn refresh_query(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn refresh_query(&mut self, cx: &mut Context<Self>) {
         self.query = TextFilter::parse(&self.text(cx));
-        let placeholder = if self.tokens.is_empty() {
-            self.placeholder.clone()
-        } else {
-            SharedString::default()
-        };
-        self.field.update(cx, |field, cx| {
-            field.set_placeholder(placeholder, window, cx);
-        });
         cx.emit(FilterEvent::Changed);
         cx.notify();
     }
@@ -180,13 +171,13 @@ impl FilterBar {
             .update(cx, |field, cx| field.set_value(remaining, window, cx));
         self.suggestions = self.candidates.suggest(&self.field.read(cx).value());
         self.highlighted = 0;
-        self.refresh_query(window, cx);
+        self.refresh_query(cx);
     }
 
-    fn remove_token(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+    fn remove_token(&mut self, ix: usize, cx: &mut Context<Self>) {
         if ix < self.tokens.len() {
             self.tokens.remove(ix);
-            self.refresh_query(window, cx);
+            self.refresh_query(cx);
         }
     }
 
@@ -211,7 +202,7 @@ impl FilterBar {
             return;
         }
         self.tokens.pop();
-        self.refresh_query(window, cx);
+        self.refresh_query(cx);
         cx.stop_propagation();
     }
 
@@ -303,7 +294,7 @@ impl FilterBar {
             .update(cx, |field, cx| field.set_value("", window, cx));
         self.suggestions.clear();
         self.chip = 0;
-        self.refresh_query(window, cx);
+        self.refresh_query(cx);
     }
 }
 
@@ -333,8 +324,8 @@ impl FilterBar {
                         Button::new(format!("{}-remove-{ix}", self.id), REMOVE_TOKEN)
                             .ghost()
                             .small()
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.remove_token(ix, window, cx);
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.remove_token(ix, cx);
                             })),
                     )
             })
@@ -390,6 +381,7 @@ impl FilterBar {
     ) -> impl IntoElement + use<> {
         let palette = *cx.palette();
         let focused = self.is_focused(window, cx);
+        let empty = self.field.read(cx).value().is_empty() && self.tokens.is_empty();
         div()
             .id("filter-field")
             .debug_selector(|| format!("{}-field", self.id))
@@ -414,18 +406,40 @@ impl FilterBar {
             .font_family(FONT_MONO)
             .text_size(TEXT_MONO)
             .children(self.token_chips(&palette, cx))
-            .child(TextField::bare(&self.field, TEXT_MONO))
-            .when(
-                self.field.read(cx).value().is_empty() && self.tokens.is_empty(),
-                |field| {
-                    field.child(
-                        div()
-                            .id("filter-shortcut")
-                            .debug_selector(|| format!("{}-shortcut", self.id))
-                            .child(Kbd::new("/")),
-                    )
-                },
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .child(TextField::bare(&self.field, TEXT_MONO))
+                    .when(empty, |input| {
+                        input.child(
+                            div()
+                                .debug_selector(|| format!("{}-placeholder", self.id))
+                                .absolute()
+                                .inset_0()
+                                .flex()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .text_color(palette.mute)
+                                        .child(self.placeholder.clone()),
+                                ),
+                        )
+                    }),
             )
+            .when(empty, |field| {
+                field.child(
+                    div()
+                        .id("filter-shortcut")
+                        .debug_selector(|| format!("{}-shortcut", self.id))
+                        .child(Kbd::new("/")),
+                )
+            })
             .when(focused && !self.suggestions.is_empty(), |field| {
                 field.child(self.suggestion_popover(&palette, cx))
             })
