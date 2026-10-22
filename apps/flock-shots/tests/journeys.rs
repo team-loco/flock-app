@@ -692,7 +692,7 @@ fn sidebar_round_trip(ui: &mut Ui, from: &str) -> anyhow::Result<()> {
         "dragging the edge from {from} did not close it"
     );
     ui.drag(
-        "sidebar-resize",
+        "sidebar-reopen",
         gpui::point(flock_ui::theme::SIDEBAR, gpui::px(0.)),
     )?;
     anyhow::ensure!(
