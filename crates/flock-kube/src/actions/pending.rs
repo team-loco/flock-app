@@ -235,6 +235,7 @@ mod tests {
             conditions: Vec::new(),
             taints: Vec::new(),
             labels: Vec::new(),
+            top_pods: Vec::new(),
         });
         detail.resources.insert(
             ResourceKind::Deployment,

@@ -664,9 +664,9 @@ fn arrow_keys_home_end_and_type_ahead_move_through_a_table() -> anyhow::Result<(
 fn escape_closes_the_inspector_and_keeps_the_page() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Nodes)?;
     ui.press("cmd-e down")?;
-    assert!(ui.bounds("close-node").is_some());
+    assert!(ui.bounds("node-inspector-pane").is_some());
     ui.press("escape")?;
-    assert!(ui.bounds("close-node").is_none());
+    assert!(ui.bounds("node-inspector-pane").is_none());
     assert_eq!(ui.state().location().page, Page::Nodes);
     Ok(())
 }
@@ -675,10 +675,10 @@ fn escape_closes_the_inspector_and_keeps_the_page() -> anyhow::Result<()> {
 fn escape_closes_the_panel_from_a_panel_section_too() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Nodes)?;
     ui.click("nodes-row-0")?;
-    ui.click("node-capacity-CPU")?;
-    assert!(ui.bounds("close-node").is_some());
+    ui.click("node-usage-CPU")?;
+    assert!(ui.bounds("node-inspector-pane").is_some());
     ui.press("escape")?;
-    assert!(ui.bounds("close-node").is_none());
+    assert!(ui.bounds("node-inspector-pane").is_none());
     assert_eq!(ui.state().location().page, Page::Nodes);
     Ok(())
 }
@@ -1307,11 +1307,36 @@ fn the_sidebar_highlight_follows_the_shown_page_after_keyboard_navigation() -> a
 }
 
 #[test]
-fn node_inspector_shows_cpu_and_memory_commitments() -> anyhow::Result<()> {
+fn node_inspector_leads_with_usage_and_keeps_labels_and_conditions_collapsed() -> anyhow::Result<()>
+{
     let mut ui = Ui::open(Screen::Nodes)?;
     ui.click("nodes-row-0")?;
-    assert!(ui.bounds("node-capacity-CPU").is_some());
-    assert!(ui.bounds("node-capacity-Memory").is_some());
+    let usage = top(&mut ui, "node-usage-CPU")?;
+    assert!(ui.bounds("node-usage-Memory").is_some());
+    assert!(ui.bounds("node-usage-Pods").is_some());
+    let details = top(&mut ui, "node-inspector-details")?;
+    assert!(usage < details);
+    assert!(ui.bounds("node-inspector-labels-body").is_none());
+    assert!(ui.bounds("node-inspector-conditions-body").is_none());
+    assert!(ui.bounds("node-inspector-pods-body").is_some());
+    ui.click("node-inspector-conditions-toggle")?;
+    assert!(ui.bounds("condition-table").is_some());
+    Ok(())
+}
+
+#[test]
+fn node_filters_narrow_by_pool_and_status_chip() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Nodes)?;
+    assert!(ui.bounds("nodes-row-13").is_some());
+    ui.click("node-pool")?;
+    ui.click("node-pool-option-2")?;
+    assert!(ui.bounds("nodes-row-1").is_some());
+    assert!(ui.bounds("nodes-row-2").is_none());
+    ui.click("node-pool")?;
+    ui.click("node-pool-option-0")?;
+    ui.click("node-filter-chips-3")?;
+    assert!(ui.bounds("nodes-row-0").is_some());
+    assert!(ui.bounds("nodes-row-1").is_none());
     Ok(())
 }
 
@@ -1573,8 +1598,11 @@ fn row_menus_carry_each_objects_actions_and_inspectors_keep_only_the_primary() -
 {
     let mut nodes = Ui::open(Screen::Nodes)?;
     nodes.click("nodes-row-0")?;
-    assert!(nodes.bounds("node-primary").is_some());
-    assert!(nodes.bounds("node-actions").is_none());
+    nodes.click("node-actions")?;
+    assert!(nodes.bounds("node-actions-item-2").is_some());
+    nodes.click("node-actions-item-1")?;
+    assert!(nodes.bounds("dialog-cancel").is_some());
+    nodes.click("dialog-cancel")?;
     nodes.right_click("nodes-row-1")?;
     assert!(nodes.bounds("nodes-row-menu-item-0").is_some());
     nodes.click("nodes-row-menu-item-3")?;
@@ -2559,7 +2587,7 @@ fn an_open_inspector_swaps_rows_without_replaying_its_entrance() -> anyhow::Resu
     let mut nodes = Ui::open(Screen::Nodes)?;
     motion_on(&mut nodes);
     nodes.click("nodes-row-0")?;
-    at_rest_while_switching_rows(&mut nodes, "node-inspector-pane", "node-capacity-CPU")?;
+    at_rest_while_switching_rows(&mut nodes, "node-inspector-pane", "node-usage-CPU")?;
     let mut pods = Ui::open(Screen::Pods)?;
     motion_on(&mut pods);
     pods.click("pods-row-0")?;
@@ -3260,8 +3288,8 @@ fn the_sidebar_header_and_page_header_read_as_one_row_over_one_content_edge() ->
     assert_eq!(scope.size.height, header.size.height);
     assert_eq!(scope.center().y, header.center().y);
     let back = bounds_of(&mut ui, "pane-0-back")?;
-    let meta = bounds_of(&mut ui, "meta-line")?;
-    assert_eq!(back.left() + ICON_BUTTON_INSET, meta.left() + SPACE_8);
+    let filter = bounds_of(&mut ui, "node-filter")?;
+    assert_eq!(back.left() + ICON_BUTTON_INSET, filter.left() + SPACE_8);
     Ok(())
 }
 
@@ -3743,19 +3771,19 @@ fn inspector_width_defaults_per_kind_and_a_dragged_width_wins() -> anyhow::Resul
 }
 
 #[test]
-fn a_node_inspector_links_the_pods_scheduled_on_it() -> anyhow::Result<()> {
+fn a_node_inspector_links_its_biggest_pods_by_request() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Node)?;
     assert!(ui.bounds("node-inspector-pane").is_some());
     ui.scroll(
         "node-inspector-pane",
         gpui::point(gpui::px(0.), gpui::px(-1200.)),
     )?;
-    ui.click("related-Pods-checkout-api-7f9c6d-x2lqp")?;
+    ui.click("node-pod-0")?;
     let location = ui.state().location().clone();
     assert_eq!(location.page, Page::Pods);
     assert_eq!(
         location.resource.map(|target| target.name),
-        Some("checkout-api-7f9c6d-x2lqp".to_owned())
+        Some("search-indexer-0".to_owned())
     );
     ui.click("pane-0-back")?;
     assert_eq!(ui.state().location().page, Page::Nodes);
@@ -3885,15 +3913,12 @@ fn panel_headers_keep_the_status_beside_the_name_at_one_height() -> anyhow::Resu
 }
 
 #[test]
-fn cordoned_node_shows_its_reason_in_the_list_and_inspector() -> anyhow::Result<()> {
+fn cordoned_node_shows_its_reason_in_the_inspector() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Nodes)?;
-    assert!(ui.bounds("reason-cell").is_some());
     ui.click("nodes-row-9")?;
     assert!(ui.bounds("error-block-0").is_some());
-    assert!(ui.bounds("condition-table").is_some());
     ui.click("nodes-row-0")?;
     assert!(ui.bounds("error-block-0").is_none());
-    assert!(ui.bounds("condition-table").is_some());
     Ok(())
 }
 

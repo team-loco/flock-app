@@ -1,12 +1,11 @@
 use std::time::Duration;
 
-use flock_core::nodes::Node;
+use flock_core::nodes::{Node, state_label};
 use flock_core::{
     ClusterDetail, ClusterId, Command, Counts, Forward, Page, ResourceKind, ResourceRef, Seen,
     Snapshot, Status,
 };
 
-use crate::detail::{READY, SCHEDULING_DISABLED};
 use crate::sim;
 
 pub const SETTLE: Duration = Duration::from_secs(2);
@@ -192,12 +191,11 @@ fn mark_node(snapshot: &mut Snapshot, target: &ResourceRef, state: &str) -> Opti
 fn set_schedulable(node: &mut Node, schedulable: bool) {
     node.schedulable = schedulable;
     node.taints.retain(|taint| taint != UNSCHEDULABLE_TAINT);
+    node.state = state_label(true, schedulable);
     if schedulable {
         node.status = Status::Ok;
-        node.state = READY.into();
     } else {
         node.status = Status::Warn;
-        node.state = SCHEDULING_DISABLED.into();
         node.taints.push(UNSCHEDULABLE_TAINT.into());
     }
 }
@@ -285,7 +283,7 @@ mod tests {
         let cordoned = node(&snapshot, "ip-10-4-12-87");
         assert!(!cordoned.schedulable);
         assert_eq!(cordoned.status, Status::Warn);
-        assert_eq!(cordoned.state, SCHEDULING_DISABLED);
+        assert_eq!(cordoned.state, "Ready,SchedulingDisabled");
         assert!(cordoned.taints.iter().any(|t| t == UNSCHEDULABLE_TAINT));
     }
 
