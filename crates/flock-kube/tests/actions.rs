@@ -13,7 +13,7 @@ use flock_kube::settings::KubeSettings;
 use flock_kube::store::ClusterStore;
 use futures::FutureExt;
 use k8s_openapi::api::apps::v1::{ControllerRevision, Deployment, ReplicaSet, StatefulSet};
-use k8s_openapi::api::core::v1::{ConfigMap, Node, Pod, PodTemplateSpec};
+use k8s_openapi::api::core::v1::{ConfigMap, Node, Pod, PodTemplateSpec, Service};
 use kube::api::{ApiResource, DynamicObject, GroupVersionKind};
 use kube::api::{DeleteParams, ListParams, Patch, PatchParams, PostParams};
 use kube::config::{KubeConfigOptions, Kubeconfig};
@@ -596,6 +596,11 @@ const APPS_V1: &str = "apps/v1";
 const CORE_V1: &str = "v1";
 const KUSTOMIZE_V1: &str = "kustomize.toolkit.fluxcd.io/v1";
 const STALE_UID: &str = "00000000-0000-0000-0000-000000000000";
+const SCRATCH_KUSTOMIZATION: &str = "flock-force-e2e";
+const PODINFO_SOURCE: &str = "podinfo";
+const PINNED_IP: &str = "10.96.201.10";
+const CHANGED_IP: &str = "10.96.201.11";
+const IMMUTABLE: &str = "may not change once set";
 const REPLACED: &str = "was replaced after you confirmed";
 
 async fn replicas(deployments: &Api<Deployment>) -> Option<i32> {
@@ -1070,13 +1075,7 @@ async fn flux_reconcile_requests_a_sync() {
         FLUX_NAMESPACE,
         KUSTOMIZATION,
     );
-    let kustomization = ApiResource::from_gvk(&GroupVersionKind::gvk(
-        "kustomize.toolkit.fluxcd.io",
-        "v1",
-        "Kustomization",
-    ));
-    let kustomizations: Api<DynamicObject> =
-        Api::namespaced_with(harness.client.clone(), FLUX_NAMESPACE, &kustomization);
+    let kustomizations = kustomizations(&harness.client, FLUX_NAMESPACE);
     let requested = || async {
         kustomizations
             .get(KUSTOMIZATION)
@@ -1209,4 +1208,144 @@ async fn writes_confirmed_for_another_uid_change_nothing() {
     );
     let after = (replicas(&deployments).await, template(&deployments).await);
     assert_eq!(after, before);
+}
+
+fn kustomizations(client: &Client, namespace: &str) -> Api<DynamicObject> {
+    let kustomization = ApiResource::from_gvk(&GroupVersionKind::gvk(
+        "kustomize.toolkit.fluxcd.io",
+        "v1",
+        "Kustomization",
+    ));
+    Api::namespaced_with(client.clone(), namespace, &kustomization)
+}
+
+fn pinned_cluster_ip(ip: &str) -> serde_json::Value {
+    let patch = format!("- op: add\n  path: /spec/clusterIP\n  value: {ip}\n");
+    json!([{ "target": { "kind": "Service", "name": PODINFO }, "patch": patch }])
+}
+
+fn ready_of(object: &DynamicObject) -> Option<(String, String)> {
+    let conditions = object.data.pointer("/status/conditions")?.as_array()?;
+    let ready = conditions
+        .iter()
+        .find(|condition| condition["type"] == "Ready")?;
+    let status = ready["status"].as_str()?.to_owned();
+    let message = ready["message"].as_str().unwrap_or_default().to_owned();
+    Some((status, message))
+}
+
+async fn service_identity(services: &Api<Service>) -> Option<(String, String)> {
+    let service = services.get_opt(PODINFO).await.ok().flatten()?;
+    let uid = service.metadata.uid?;
+    let ip = service.spec?.cluster_ip?;
+    Some((uid, ip))
+}
+
+async fn force_apply_body(harness: &Harness, kustomizations: &Api<DynamicObject>) {
+    let namespace = harness.namespace();
+    let services: Api<Service> = Api::namespaced(harness.client.clone(), namespace);
+    let pinned = eventually(
+        "pinned service",
+        || service_identity(&services),
+        |identity| identity.as_ref().is_some_and(|(_, ip)| ip == PINNED_IP),
+    )
+    .await;
+    let changed = json!({ "spec": { "patches": pinned_cluster_ip(CHANGED_IP) } });
+    let patched = kustomizations
+        .patch(
+            SCRATCH_KUSTOMIZATION,
+            &PatchParams::default(),
+            &Patch::Merge(&changed),
+        )
+        .await;
+    let Ok(patched) = patched else {
+        panic!("change cluster IP: {patched:?}");
+    };
+    let Some(changed_generation) = patched.metadata.generation else {
+        panic!("kustomization has no generation");
+    };
+    eventually(
+        "plain apply rejected",
+        || async { kustomizations.get(SCRATCH_KUSTOMIZATION).await.ok() },
+        |object| {
+            object
+                .as_ref()
+                .and_then(ready_of)
+                .is_some_and(|(status, message)| status == "False" && message.contains(IMMUTABLE))
+        },
+    )
+    .await;
+    let target = resource("Kustomization", Some(namespace), SCRATCH_KUSTOMIZATION);
+    let seen = seen_by(&harness.client, KUSTOMIZE_V1, target).await;
+    let key = FluxKey::new(
+        CONTEXT,
+        FluxKind::Kustomization,
+        namespace,
+        SCRATCH_KUSTOMIZATION,
+    );
+    harness.send(Command::Flux(key, seen.uid, FluxAction::Force));
+    eventually(
+        "service recreated",
+        || service_identity(&services),
+        |identity| {
+            identity.as_ref().is_some_and(|(uid, ip)| {
+                ip == CHANGED_IP && pinned.as_ref().is_some_and(|(old, _)| old != uid)
+            })
+        },
+    )
+    .await;
+    let restored_generation = changed_generation + 2;
+    eventually(
+        "spec.force restored",
+        || async { kustomizations.get(SCRATCH_KUSTOMIZATION).await.ok() },
+        |object| {
+            object.as_ref().is_some_and(|object| {
+                object.metadata.generation == Some(restored_generation)
+                    && object.data.pointer("/spec/force") == Some(&json!(false))
+                    && ready_of(object).is_some_and(|(status, _)| status == "True")
+            })
+        },
+    )
+    .await;
+    no_notices(harness);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn force_apply_recreates_an_immutable_change_then_restores_spec_force() {
+    let Some(harness) = Harness::start().await else {
+        return;
+    };
+    let namespace = harness.namespace().to_owned();
+    let kustomizations = kustomizations(&harness.client, &namespace);
+    let fixture = json!({
+        "apiVersion": KUSTOMIZE_V1,
+        "kind": "Kustomization",
+        "metadata": { "name": SCRATCH_KUSTOMIZATION },
+        "spec": {
+            "interval": "60m",
+            "path": "./kustomize",
+            "prune": true,
+            "wait": false,
+            "timeout": "1m",
+            "force": false,
+            "targetNamespace": namespace,
+            "sourceRef": {
+                "kind": "GitRepository",
+                "name": PODINFO_SOURCE,
+                "namespace": FLUX_NAMESPACE
+            },
+            "patches": pinned_cluster_ip(PINNED_IP)
+        }
+    });
+    let Ok(object) = serde_json::from_value::<DynamicObject>(fixture) else {
+        panic!("kustomization fixture");
+    };
+    let created = kustomizations.create(&PostParams::default(), &object).await;
+    assert!(created.is_ok(), "{created:?}");
+    restoring(force_apply_body(&harness, &kustomizations), async {
+        let _ = kustomizations
+            .delete(SCRATCH_KUSTOMIZATION, &DeleteParams::default())
+            .await;
+    })
+    .await;
 }

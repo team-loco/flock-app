@@ -322,8 +322,21 @@ fn patches_share_tokens_and_touch_only_intended_fields() -> TestResult {
         json!({"metadata":{"annotations":{"reconcile.fluxcd.io/requestedAt":token}}})
     );
     assert_eq!(
-        actions::force(at),
+        actions::force_upgrade(at),
         json!({"metadata":{"annotations":{"reconcile.fluxcd.io/requestedAt":token,"reconcile.fluxcd.io/forceAt":token}}})
+    );
+    assert_eq!(
+        actions::force_apply(at),
+        json!({"metadata":{"annotations":{"reconcile.fluxcd.io/requestedAt":token}},"spec":{"force":true}})
+    );
+    assert_eq!(actions::restore_force(None), json!({"spec":{"force":null}}));
+    assert_eq!(
+        actions::restore_force(Some(false)),
+        json!({"spec":{"force":false}})
+    );
+    assert_eq!(
+        actions::restore_force(Some(true)),
+        json!({"spec":{"force":true}})
     );
     assert_eq!(
         actions::reset(at),
@@ -331,6 +344,24 @@ fn patches_share_tokens_and_touch_only_intended_fields() -> TestResult {
     );
     assert_eq!(actions::suspend(), json!({"spec":{"suspend":true}}));
     assert_eq!(actions::resume(), json!({"spec":{"suspend":false}}));
+    Ok(())
+}
+
+#[test]
+fn a_forced_apply_is_handled_once_flux_reports_its_token_at_the_forced_generation() -> TestResult {
+    let at = "2026-10-12T18:11:00Z".parse()?;
+    let mut object = object(KUSTOMIZATION)?;
+    assert_eq!(actions::force_setting(&object), None);
+    object.spec["force"] = json!(false);
+    assert_eq!(actions::force_setting(&object), Some(false));
+    object.last_handled_reconcile_at = Some("2026-10-12T18:10:00+00:00".into());
+    object.observed_generation = Some(4);
+    assert!(!actions::handled(&object, at, 4));
+    object.last_handled_reconcile_at = Some("2026-10-12T18:11:00+00:00".into());
+    assert!(actions::handled(&object, at, 4));
+    assert!(!actions::handled(&object, at, 5));
+    object.observed_generation = None;
+    assert!(!actions::handled(&object, at, 4));
     Ok(())
 }
 

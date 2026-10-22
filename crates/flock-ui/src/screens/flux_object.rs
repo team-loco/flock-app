@@ -775,7 +775,7 @@ fn force_item(this: &WeakEntity<FluxObjectPage>, object: &FluxObject) -> Option<
     let (label, body, confirm_label) = match object.key.kind {
         FluxKind::Kustomization => (
             "Force apply…",
-            "Flux deletes and recreates every object whose immutable fields changed. Pods behind them restart.",
+            "Flock sets spec.force to true and requests a reconcile. Flux deletes and recreates every object whose immutable fields changed, and pods behind them restart. When Flux finishes, Flock restores spec.force. If Flock quits first, spec.force stays true.",
             "Force apply",
         ),
         FluxKind::HelmRelease => (
