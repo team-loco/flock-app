@@ -462,11 +462,14 @@ impl CustomResourcesScreen {
         Some(object_ref(self.cluster.clone()?, crd, row))
     }
 
-    fn row_actions(&self, cx: &mut Context<Self>) -> impl Fn(&Resource) -> Vec<MenuItem> + 'static {
+    fn row_actions(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(&Resource, &[&Resource]) -> Vec<MenuItem> + 'static {
         let cluster = self.cluster.clone();
         let crd = self.crd.clone();
         let screen = cx.weak_entity();
-        move |row: &Resource| {
+        move |row: &Resource, _: &[&Resource]| {
             let (Some(cluster), Some(crd)) = (cluster.clone(), crd.as_ref()) else {
                 return Vec::new();
             };

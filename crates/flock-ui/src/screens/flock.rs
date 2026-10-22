@@ -95,7 +95,7 @@ impl FlockScreen {
         });
         let cluster_table = cx.new(|cx| {
             Table::new("flock-clusters", cluster_columns(), cx)
-                .row_actions(move |cluster: &ClusterSummary| {
+                .row_actions(move |cluster: &ClusterSummary, _: &[&ClusterSummary]| {
                     let open_run = run.clone();
                     let open = Command::SelectCluster(Some(cluster.id.clone()));
                     let mut items = vec![new_tab_item(open, move |command, cx| {

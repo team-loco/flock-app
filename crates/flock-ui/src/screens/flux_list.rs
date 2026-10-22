@@ -40,7 +40,9 @@ impl FluxListScreen {
         let table = cx.new(|cx| {
             Table::new("flux-list", columns(), cx)
                 .click_opens()
-                .row_actions(move |object: &FluxObject| row_items(object, &screen))
+                .row_actions(move |object: &FluxObject, _: &[&FluxObject]| {
+                    row_items(object, &screen)
+                })
                 .row_key(|o: &FluxObject| format!("{}/{}", o.key.namespace, o.key.name).into())
                 .type_ahead(|o: &FluxObject| o.key.name.clone().into())
         });

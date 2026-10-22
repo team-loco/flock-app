@@ -588,7 +588,6 @@ fn pod_toolbar_controls_keep_their_place_when_a_filter_is_applied() -> anyhow::R
         "pod-filter-chips-1",
         "pod-filter-clear-slot",
         "pod-filter-note",
-        "pods-logs-bar",
         "pods-row-0",
     ];
     let idle = toolbar.map(|part| ui.bounds(part));
@@ -606,18 +605,11 @@ fn pod_toolbar_controls_keep_their_place_when_a_filter_is_applied() -> anyhow::R
 #[test]
 fn marking_pods_for_logs_moves_nothing() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
-    let watched = [
-        "pods-logs-bar",
-        "pods-clear-selection-slot",
-        "pods-row-0",
-        "pods-row-2",
-    ];
+    let watched = ["pods-row-0", "pods-row-2"];
     let idle = watched.map(|part| ui.bounds(part));
     assert!(idle.iter().all(Option::is_some), "{idle:?}");
     ui.click("pods-row-0")?;
     ui.shift_click("pods-row-1")?;
-    assert_eq!(watched.map(|part| ui.bounds(part)), idle);
-    ui.click("pods-clear-selection")?;
     assert_eq!(watched.map(|part| ui.bounds(part)), idle);
     Ok(())
 }
@@ -3460,14 +3452,46 @@ fn the_workload_menu_and_dock_follow_all_pods() -> anyhow::Result<()> {
     Ok(())
 }
 
+const POD_LOGS_FOR_ITEM: &str = "pods-row-menu-item-3";
+const POD_MENU_ITEMS: [&str; 8] = [
+    "pods-row-menu-item-0",
+    "pods-row-menu-item-1",
+    "pods-row-menu-item-2",
+    "pods-row-menu-item-3",
+    "pods-row-menu-item-4",
+    "pods-row-menu-item-5",
+    "pods-row-menu-item-6",
+    "pods-row-menu-item-7",
+];
+
+fn pod_menu_len(ui: &mut Ui) -> anyhow::Result<usize> {
+    ui.right_click("pods-row-1")?;
+    let items = POD_MENU_ITEMS
+        .iter()
+        .take_while(|item| ui.bounds(item).is_some())
+        .count();
+    ui.press("escape")?;
+    Ok(items)
+}
+
 #[test]
-fn shift_clicked_pods_open_one_merged_logs_tab() -> anyhow::Result<()> {
+fn the_pods_page_has_no_logs_bar() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
-    ui.click("pods-logs-selected")?;
-    assert_eq!(ui.state().location().page, Page::Pods);
+    assert!(ui.bounds("pods-logs-bar").is_none());
+    assert!(ui.bounds("pods-logs-selected").is_none());
+    assert!(ui.bounds("pods-clear-selection").is_none());
+    Ok(())
+}
+
+#[test]
+fn shift_clicked_pods_open_one_merged_logs_tab_from_the_row_menu() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    let plain = pod_menu_len(&mut ui)?;
     ui.click("pods-row-0")?;
     ui.shift_click("pods-row-1")?;
-    ui.click("pods-logs-selected")?;
+    assert_eq!(pod_menu_len(&mut ui)?, plain + 1);
+    ui.right_click("pods-row-1")?;
+    ui.click(POD_LOGS_FOR_ITEM)?;
     let state = ui.state();
     assert_eq!(state.location().page, Page::Logs);
     let target = state.location().logs.clone();
@@ -3479,11 +3503,12 @@ fn shift_clicked_pods_open_one_merged_logs_tab() -> anyhow::Result<()> {
 }
 
 #[test]
-fn a_label_filter_on_pods_offers_logs_for_the_selector() -> anyhow::Result<()> {
+fn a_label_filter_on_pods_offers_logs_for_the_selector_in_the_row_menu() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
     ui.press("/")?;
     ui.type_text("l:app=checkout-api ")?;
-    ui.click("pods-logs-selected")?;
+    ui.right_click("pods-row-0")?;
+    ui.click(POD_LOGS_FOR_ITEM)?;
     let target = ui.state().location().logs.clone();
     assert_eq!(
         target.as_ref().map(flock_core::LogTarget::label),

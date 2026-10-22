@@ -262,7 +262,7 @@ Settled; change only with a new entry that says why.
     `MAX_STREAMS` log requests run at once per view. The UI merges lines by their RFC 3339
     timestamp into a buffer of `MERGED_LINES` and colours each pod from a palette derived from the
     theme. Entry points: the workload Actions menu (Logs for all pods), the workload dock's
-    `all pods` toggle, the Pods page (⇧-click rows or a label filter, then Logs for …) and the
+    `all pods` toggle, the Pods row menu (⇧-click rows or apply a label filter, then Logs for N selected pods or Logs for <selector>) and the
     palette's `Logs: follow all <workload> pods`, which opened the workload page before.
 36. **Edit YAML applies server-side, pinned to what the user saw** (#231): every object opens in an
     Edit YAML tab (row menus, inspectors, ⌘E while YAML shows). The editable text drops `status`,
