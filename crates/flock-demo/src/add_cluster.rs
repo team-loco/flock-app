@@ -133,8 +133,16 @@ fn line(status: CheckStatus, detail: &str, millis: u64) -> CheckLine {
     CheckLine {
         status,
         detail: detail.to_owned(),
+        raw: None,
         remedy: None,
         duration: Duration::from_millis(millis),
+    }
+}
+
+fn raw_line(status: CheckStatus, raw: &str, detail: &str, millis: u64) -> CheckLine {
+    CheckLine {
+        raw: Some(raw.to_owned()),
+        ..line(status, detail, millis)
     }
 }
 
@@ -158,9 +166,10 @@ pub fn script(context: &ContextRef, retried: bool) -> (Vec<CheckLine>, Verdict) 
                     "Metrics from monitoring/prometheus-k8s",
                     260,
                 ),
-                line(
+                raw_line(
                     CheckStatus::Warn,
-                    "Can’t read Secrets, so env var values won’t resolve. Everything else works.",
+                    "secrets is forbidden: cannot list resource \"secrets\"",
+                    "env values won’t resolve",
                     180,
                 ),
             ],
@@ -178,21 +187,19 @@ pub fn script(context: &ContextRef, retried: bool) -> (Vec<CheckLine>, Verdict) 
             Verdict::Ready,
         ),
         SANDBOX => {
-            let mut expired = line(
-                CheckStatus::Err,
-                "aws eks get-token: ExpiredToken. Sign in again, then retry.",
-                640,
-            );
+            let mut expired =
+                raw_line(CheckStatus::Err, "aws eks get-token: ExpiredToken", "", 640);
             expired.remedy = Some("aws sso login --profile sandbox".to_owned());
             (
                 vec![line(CheckStatus::Ok, "Reachable in 88 ms", 88), expired],
-                Verdict::CannotAuthenticate,
+                Verdict::Unauthorized,
             )
         }
         _ => {
-            let mut refused = line(
+            let mut refused = raw_line(
                 CheckStatus::Err,
-                "Can’t reach https://127.0.0.1:52011: connection refused.",
+                "tcp connect error: Connection refused (os error 61)",
+                "",
                 3,
             );
             refused.remedy = Some("minikube start".to_owned());
@@ -287,7 +294,7 @@ mod tests {
             context: SANDBOX.to_owned(),
         };
         let (lines, verdict) = script(&sandbox, false);
-        assert_eq!(verdict, Verdict::CannotAuthenticate);
+        assert_eq!(verdict, Verdict::Unauthorized);
         let remedy = lines.last().and_then(|l| l.remedy.clone());
         assert_eq!(remedy.as_deref(), Some("aws sso login --profile sandbox"));
         let (_, verdict) = script(&sandbox, true);

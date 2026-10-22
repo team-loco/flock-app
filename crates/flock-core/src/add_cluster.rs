@@ -11,7 +11,6 @@ const EKS_PREFIX: &str = "arn:aws:eks:";
 const EKS_CLUSTER: &str = ":cluster/";
 const HOME: &str = "~";
 const META_SEPARATOR: &str = " · ";
-const MIXED_WAIT: (&str, &str) = ("connects", "connect");
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ContextRef {
@@ -59,6 +58,7 @@ pub enum CheckStatus {
 pub struct CheckLine {
     pub status: CheckStatus,
     pub detail: String,
+    pub raw: Option<String>,
     pub remedy: Option<String>,
     pub duration: Duration,
 }
@@ -68,7 +68,7 @@ pub enum Verdict {
     Checking,
     Ready,
     CannotReach,
-    CannotAuthenticate,
+    Unauthorized,
 }
 
 impl Verdict {
@@ -77,25 +77,16 @@ impl Verdict {
             Self::Checking => Status::Progress,
             Self::Ready => Status::Ok,
             Self::CannotReach => Status::Err,
-            Self::CannotAuthenticate => Status::Err,
+            Self::Unauthorized => Status::Err,
         }
     }
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Checking => "Checking…",
-            Self::Ready => "Ready to add",
+            Self::Ready => "Ready",
             Self::CannotReach => "Can’t reach",
-            Self::CannotAuthenticate => "Can’t authenticate",
-        }
-    }
-
-    const fn waits_for(self) -> Option<(&'static str, &'static str)> {
-        match self {
-            Self::Checking => None,
-            Self::Ready => None,
-            Self::CannotReach => Some(("is reachable", "are reachable")),
-            Self::CannotAuthenticate => Some(("authenticates", "authenticate")),
+            Self::Unauthorized => "Unauthorized",
         }
     }
 }
@@ -297,24 +288,9 @@ impl AddClusterFlow {
         }
     }
 
-    pub fn waiting_note(&self) -> Option<String> {
-        let failed: Vec<&Candidate> = self
-            .candidates
-            .iter()
-            .filter(|c| c.verdict.waits_for().is_some())
-            .collect();
-        let names: Vec<&str> = failed.iter().map(|c| c.name.as_str()).collect();
-        let first = failed.first()?.verdict;
-        let same = failed.iter().all(|c| c.verdict == first);
-        let (one, many) = if same { first.waits_for()? } else { MIXED_WAIT };
-        match names.as_slice() {
-            [] => None,
-            [name] => Some(format!("{name} stays here until it {one}.")),
-            several => Some(format!(
-                "{} stay here until they {many}.",
-                several.join(", ")
-            )),
-        }
+    pub fn ready_note(&self) -> String {
+        let ready = self.ready().len();
+        format!("{ready} of {} ready", self.candidates.len())
     }
 }
 
@@ -380,6 +356,7 @@ mod tests {
         CheckLine {
             status,
             detail: "Reachable in 88 ms".to_owned(),
+            raw: None,
             remedy: None,
             duration: Duration::ZERO,
         }
@@ -473,16 +450,13 @@ mod tests {
         let analytics = id("gke_acme-data_us-central1_analytics");
         let sandbox = id("arn:aws:eks:us-west-2:1:cluster/sandbox");
         assert_eq!(flow.add_label(), "Add");
-        assert_eq!(flow.waiting_note(), None);
+        assert_eq!(flow.ready_note(), "0 of 2 ready");
         flow.record(&analytics, line(CheckStatus::Ok));
         flow.finish(&analytics, Verdict::Ready);
         flow.record(&sandbox, line(CheckStatus::Ok));
-        flow.finish(&sandbox, Verdict::CannotAuthenticate);
+        flow.finish(&sandbox, Verdict::Unauthorized);
         assert_eq!(flow.add_label(), "Add analytics");
-        assert_eq!(
-            flow.waiting_note().as_deref(),
-            Some("sandbox stays here until it authenticates.")
-        );
+        assert_eq!(flow.ready_note(), "1 of 2 ready");
         assert_eq!(
             flow.ready(),
             vec![NewCluster {
@@ -492,26 +466,24 @@ mod tests {
         );
         assert!(flow.retry(&sandbox));
         assert_eq!(flow.candidates.get(1).map(|c| c.checks.len()), Some(0));
-        assert_eq!(flow.waiting_note(), None);
+        assert_eq!(flow.ready_note(), "1 of 2 ready");
     }
 
     #[test]
-    fn several_failures_share_one_note() {
+    fn the_footer_counts_ready_clusters() {
         let (mut flow, _) = flow(AddClusterStep::Pick, &[]);
         flow.toggle(&id("minikube"));
         assert!(flow.connect().is_some());
         flow.finish(&id("minikube"), Verdict::CannotReach);
         flow.finish(
             &id("arn:aws:eks:us-west-2:1:cluster/sandbox"),
-            Verdict::CannotAuthenticate,
+            Verdict::Unauthorized,
         );
         flow.finish(&id("gke_acme-data_us-central1_analytics"), Verdict::Ready);
-        assert_eq!(
-            flow.waiting_note().as_deref(),
-            Some("minikube, sandbox stay here until they connect.")
-        );
+        assert_eq!(flow.ready_note(), "1 of 3 ready");
         assert_eq!(flow.add_label(), "Add analytics");
         flow.finish(&id("minikube"), Verdict::Ready);
+        assert_eq!(flow.ready_note(), "2 of 3 ready");
         assert_eq!(flow.add_label(), "Add 2 clusters");
     }
 
@@ -530,6 +502,8 @@ mod tests {
     fn verdicts_map_to_status() {
         assert_eq!(Verdict::Checking.status(), Status::Progress);
         assert_eq!(Verdict::Ready.status(), Status::Ok);
-        assert_eq!(Verdict::CannotAuthenticate.status(), Status::Err);
+        assert_eq!(Verdict::Unauthorized.status(), Status::Err);
+        assert_eq!(Verdict::Ready.label(), "Ready");
+        assert_eq!(Verdict::Unauthorized.label(), "Unauthorized");
     }
 }

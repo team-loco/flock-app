@@ -4,20 +4,21 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{AllocAnyThread, DefinedClass, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSCellImagePosition, NSColor, NSFont, NSFontAttributeName, NSFontWeightRegular,
-    NSForegroundColorAttributeName, NSImage, NSMenu, NSMenuItem, NSMutableParagraphStyle,
-    NSParagraphStyleAttributeName, NSStatusBar, NSStatusItem, NSTextAlignment, NSTextTab,
-    NSVariableStatusItemLength,
+    NSAccessibility, NSCellImagePosition, NSColor, NSFont, NSFontAttributeName,
+    NSFontWeightRegular, NSForegroundColorAttributeName, NSImage, NSMenu, NSMenuItem, NSStatusBar,
+    NSStatusItem, NSVariableStatusItemLength,
 };
 use objc2_foundation::{
-    MainThreadMarker, NSArray, NSAttributedString, NSAttributedStringKey, NSData, NSDictionary,
-    NSMutableAttributedString, NSObject, NSObjectProtocol, NSSize, NSString,
+    MainThreadMarker, NSAttributedString, NSAttributedStringKey, NSData, NSDictionary, NSObject,
+    NSObjectProtocol, NSSize, NSString,
 };
 
 use super::Action;
-use flock_core::{Sender, Status, menubar::MenuBar};
+use flock_core::{
+    Sender,
+    menubar::{ClusterItem, MenuBar},
+};
 
-const TOOLTIP: &str = "Flock cluster health";
 const NO_CLUSTERS: &str = "No clusters";
 const OPEN: &str = "Open Flock";
 const OPEN_KEY: &str = "o";
@@ -26,12 +27,7 @@ const QUIT_KEY: &str = "q";
 const NO_KEY: &str = "";
 const ICON: &[u8] = include_bytes!("../../resources/MenuBarIcon.png");
 const ICON_SIZE: NSSize = NSSize::new(18.0, 16.0);
-const GLYPH_FONT_SIZE: f64 = 10.0;
-const META_FONT_SIZE: f64 = 11.0;
 const DEFAULT_FONT_SIZE: f64 = 0.0;
-const META_TAB: f64 = 240.0;
-const GLYPH_GAP: &str = "  ";
-const TAB: &str = "\t";
 
 struct TargetState {
     sender: Sender<Action>,
@@ -78,15 +74,17 @@ impl Item {
                 NSFontWeightRegular
             });
             button.setFont(Some(&digits));
-            button.setToolTip(Some(&NSString::from_str(TOOLTIP)));
         }
         Self { item, mtm }
     }
 
     pub(super) fn update(&mut self, model: &MenuBar, sender: &Sender<Action>) {
         if let Some(button) = self.item.button(self.mtm) {
-            button.setTitle(&NSString::from_str(&model.badge));
-            button.setAppearsDisabled(model.dimmed);
+            button.setTitle(&NSString::from_str(&model.badge()));
+            button.setAppearsDisabled(model.dimmed());
+            let label = NSString::from_str(&model.accessibility_label());
+            button.setAccessibilityLabel(Some(&label));
+            button.setToolTip(Some(&label));
         }
         let menu = NSMenu::new(self.mtm);
         menu.setAutoenablesItems(false);
@@ -140,50 +138,10 @@ impl Item {
     }
 }
 
-fn cluster_title(cluster: &flock_core::menubar::ClusterItem) -> Retained<NSAttributedString> {
-    let title = NSMutableAttributedString::new();
-    let mono =
-        NSFont::monospacedSystemFontOfSize_weight(GLYPH_FONT_SIZE, unsafe { NSFontWeightRegular });
-    let meta_font =
-        NSFont::monospacedSystemFontOfSize_weight(META_FONT_SIZE, unsafe { NSFontWeightRegular });
-    let menu_font = NSFont::menuFontOfSize(DEFAULT_FONT_SIZE);
+fn cluster_title(cluster: &ClusterItem) -> Retained<NSAttributedString> {
+    let font = NSFont::menuFontOfSize(DEFAULT_FONT_SIZE);
     let disabled = (!cluster.available).then(NSColor::disabledControlTextColor);
-    let glyph_colour = disabled
-        .clone()
-        .unwrap_or_else(|| status_colour(cluster.status));
-    let glyph = run(cluster.status.glyph(), &mono, Some(&glyph_colour));
-    title.appendAttributedString(&glyph);
-    let gap = run(GLYPH_GAP, &menu_font, None);
-    title.appendAttributedString(&gap);
-    let name = run(&cluster.name, &menu_font, disabled.as_deref());
-    title.appendAttributedString(&name);
-    if !cluster.meta.is_empty() {
-        let tab = run(TAB, &menu_font, None);
-        title.appendAttributedString(&tab);
-        let meta_colour = disabled
-            .clone()
-            .unwrap_or_else(|| status_colour(cluster.meta_status));
-        let meta = run(&cluster.meta, &meta_font, Some(&meta_colour));
-        title.appendAttributedString(&meta);
-    }
-    let style = NSMutableParagraphStyle::new();
-    let options = NSDictionary::new();
-    let stop = unsafe {
-        NSTextTab::initWithTextAlignment_location_options(
-            NSTextTab::alloc(),
-            NSTextAlignment::Right,
-            META_TAB,
-            &options,
-        )
-    };
-    let stops = NSArray::from_retained_slice(&[stop]);
-    style.setTabStops(Some(&stops));
-    let length = title.length();
-    let whole = objc2_foundation::NSRange::new(0, length);
-    let key: &NSAttributedStringKey = unsafe { NSParagraphStyleAttributeName };
-    let value: &AnyObject = style.as_ref();
-    unsafe { title.addAttribute_value_range(key, value, whole) };
-    Retained::into_super(title)
+    run(&cluster.name, &font, disabled.as_deref())
 }
 
 fn run(text: &str, font: &NSFont, colour: Option<&NSColor>) -> Retained<NSAttributedString> {
@@ -203,17 +161,6 @@ fn run(text: &str, font: &NSFont, colour: Option<&NSColor>) -> Retained<NSAttrib
             &string,
             Some(&attributes),
         )
-    }
-}
-
-fn status_colour(status: Status) -> Retained<NSColor> {
-    match status {
-        Status::Ok => NSColor::systemGreenColor(),
-        Status::Warn => NSColor::systemOrangeColor(),
-        Status::Err => NSColor::systemRedColor(),
-        Status::Progress => NSColor::systemBlueColor(),
-        Status::Suspended => NSColor::secondaryLabelColor(),
-        Status::Offline => NSColor::secondaryLabelColor(),
     }
 }
 

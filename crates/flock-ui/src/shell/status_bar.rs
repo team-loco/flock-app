@@ -49,7 +49,7 @@ impl Shell {
                     .gap(SPACE_5)
                     .cursor_pointer()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.dispatch(Command::SelectPage(Page::Overview), cx);
+                        this.dispatch(Command::SelectPage(Page::Problems), cx);
                     }))
                     .child(div().text_color(palette.err).child(status_symbols(format!(
                         "{} {}",

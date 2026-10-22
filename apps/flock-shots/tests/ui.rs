@@ -150,9 +150,10 @@ fn arrow_keys_move_from_the_current_cluster() -> anyhow::Result<()> {
 fn cluster_actions_open_from_the_switcher() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     ui.press("cmd-shift-c cmd-.")?;
-    assert!(ui.bounds("switcher-back").is_some());
+    assert!(ui.bounds("switcher-menu").is_some());
+    assert!(ui.bounds("switcher-row-0").is_some());
     ui.press("escape")?;
-    assert!(ui.bounds("switcher-back").is_none());
+    assert!(ui.bounds("switcher-menu").is_none());
     assert!(ui.read(Shell::switcher_open));
     ui.press("down cmd-.")?;
     ui.click("switcher-action-0")?;
@@ -1810,20 +1811,26 @@ fn command_zero_shows_all_clusters_in_the_active_tab() -> anyhow::Result<()> {
 }
 
 #[test]
-fn the_switcher_gear_opens_settings_and_right_click_offers_connection_actions() -> anyhow::Result<()>
-{
+fn the_switcher_gear_and_right_click_open_the_cluster_menu_beside_the_list() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Flock)?;
     ui.click("cluster-switcher")?;
     let staging = switcher_row(&ui, "staging")?;
     ui.right_click(staging)?;
-    assert!(ui.bounds("switcher-back").is_some());
+    let menu = ui
+        .bounds("switcher-menu")
+        .context("right-click opens the menu")?;
+    let list = ui.bounds(staging).context("the list stays open")?;
+    assert!(menu.right() < list.left());
     assert!(ui.bounds("switcher-action-2").is_some());
+    assert!(ui.bounds("switcher-action-3").is_none());
     ui.press("escape escape")?;
     assert!(!ui.read(Shell::switcher_open));
     ui.click("cluster-switcher")?;
     ui.hover(staging)?;
     let gear: &'static str = staging.replace("row", "gear").leak();
     ui.click(gear)?;
+    assert!(ui.read(Shell::switcher_open));
+    ui.click("switcher-action-0")?;
     assert_eq!(ui.state().location().page, Page::ClusterSettings);
     assert_eq!(settings_selection(&ui), Some(ClusterId::new("staging")));
     assert!(!ui.read(Shell::switcher_open));
@@ -2444,7 +2451,7 @@ fn nav_badges_stay_after_leaving_their_page() -> anyhow::Result<()> {
     ui.click("nav-overview")?;
     assert_eq!(ui.state().location().page, Page::ClusterOverview);
     assert!(ui.bounds("nav-deployments-err").is_some());
-    assert!(ui.bounds("nav-deployments-total").is_some());
+    assert!(ui.bounds("nav-deployments-total").is_none());
     Ok(())
 }
 
@@ -4137,7 +4144,6 @@ fn the_sidebar_row_opens_the_definitions_page_and_back_returns_to_it() -> anyhow
     let mut ui = Ui::open(Screen::Cluster)?;
     let definitions = ui.state().snapshot.definitions(&ClusterId::new(SAMPLE));
     assert_ne!(definitions.len(), 0);
-    assert!(ui.bounds("nav-custom resources-total").is_some());
     ui.scroll("sidebar-nav", gpui::point(gpui::px(0.), gpui::px(-2000.)))?;
     ui.click(CUSTOM_RESOURCES_ROW)?;
     let location = ui.state().location().clone();
@@ -4330,6 +4336,16 @@ fn the_status_bar_shows_only_the_problem_counts_and_the_kubernetes_version() -> 
     let mut ui = Ui::open(Screen::Flock)?;
     assert!(ui.bounds("status-problems").is_some());
     assert!(ui.bounds("status-version").is_none());
+    Ok(())
+}
+
+#[test]
+fn the_status_bar_counts_open_the_fleet_problems_page() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    ui.click("status-problems")?;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, Page::Problems);
+    assert_eq!(location.cluster, None);
     Ok(())
 }
 

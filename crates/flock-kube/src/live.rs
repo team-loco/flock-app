@@ -1210,6 +1210,7 @@ impl Live {
                 let line = CheckLine {
                     status: flock_core::CheckStatus::Err,
                     detail: MISSING_CONTEXT.to_owned(),
+                    raw: None,
                     remedy: None,
                     duration: Duration::ZERO,
                 };
@@ -1873,6 +1874,7 @@ pub fn check_line(result: &CheckResult) -> CheckLine {
     CheckLine {
         status,
         detail: result.detail.clone(),
+        raw: result.raw.clone(),
         remedy: result.remedy.clone(),
         duration: result.duration,
     }
@@ -1882,7 +1884,7 @@ pub fn verdict(verdict: checks::Verdict) -> Verdict {
     match verdict {
         checks::Verdict::Ready => Verdict::Ready,
         checks::Verdict::CannotReach => Verdict::CannotReach,
-        checks::Verdict::CannotAuthenticate => Verdict::CannotAuthenticate,
+        checks::Verdict::Unauthorized => Verdict::Unauthorized,
     }
 }
 
@@ -2712,16 +2714,18 @@ mod tests {
         let result = CheckResult {
             kind: checks::CheckKind::Authenticate,
             status: checks::CheckStatus::Err,
-            detail: "ExpiredToken".to_owned(),
+            detail: String::new(),
+            raw: Some("aws eks get-token: ExpiredToken".to_owned()),
             remedy: Some("aws sso login".to_owned()),
             duration: Duration::from_millis(5),
         };
         let line = check_line(&result);
         assert_eq!(line.status, flock_core::CheckStatus::Err);
+        assert_eq!(line.raw.as_deref(), Some("aws eks get-token: ExpiredToken"));
         assert_eq!(line.remedy.as_deref(), Some("aws sso login"));
         assert_eq!(
-            verdict(checks::Verdict::CannotAuthenticate),
-            Verdict::CannotAuthenticate
+            verdict(checks::Verdict::Unauthorized),
+            Verdict::Unauthorized
         );
     }
 

@@ -23,56 +23,53 @@ const KUSTOMIZATION_KIND: &str = "Kustomization";
 const KUSTOMIZATION_PLURAL: &str = "kustomizations";
 const HELM_RELEASE_KIND: &str = "HelmRelease";
 const HELM_RELEASE_PLURAL: &str = "helmreleases";
-const SECRETS_LABEL: &str = "Secrets";
-const PODS_LABEL: &str = "pods";
-const NAMESPACES_LABEL: &str = "namespaces";
+const SECRETS: &str = "secrets";
+const PODS: &str = "pods";
+const NAMESPACES: &str = "namespaces";
+const NOTHING_DENIED: &str = "Can read everything Flock shows.";
+const ALL_DENIED: &str = "every page will be empty";
+const CORE_DENIED: &str = "most pages will be empty";
+const SECRETS_DENIED: &str = "env values won’t resolve";
+const SOME_DENIED: &str = "those pages will be empty";
 const CORE_ACCESS: [AccessRequest; 6] = [
     AccessRequest {
-        label: PODS_LABEL,
         group: "",
-        resource: "pods",
+        resource: PODS,
         verb: "list",
     },
     AccessRequest {
-        label: NAMESPACES_LABEL,
         group: "",
-        resource: "namespaces",
+        resource: NAMESPACES,
         verb: "list",
     },
     AccessRequest {
-        label: "nodes",
         group: "",
         resource: "nodes",
         verb: "list",
     },
     AccessRequest {
-        label: "events",
         group: "",
         resource: "events",
         verb: "list",
     },
     AccessRequest {
-        label: "deployments",
         group: "apps",
         resource: "deployments",
         verb: "list",
     },
     AccessRequest {
-        label: SECRETS_LABEL,
         group: "",
-        resource: "secrets",
+        resource: SECRETS,
         verb: "list",
     },
 ];
 const FLUX_ACCESS: [AccessRequest; 2] = [
     AccessRequest {
-        label: "Kustomizations",
         group: FLUX_KUSTOMIZE_GROUP,
         resource: KUSTOMIZATION_PLURAL,
         verb: "list",
     },
     AccessRequest {
-        label: "HelmReleases",
         group: FLUX_HELM_GROUP,
         resource: HELM_RELEASE_PLURAL,
         verb: "list",
@@ -104,6 +101,7 @@ pub struct CheckResult {
     pub kind: CheckKind,
     pub status: CheckStatus,
     pub detail: String,
+    pub raw: Option<String>,
     pub remedy: Option<String>,
     pub duration: Duration,
 }
@@ -112,7 +110,7 @@ pub struct CheckResult {
 pub enum Verdict {
     Ready,
     CannotReach,
-    CannotAuthenticate,
+    Unauthorized,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -182,6 +180,7 @@ fn result(kind: CheckKind, status: CheckStatus, detail: String, duration: Durati
         kind,
         status,
         detail,
+        raw: None,
         remedy: None,
         duration,
     }
@@ -191,7 +190,8 @@ fn failed(kind: CheckKind, failure: &Failure, duration: Duration) -> CheckResult
     CheckResult {
         kind,
         status: CheckStatus::Err,
-        detail: failure.detail.clone(),
+        detail: String::new(),
+        raw: Some(failure.detail.clone()),
         remedy: failure.remedy.clone(),
         duration,
     }
@@ -235,39 +235,41 @@ pub fn flux_detail(flux: &FluxInfo) -> String {
     }
 }
 
-pub fn permissions_detail(denied: &[&str], checked: usize) -> (CheckStatus, String) {
+pub fn forbidden(request: &AccessRequest) -> String {
+    let denied = format!(
+        "{} is forbidden: cannot {} resource \"{}\"",
+        request.resource, request.verb, request.resource
+    );
+    if request.group.is_empty() {
+        denied
+    } else {
+        format!("{denied} in API group \"{}\"", request.group)
+    }
+}
+
+pub fn permissions_line(
+    denied: &[&AccessRequest],
+    checked: usize,
+) -> (CheckStatus, String, Option<String>) {
     if denied.is_empty() {
-        return (
-            CheckStatus::Ok,
-            "Can read everything Flock shows.".to_owned(),
-        );
+        return (CheckStatus::Ok, NOTHING_DENIED.to_owned(), None);
     }
-    if denied.len() == checked {
-        return (
-            CheckStatus::Err,
-            "Can’t list anything; Flock would show an empty cluster.".to_owned(),
-        );
-    }
-    if denied.contains(&PODS_LABEL) && denied.contains(&NAMESPACES_LABEL) {
-        return (
-            CheckStatus::Err,
-            format!(
-                "Can’t list {}. Most pages will be empty.",
-                denied.join(", ")
-            ),
-        );
-    }
-    if denied == [SECRETS_LABEL] {
-        return (
-            CheckStatus::Warn,
-            "Can’t read Secrets, so env var values won’t resolve. Everything else works."
-                .to_owned(),
-        );
-    }
-    (
-        CheckStatus::Warn,
-        format!("Can’t list {}. Everything else works.", denied.join(", ")),
-    )
+    let raw = denied
+        .iter()
+        .map(|request| forbidden(request))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let resources: Vec<&str> = denied.iter().map(|request| request.resource).collect();
+    let (status, consequence) = if denied.len() == checked {
+        (CheckStatus::Err, ALL_DENIED)
+    } else if resources.contains(&PODS) && resources.contains(&NAMESPACES) {
+        (CheckStatus::Err, CORE_DENIED)
+    } else if resources == [SECRETS] {
+        (CheckStatus::Warn, SECRETS_DENIED)
+    } else {
+        (CheckStatus::Warn, SOME_DENIED)
+    };
+    (status, consequence.to_owned(), Some(raw))
 }
 
 pub fn metrics_detail(
@@ -341,7 +343,6 @@ impl Session<'_> {
                 if failure.kind == FailureKind::Other {
                     failure.kind = FailureKind::Unreachable;
                 }
-                failure.detail = format!("Can’t reach {server}: {}", failure.detail);
                 self.record(failed(CheckKind::Reach, &failure, took));
                 Some(failure)
             }
@@ -517,7 +518,7 @@ async fn permissions(
     for (request, (answer, _)) in requests.iter().zip(answers) {
         match answer {
             Ok(true) => {}
-            Ok(false) => denied.push(request.label),
+            Ok(false) => denied.push(*request),
             Err(err) => {
                 let failure = classify(&err, context);
                 let check = failed(CheckKind::Permissions, &failure, started.elapsed());
@@ -525,8 +526,11 @@ async fn permissions(
             }
         }
     }
-    let (status, detail) = permissions_detail(&denied, requests.len());
-    let check = result(CheckKind::Permissions, status, detail, started.elapsed());
+    let (status, detail, raw) = permissions_line(&denied, requests.len());
+    let check = CheckResult {
+        raw,
+        ..result(CheckKind::Permissions, status, detail, started.elapsed())
+    };
     (check, Learned::Nothing)
 }
 
@@ -653,7 +657,7 @@ async fn run_session(
             let verdict = if failure.kind == FailureKind::Unreachable {
                 Verdict::CannotReach
             } else {
-                Verdict::CannotAuthenticate
+                Verdict::Unauthorized
             };
             return session.finish(verdict, Some(failure));
         }
@@ -693,25 +697,39 @@ mod tests {
     }
 
     #[test]
-    fn permission_lines() {
-        assert_eq!(permissions_detail(&[], 6).0, CheckStatus::Ok);
+    fn permission_lines_show_the_forbidden_message_and_what_breaks() {
+        let [pods, namespaces, nodes, _, _, secrets] = &CORE_ACCESS;
+        let [kustomizations, _] = &FLUX_ACCESS;
         assert_eq!(
-            permissions_detail(&["Secrets"], 6),
+            permissions_line(&[], 6),
+            (CheckStatus::Ok, NOTHING_DENIED.to_owned(), None)
+        );
+        assert_eq!(
+            permissions_line(&[secrets], 6),
             (
                 CheckStatus::Warn,
-                "Can’t read Secrets, so env var values won’t resolve. Everything else works."
-                    .to_owned()
+                "env values won’t resolve".to_owned(),
+                Some("secrets is forbidden: cannot list resource \"secrets\"".to_owned())
             )
         );
         assert_eq!(
-            permissions_detail(&["nodes", "Secrets"], 6).1,
-            "Can’t list nodes, Secrets. Everything else works."
+            permissions_line(&[nodes, kustomizations], 8),
+            (
+                CheckStatus::Warn,
+                SOME_DENIED.to_owned(),
+                Some(
+                    "nodes is forbidden: cannot list resource \"nodes\"\n\
+                     kustomizations is forbidden: cannot list resource \"kustomizations\" \
+                     in API group \"kustomize.toolkit.fluxcd.io\""
+                        .to_owned()
+                )
+            )
         );
         assert_eq!(
-            permissions_detail(&["pods", "namespaces"], 6).0,
-            CheckStatus::Err
+            permissions_line(&[pods, namespaces], 6).1,
+            CORE_DENIED.to_owned()
         );
-        assert_eq!(permissions_detail(&["a", "b"], 2).0, CheckStatus::Err);
+        assert_eq!(permissions_line(&[pods, nodes], 2).0, CheckStatus::Err);
     }
 
     #[test]
