@@ -200,6 +200,7 @@ pub enum ExecEvent {
     Started { note: String },
     Output(Vec<u8>),
     NoShell,
+    Failed(String),
     Exited { code: Option<i32> },
 }
 
@@ -215,6 +216,19 @@ pub struct ExecRequest {
     pub input: Source<Vec<u8>>,
     pub resize: Source<TermSize>,
     pub output: Sink<ExecEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NodeShellRequest {
+    pub node: ResourceRef,
+    pub image: String,
+    pub input: Source<Vec<u8>>,
+    pub resize: Source<TermSize>,
+    pub output: Sink<ExecEvent>,
+}
+
+pub fn node_shell_command_line(node: &str, image: &str) -> String {
+    format!("$ kubectl debug node/{node} -it --image={image}")
 }
 
 #[cfg(test)]
@@ -258,6 +272,14 @@ mod tests {
         assert_eq!(
             target.command_line(),
             "$ kubectl exec -it checkout-api-7f9c6d-x2lqp -c api -- sh"
+        );
+    }
+
+    #[test]
+    fn node_shells_print_the_equivalent_kubectl() {
+        assert_eq!(
+            node_shell_command_line("ip-10-4-12-87", "busybox:1.36"),
+            "$ kubectl debug node/ip-10-4-12-87 -it --image=busybox:1.36"
         );
     }
 

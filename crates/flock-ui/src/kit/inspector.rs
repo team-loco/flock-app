@@ -21,7 +21,7 @@ pub struct Inspector {
     mono: bool,
     status: Option<(Status, SharedString)>,
     issues: Vec<Issue>,
-    actions: Option<AnyElement>,
+    actions: Vec<AnyElement>,
     width: Pixels,
     sections: Vec<Part>,
 }
@@ -39,7 +39,7 @@ impl Inspector {
             mono: false,
             status: None,
             issues: Vec::new(),
-            actions: None,
+            actions: Vec::new(),
             width: INSPECTOR,
             sections: Vec::new(),
         }
@@ -61,7 +61,7 @@ impl Inspector {
     }
 
     pub fn actions(mut self, actions: impl IntoElement) -> Self {
-        self.actions = Some(actions.into_any_element());
+        self.actions.push(actions.into_any_element());
         self
     }
 
@@ -101,10 +101,7 @@ impl RenderOnce for Inspector {
             Some((status, label)) => header.status(status, label),
             None => header,
         };
-        let header = match self.actions {
-            Some(actions) => header.action(actions),
-            None => header,
-        };
+        let header = self.actions.into_iter().fold(header, PanelHeader::action);
         let sections = self.sections.into_iter().map(|part| match part {
             Part::Section(section) => section.into_any_element(),
             Part::Plain(content) => div()

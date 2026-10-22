@@ -39,6 +39,13 @@ impl DockState {
         }
     }
 
+    pub fn collapsed() -> Self {
+        Self {
+            open: false,
+            ..Self::new()
+        }
+    }
+
     pub fn active(&self) -> usize {
         self.active
     }

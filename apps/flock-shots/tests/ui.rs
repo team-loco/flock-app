@@ -844,6 +844,26 @@ fn escape_goes_to_a_running_terminal_and_closes_the_panel_once_it_ends() -> anyh
 }
 
 #[test]
+fn node_shells_open_only_after_the_confirmation() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Nodes)?;
+    ui.click("nodes-row-0")?;
+    ui.click("node-shell")?;
+    assert!(ui.bounds("dialog-confirm").is_some());
+    ui.click("dialog-cancel")?;
+    assert!(ui.bounds("dialog-confirm").is_none());
+    assert!(ui.bounds("node-close-shell").is_none());
+    ui.click("node-actions")?;
+    ui.click("node-actions-item-3")?;
+    assert!(ui.bounds("dialog-confirm").is_some());
+    ui.click("dialog-confirm")?;
+    assert!(ui.bounds("dialog-confirm").is_none());
+    assert!(ui.bounds("node-close-shell").is_some());
+    ui.click("node-close-shell")?;
+    assert!(ui.bounds("node-close-shell").is_none());
+    Ok(())
+}
+
+#[test]
 fn command_j_toggles_the_dock() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Workload)?;
     let dock = |ui: &Ui| ui.read(Shell::dock_open);

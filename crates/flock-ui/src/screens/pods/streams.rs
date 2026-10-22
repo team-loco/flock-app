@@ -281,6 +281,10 @@ impl PodsScreen {
                 }
                 cx.notify();
             }
+            ExecEvent::Failed(message) => {
+                self.terminal.update(cx, |t, cx| t.line(message, cx));
+                self.exec_event(ExecEvent::Exited { code: None }, cx);
+            }
             ExecEvent::Exited { code } => {
                 let no_shell = self.shell.as_ref().is_some_and(|s| s.no_shell);
                 self.terminal.update(cx, |t, cx| {
