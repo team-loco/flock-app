@@ -247,7 +247,6 @@ pub async fn find_prometheus(client: &Client) -> Option<PrometheusTarget> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccessRequest {
-    pub label: &'static str,
     pub group: &'static str,
     pub resource: &'static str,
     pub verb: &'static str,

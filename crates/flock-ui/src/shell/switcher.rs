@@ -653,7 +653,6 @@ impl Render for ClusterSwitcher {
             let panel = surface("switcher", &palette)
                 .w(SWITCHER_WIDTH)
                 .overflow_hidden()
-                .font_family(FONT_SANS)
                 .track_focus(&self.focus)
                 .on_key_down(cx.listener(Self::key_down))
                 .on_mouse_down_out(cx.listener(|this, _, window, cx| {
@@ -664,7 +663,11 @@ impl Render for ClusterSwitcher {
                     this.close(window, cx);
                 }))
                 .child(body);
-            let anchor = div().relative().children(menu).child(panel);
+            let anchor = div()
+                .relative()
+                .font_family(FONT_SANS)
+                .children(menu)
+                .child(panel);
             let key = ElementId::NamedInteger(ID.into(), self.generation);
             above_right(appear(anchor, key))
         });

@@ -200,20 +200,16 @@ fn classify_auth(auth: &AuthError, context: &KubeContext, message: String) -> Fa
             } else {
                 redact::credentials(&stderr)
             };
-            if contains_any(&output, &EXPIRED_MARKERS) {
-                Failure {
-                    kind: FailureKind::ExpiredCredentials,
-                    detail: format!("{label}: credentials expired. Sign in again, then retry."),
-                    remedy: login_command(context),
-                    message,
-                }
+            let kind = if contains_any(&output, &EXPIRED_MARKERS) {
+                FailureKind::ExpiredCredentials
             } else {
-                Failure {
-                    kind: FailureKind::AuthFailed,
-                    detail: format!("{label}: {}", first_line(&output)),
-                    remedy: login_command(context),
-                    message,
-                }
+                FailureKind::AuthFailed
+            };
+            Failure {
+                kind,
+                detail: format!("{label}: {}", first_line(&output)),
+                remedy: login_command(context),
+                message,
             }
         }
         AuthError::AuthExecParse(_) => Failure {
@@ -243,8 +239,7 @@ fn classify_status(status: &kube::core::Status, context: &KubeContext, message: 
             };
             Failure {
                 kind,
-                detail: "The API server rejected these credentials. Sign in again, then retry."
-                    .to_owned(),
+                detail,
                 remedy: login_command(context),
                 message,
             }
@@ -408,7 +403,8 @@ mod tests {
         assert_eq!(failure.kind, FailureKind::ExpiredCredentials);
         assert_eq!(
             failure.detail,
-            "aws eks get-token: credentials expired. Sign in again, then retry."
+            "aws eks get-token: An error occurred (ExpiredTokenException) when calling the \
+             GetCallerIdentity operation: The security token included in the request is expired"
         );
         assert_eq!(
             failure.remedy.as_deref(),
@@ -479,6 +475,7 @@ mod tests {
         };
         let unauthorized = classify(&status(401, "Unauthorized"), &ctx);
         assert_eq!(unauthorized.kind, FailureKind::ExpiredCredentials);
+        assert_eq!(unauthorized.detail, "Unauthorized");
         assert_eq!(unauthorized.remedy.as_deref(), Some("gcloud auth login"));
         let forbidden = classify(
             &status(403, "pods is forbidden: User \"x\" cannot list"),

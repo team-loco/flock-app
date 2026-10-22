@@ -497,3 +497,19 @@ Settled; change only with a new entry that says why.
     what the cluster returns (newest 1000), and Kubernetes keeps events for 1h by default. The
     pod panel drops its status line and shows the last termination as plain container rows;
     env-var notes are terse facts instead of a boxed sentence.
+51. **v4 chrome: connected-count badge and a plain switcher menu** (design v4 `MenuExtra`,
+    `StatusBar`, `Nav` and `AddCluster`; amends 25 and 38): the menu-bar badge is the number of
+    connected clusters in tabular figures, `0` and dimmed when none are, and the status item's
+    accessibility label (also its tooltip) reads "Flock, N clusters connected". Menu rows and
+    switcher rows show only the cluster name, muted when it is not connected; status glyphs,
+    problem counts and state words are gone from both, and the switcher trigger shows only the
+    name. Problem counts live in the status bar, whose counts open the fleet Problems page, and in
+    the nav, which shows only error, warning and suspended badges (no grey totals). An
+    auth-expired cluster still counts as connected until the snapshot carries a typed signal for
+    it. The switcher's gear, right-click on a row and ⌘. open one 190px menu beside the list: the
+    cluster name, then Settings…, Connect or Disconnect, and Remove in red, with no descriptions;
+    Esc closes it and keeps the list open. Rename and Switch context are left out until they
+    exist. Add cluster check lines show the cluster's or tool's own message through
+    `kit::RawMessage` (a forbidden list reads like the API server's, `secrets is forbidden:
+    cannot list resource "secrets"`) followed by what breaks; verdicts read Ready and
+    Unauthorized, and the footer counts `N of M ready`.

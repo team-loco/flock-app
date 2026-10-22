@@ -14,8 +14,8 @@ use gpui::{
 
 use crate::kit::status_symbols;
 use crate::kit::{
-    Button, Checkbox, InputEvent, Modal, TextArea, TextAreaState, TextField, TextFieldState, Toast,
-    toast,
+    Button, Checkbox, InputEvent, Modal, RawMessage, TextArea, TextAreaState, TextField,
+    TextFieldState, Toast, toast,
 };
 use crate::theme::{
     ActiveTheme, CHECK_GLYPH_COLUMN, CODE_PAD_Y, DIALOG_WIDE, EMPTY_WIDTH, FONT_MONO, LINE_PROSE,
@@ -24,7 +24,7 @@ use crate::theme::{
     TEXT_CONTROL, TEXT_GLYPH, TEXT_HEADING, TEXT_MONO, TEXT_SMALL,
 };
 
-const SUBTITLE: &str = "Contexts in your kubeconfig files that aren't in Flock yet.";
+const SUBTITLE: &str = "Contexts not added yet";
 const LOADING: &str = "Reading kubeconfig files…";
 const NOTHING_LEFT: &str =
     "Every context in ~/.kube and $KUBECONFIG is already in Flock, or there are none yet.";
@@ -440,7 +440,7 @@ impl AddClusterDialog {
                     .truncate()
                     .text_size(TEXT_CONTROL)
                     .text_color(palette.mute)
-                    .children(self.flow.waiting_note()),
+                    .child(self.flow.ready_note()),
             )
             .child(add);
         body()
@@ -587,6 +587,19 @@ fn check_line(
                     .on_click(cx.listener(move |this, _, _, cx| this.retry(&retried, cx))),
             )
     });
+    let raw = line
+        .raw
+        .clone()
+        .map(|message| RawMessage::new(message).color(palette.fg2));
+    let detail = (!line.detail.is_empty()).then(|| line.detail.clone());
+    let text = div()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap(SPACE_4)
+        .min_w_0()
+        .children(raw)
+        .children(detail);
     div()
         .flex()
         .gap(SPACE_4)
@@ -609,7 +622,7 @@ fn check_line(
                 .items_start()
                 .min_w_0()
                 .text_color(palette.fg2)
-                .child(line.detail.clone())
+                .child(text)
                 .children(remedy),
         )
         .into_any_element()
