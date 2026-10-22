@@ -740,8 +740,7 @@ fn live_sidebar_toggles_with_command_b_and_the_edge_from_every_focus() -> anyhow
     sidebar_round_trip(&mut ui, "the inspector")?;
     visit(&mut ui, Page::Pods)?;
     all_namespaces(&mut ui, "pod-namespace")?;
-    ui.click("pods-row-0")?;
-    ui.click("dock-tab-0")?;
+    focus_pod_dock(&mut ui)?;
     sidebar_round_trip(&mut ui, "the dock")?;
     ui.press("cmd-k escape")?;
     sidebar_round_trip(&mut ui, "the palette just closed")?;
@@ -756,6 +755,12 @@ fn live_sidebar_toggles_with_command_b_and_the_edge_from_every_focus() -> anyhow
     );
     sidebar_round_trip(&mut ui, "settings")?;
     check_invariants(&mut ui, &before, "toggling the sidebar")
+}
+
+fn focus_pod_dock(ui: &mut Ui) -> anyhow::Result<()> {
+    ui.right_click("pods-row-0")?;
+    ui.click("pods-row-menu-item-2")?;
+    ui.click("dock-tab-0")
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -781,8 +786,7 @@ fn focus(ui: &mut Ui, focus: Focus) -> anyhow::Result<()> {
         }
         Focus::Dock => {
             visit(ui, Page::Pods)?;
-            ui.click("pods-row-0")?;
-            ui.click("dock-tab-0")
+            focus_pod_dock(ui)
         }
         Focus::Palette => ui.press("cmd-k escape"),
         Focus::Settings => ui.press("cmd-,"),
