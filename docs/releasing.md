@@ -1,6 +1,8 @@
 # Releasing Flock
 
-Flock ships for Apple silicon only: an arm64 `Flock.app`, zipped and attached to a GitHub Release. The app checks the latest release itself and installs it after verifying an ed25519
+Flock ships for Apple silicon only: an arm64 `Flock.app` in two variants, default features and
+`--features loco`, each zipped and attached to a GitHub Release. Each build updates only from its
+own variant (`flock_update::release::Variant`). The app checks the latest release itself and installs it after verifying an ed25519
 signature and a SHA-256 checksum.
 
 ## Cut a release
@@ -19,13 +21,15 @@ on "Include pre-releases".
 Pushing the tag starts `.github/workflows/release.yml` on `macos-latest`:
 
 1. checks that the tag matches the workspace version
-2. `mise run package`: builds and ad-hoc signs `dist/Flock.app` with `mise run bundle`, checks the
-   binary is arm64 and zips it with `ditto -c -k --keepParent` as `dist/Flock-<version>-arm64.zip`
-3. `mise run sign -- dist/Flock-<version>-arm64.zip`: writes `<zip>.sha256` (shasum format) and
-   `<zip>.sig` (base64 ed25519 signature of the zip), then verifies both with the public key compiled
-   into the app. Only this step sees the signing key
+2. `mise run package` and `mise run package -- --loco`: each builds and ad-hoc signs
+   `dist/Flock.app` with `mise-tasks/bundle`, checks the binary is arm64 and zips it with
+   `ditto -c -k --keepParent` as `dist/Flock-<version>-arm64.zip` or
+   `dist/Flock-<version>-loco-arm64.zip`
+3. `mise run sign -- <zip>` for each zip: writes `<zip>.sha256` (shasum format) and `<zip>.sig`
+   (base64 ed25519 signature of the zip), then verifies both with the public key compiled into the
+   app. Only this step sees the signing key
 4. writes release notes from the commit subjects since the previous `v*` tag
-5. `gh release create` with the zip, the checksum and the signature
+5. `gh release create` with both zips, their checksums and their signatures
 
 ## What installed copies do
 
@@ -39,7 +43,7 @@ folder Flock cannot write shows "Download Flock <version>" linking to the releas
 ## Build and sign locally
 
 ```sh
-mise run package
+mise run package             # or: mise run package -- --loco
 mise run sign -- dist/Flock-0.2.0-arm64.zip
 ```
 
@@ -90,7 +94,8 @@ The no-prompt route is the install script, which downloads with curl (no quarant
 curl -fsSL https://raw.githubusercontent.com/team-loco/flock-app/main/install.sh | sh
 ```
 
-`FLOCK_VERSION` pins a version and `FLOCK_INSTALL_DIR` changes the target directory.
+`FLOCK_LOCO=1` installs the Loco variant, `FLOCK_VERSION` pins a version and `FLOCK_INSTALL_DIR`
+changes the target directory.
 
 For a browser download, open Flock from System Settings → Privacy & Security → Open Anyway, or run
 `xattr -dr com.apple.quarantine /Applications/Flock.app`. Updates that Flock downloads itself are

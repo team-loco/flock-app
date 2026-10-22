@@ -34,12 +34,17 @@ jobs:
             echo "tag $TAG does not match the workspace version $version" >&2
             exit 1
           fi
-      - name: Build the app and zip it
-        run: mise run package
-      - name: Sign the zip
+      - name: Build both variants and zip them
+        run: |
+          mise run package
+          mise run package -- --loco
+      - name: Sign the zips
         env:
           FLOCK_UPDATE_SIGNING_KEY: ${{ secrets.FLOCK_UPDATE_SIGNING_KEY }}
-        run: mise run sign -- "dist/Flock-${TAG#v}-arm64.zip"
+        run: |
+          for zip in dist/Flock-*.zip; do
+            mise run sign -- "$zip"
+          done
       - name: Write release notes
         run: |
           previous="$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)"
@@ -53,12 +58,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${TAG#v}"
-          zip="dist/Flock-$version-arm64.zip"
           prerelease=""
           case "$version" in
             *-*) prerelease="--prerelease" ;;
           esac
-          gh release create "$TAG" "$zip" "$zip.sha256" "$zip.sig" \
+          gh release create "$TAG" dist/Flock-*.zip dist/Flock-*.zip.sha256 dist/Flock-*.zip.sig \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "Flock $version" \

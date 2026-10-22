@@ -40,6 +40,36 @@
       "size": 89,
       "download_count": 3,
       "browser_download_url": "https://github.com/team-loco/flock-app/releases/download/v0.2.0/Flock-0.2.0-arm64.zip.sig"
+    },
+    {
+      "url": "https://api.github.com/repos/team-loco/flock-app/releases/assets/6001",
+      "id": 6001,
+      "name": "Flock-0.2.0-loco-arm64.zip",
+      "content_type": "application/zip",
+      "state": "uploaded",
+      "size": 41234567,
+      "download_count": 3,
+      "browser_download_url": "https://github.com/team-loco/flock-app/releases/download/v0.2.0/Flock-0.2.0-loco-arm64.zip"
+    },
+    {
+      "url": "https://api.github.com/repos/team-loco/flock-app/releases/assets/6002",
+      "id": 6002,
+      "name": "Flock-0.2.0-loco-arm64.zip.sha256",
+      "content_type": "text/plain",
+      "state": "uploaded",
+      "size": 82,
+      "download_count": 3,
+      "browser_download_url": "https://github.com/team-loco/flock-app/releases/download/v0.2.0/Flock-0.2.0-loco-arm64.zip.sha256"
+    },
+    {
+      "url": "https://api.github.com/repos/team-loco/flock-app/releases/assets/6003",
+      "id": 6003,
+      "name": "Flock-0.2.0-loco-arm64.zip.sig",
+      "content_type": "text/plain",
+      "state": "uploaded",
+      "size": 89,
+      "download_count": 3,
+      "browser_download_url": "https://github.com/team-loco/flock-app/releases/download/v0.2.0/Flock-0.2.0-loco-arm64.zip.sig"
     }
   ],
   "tarball_url": "https://api.github.com/repos/team-loco/flock-app/tarball/v0.2.0",

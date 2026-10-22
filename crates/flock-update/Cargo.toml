@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+loco = []
+
 [[bin]]
 name = "flock-sign"
 path = "src/bin/flock-sign.rs"
