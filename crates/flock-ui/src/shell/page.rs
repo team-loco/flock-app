@@ -517,7 +517,7 @@ impl Shell {
             let add = cx.listener(|this, _, window, cx| {
                 this.open_add_cluster(AddClusterStep::Pick, window, cx);
             });
-            return empty_flock(palette, add).into_any_element();
+            return empty_flock(add).into_any_element();
         }
         let screens = self.screens(ix);
         match location.page {

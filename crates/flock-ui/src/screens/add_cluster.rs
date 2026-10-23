@@ -654,11 +654,9 @@ pub(super) fn note(text: &'static str, palette: &Palette) -> AnyElement {
 }
 
 const EMPTY_TITLE: &str = "No clusters yet";
-const EMPTY_SENTENCE: &str = "Flock only connects to clusters you add. Pick contexts from your kubeconfig files and Flock checks each connection before adding it.";
 const EMPTY_ACTION: &str = "Add cluster";
 
 pub fn empty_flock(
-    palette: &Palette,
     on_add: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     div()
@@ -674,13 +672,6 @@ pub fn empty_flock(
                 .text_size(TEXT_HEADING)
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(EMPTY_TITLE),
-        )
-        .child(
-            div()
-                .text_size(TEXT_BODY)
-                .line_height(relative(LINE_PROSE))
-                .text_color(palette.fg2)
-                .child(EMPTY_SENTENCE),
         )
         .child(
             div().pt(SPACE_2).child(
