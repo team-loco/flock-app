@@ -28,7 +28,6 @@ For Apple Silicon only.
 - Flux: Kustomizations, HelmReleases and sources, a dependency graph and commit-to-cluster tracing
 - Helm release history decoded from the cluster
 - Command palette, tabs, split panes and a menu-bar health indicator; see [docs/keyboard.md](docs/keyboard.md)
-- Loco support: add `FLOCK_LOCO=1` to the install command
 
 <p align="center">
   <img src="docs/screenshots/flux-graph.png" alt="Flux graph" width="900">
