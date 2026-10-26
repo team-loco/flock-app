@@ -240,7 +240,7 @@ export default function App() {
           className="top-0 max-lg:hidden"
           style={{ height: BAND_STOP }}
         />
-        <section className="relative mx-auto flex max-w-page flex-col items-center gap-5.5 px-6 pt-22 pb-11 text-center">
+        <section className="relative mx-auto flex max-w-page flex-col items-center gap-5.5 px-6 pt-11 pb-11 text-center">
           <Icon size={ICON_SIZE} label="Flock" className="shadow-icon" />
           <h1 className="m-0 max-w-headline text-hero-compact font-semibold sm:text-hero">
             Kubernetes, without the{" "}
@@ -272,7 +272,7 @@ export default function App() {
 
       <section className="relative flex flex-[1_0_auto] flex-col bg-band text-band-foreground">
         <Field kind="cta" light={light} className="inset-y-0" />
-        <div className="relative mx-auto flex max-w-page flex-col items-center gap-5 px-6 pt-22 pb-14 text-center">
+        <div className="relative mx-auto flex max-w-page flex-col items-center gap-4 px-6 pt-12 pb-8 text-center">
           <Icon size={CTA_ICON_SIZE} label="Flock app icon" />
           <h2 className="m-0 text-download font-semibold">Download Flock</h2>
           <div className="flex flex-wrap items-center justify-center gap-3">
@@ -286,7 +286,7 @@ export default function App() {
           <span className="text-note text-band-foreground-soft">For Macs with Apple silicon</span>
         </div>
         <footer className="relative mt-auto">
-          <div className="mx-auto flex max-w-page flex-wrap items-center gap-6 px-6 pb-6 text-footer text-band-foreground-soft">
+          <div className="mx-auto flex max-w-page flex-wrap items-center gap-6 px-6 pb-10 text-footer text-band-foreground-soft">
             <span className="font-medium text-band-foreground">Flock</span>
             <span className="flex-1" />
             <a href={__RELEASES_URL__} className="no-underline hover:text-band-foreground">
