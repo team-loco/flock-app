@@ -35,7 +35,7 @@ cd "${ROOT}"
 test_scope=(--workspace)
 loco_feature=flock-shots/loco
 if [[ "$(uname -s)" != Darwin ]]; then
-  test_scope+=(--exclude flock --exclude flock-shots --exclude flock-ui --exclude flock-update)
+  test_scope+=(--exclude flock --exclude flock-bench --exclude flock-shots --exclude flock-ui --exclude flock-update)
   loco_feature=flock-kube/loco,flock-demo/loco
 fi
 build_log="${work_dir}/build.log"
