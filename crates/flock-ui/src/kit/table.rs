@@ -334,7 +334,7 @@ impl<R: 'static> Column<R> {
 }
 
 fn cell_frame(width: Width, align: Align) -> Div {
-    justify(sized(cell_body(), width), align)
+    justify(sized(cell_body().h_full(), width), align)
 }
 
 fn cell_body() -> Div {
@@ -470,7 +470,7 @@ pub struct Table<R: 'static> {
     order: Vec<usize>,
     sort: Option<(usize, SortDirection)>,
     selected: Option<usize>,
-    marked: Option<Vec<SharedString>>,
+    marked: Option<Vec<usize>>,
     row_height: Pixels,
     column_gap: Pixels,
     inset: Pixels,
@@ -830,44 +830,53 @@ impl<R: 'static> Table<R> {
     }
 
     pub fn marked_rows(&self) -> Vec<&R> {
-        let (Some(key), Some(marked)) = (&self.key, &self.marked) else {
-            return Vec::new();
-        };
-        self.order
+        self.marked
             .iter()
+            .flatten()
             .filter_map(|&ix| self.rows.get(ix))
-            .filter(|row| marked.contains(&key(row)))
             .collect()
     }
 
-    fn is_marked(&self, row: &R) -> bool {
-        let (Some(key), Some(marked)) = (&self.key, &self.marked) else {
-            return false;
-        };
-        marked.contains(&key(row))
+    fn is_marked(&self, ix: usize) -> bool {
+        self.marked
+            .as_ref()
+            .is_some_and(|marked| marked.contains(&ix))
     }
 
     fn toggle_mark(&mut self, row: usize) {
-        let Some(key) = self.key.clone() else {
+        if self.key.is_none() || row >= self.rows.len() {
             return;
-        };
+        }
         let current = self
-            .selected_row()
-            .filter(|_| self.selected != Some(row))
-            .map(|r| key(r));
-        let clicked = self.rows.get(row).map(|r| key(r));
-        let (Some(marked), Some(clicked)) = (self.marked.as_mut(), clicked) else {
+            .selected
+            .filter(|&selected| selected != row && selected < self.rows.len());
+        let Some(marked) = self.marked.as_mut() else {
             return;
         };
         if marked.is_empty() {
             marked.extend(current);
         }
-        match marked.iter().position(|marked| marked == &clicked) {
+        match marked.iter().position(|&marked| marked == row) {
             Some(at) => {
                 marked.remove(at);
             }
-            None => marked.push(clicked),
+            None => marked.push(row),
         }
+        self.order_marks();
+    }
+
+    fn order_marks(&mut self) {
+        let order = &self.order;
+        if let Some(marked) = self.marked.as_mut() {
+            marked.sort_by_key(|&ix| order.iter().position(|&shown| shown == ix));
+        }
+    }
+
+    fn marked_keys(&self) -> Vec<SharedString> {
+        let Some(key) = &self.key else {
+            return Vec::new();
+        };
+        self.marked_rows().into_iter().map(|row| key(row)).collect()
     }
 
     pub fn row_key(mut self, key: impl Fn(&R) -> SharedString + 'static) -> Self {
@@ -917,6 +926,7 @@ impl<R: 'static> Table<R> {
 
     pub fn set_rows(&mut self, rows: Vec<R>, cx: &mut Context<Self>) {
         let selected_key = self.selected_key();
+        let marked_keys = self.marked_keys();
         if self.record_flashes(&rows) {
             let latest = self.flash_generation;
             self.flash_timer = Some(cx.spawn(async move |this, cx| {
@@ -935,9 +945,17 @@ impl<R: 'static> Table<R> {
             (Some(wanted), Some(key)) => self.rows.iter().position(|row| key(row) == wanted),
             _ => self.selected.filter(|&ix| ix < self.rows.len()),
         };
-        if let (Some(key), Some(marked)) = (&self.key, self.marked.as_mut()) {
-            let keys: Vec<SharedString> = self.rows.iter().map(|row| key(row)).collect();
-            marked.retain(|marked| keys.contains(marked));
+        if let Some(marked) = self.marked.as_mut() {
+            *marked = match (&self.key, marked_keys.is_empty()) {
+                (Some(key), false) => self
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, row)| marked_keys.contains(&key(row)))
+                    .map(|(ix, _)| ix)
+                    .collect(),
+                _ => Vec::new(),
+            };
         }
         self.resort();
         cx.notify();
@@ -981,6 +999,7 @@ impl<R: 'static> Table<R> {
             Some((compare, direction)) => sort_order(&self.rows, compare.as_ref(), direction),
             None => (0..self.rows.len()).collect(),
         };
+        self.order_marks();
     }
 
     fn position_of(&self, row: Option<usize>) -> Option<usize> {
@@ -1189,7 +1208,7 @@ impl<R: 'static> Table<R> {
                 .child(content)
                 .into_any_element();
         }
-        let selected = self.selected == Some(ix) || self.is_marked(row);
+        let selected = self.selected == Some(ix) || self.is_marked(ix);
         let status = self.status.as_ref().and_then(|status| status(row));
         let tint = status.and_then(|status| palette.tint(status));
         let hover = palette.hover;
@@ -1246,6 +1265,7 @@ impl<R: 'static> Table<R> {
         let flash = self
             .key
             .as_ref()
+            .filter(|_| !self.flashes.is_empty())
             .and_then(|key| self.flashes.get(&key(row)).copied())
             .zip(status);
         match flash {
@@ -1494,5 +1514,58 @@ mod tests {
         cx.executor().advance_clock(FLASH);
         cx.run_until_parked();
         assert!(table.read_with(cx, |table, _| table.flashes.is_empty()));
+    }
+
+    fn marked_names(table: &Table<&'static str>) -> Vec<&'static str> {
+        table.marked_rows().into_iter().copied().collect()
+    }
+
+    #[gpui::test]
+    fn marks_follow_their_rows_through_updates_and_sorting(cx: &mut gpui::TestAppContext) {
+        let table = cx.new(|cx| {
+            let columns =
+                vec![Column::text("Name", |row: &&str| (*row).into()).sort_by_key(|row| *row)];
+            Table::new("marks", columns, cx)
+                .row_key(|row: &&str| (*row).into())
+                .multi_select()
+                .rows(vec!["b", "a", "c"])
+        });
+        table.update(cx, |table, cx| {
+            table.select(Some(2), cx);
+            table.toggle_mark(0);
+            assert_eq!(marked_names(table), ["b", "c"]);
+            table.toggle_mark(1);
+            table.toggle_mark(2);
+            assert_eq!(marked_names(table), ["b", "a"]);
+            table.toggle_sort(0, cx);
+            assert_eq!(marked_names(table), ["a", "b"]);
+            table.set_rows(vec!["d", "b", "c"], cx);
+            assert_eq!(marked_names(table), ["b"]);
+            assert!(table.is_marked(1));
+            assert!(!table.is_marked(0));
+        });
+    }
+
+    #[gpui::test]
+    fn reading_marks_derives_no_row_keys(cx: &mut gpui::TestAppContext) {
+        let keys = Rc::new(std::cell::Cell::new(0_usize));
+        let counted = keys.clone();
+        let rows: Vec<usize> = (0..100).collect();
+        let table = cx.new(|cx| {
+            Table::new("marks", Vec::new(), cx)
+                .row_key(move |row: &usize| {
+                    counted.set(counted.get() + 1);
+                    row.to_string().into()
+                })
+                .multi_select()
+                .rows(rows)
+        });
+        table.update(cx, |table, _| {
+            table.toggle_mark(7);
+            keys.set(0);
+            assert_eq!(table.marked_rows(), [&7]);
+            assert!((0..100).filter(|&ix| table.is_marked(ix)).eq([7]));
+        });
+        assert_eq!(keys.get(), 0);
     }
 }
