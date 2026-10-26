@@ -1,19 +1,19 @@
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
-use flock_core::crd::{Crd, CrdKey, CustomObjects, Definition};
+use flock_core::crd::{Crd, CrdKey, Definition};
 use flock_core::diagnosis;
 use flock_core::emptiness::Noun;
 use flock_core::events::Event;
 use flock_core::filter::{StatusFilter, label_values};
 use flock_core::pods::PodEvent;
-use flock_core::related::Related;
 use flock_core::resources::{Resource, filter_counts, filter_resources, namespace_counts};
 use flock_core::settings::NamespaceSelection;
 use flock_core::time::age;
 use flock_core::{
     ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Page, Preferences, ResourceRef,
-    Status,
+    Snapshot, Status,
 };
 use gpui::{
     AnyElement, AnyView, App, AppContext, Context, Entity, EventEmitter, InteractiveElement,
@@ -26,7 +26,8 @@ use super::definitions::DefinitionsScreen;
 use crate::kit::{
     Button, CONDITIONS, CodeView, Column, ConditionTable, EmptyState, FilterBar, FilterEvent,
     IconButton, Inspector, MenuItem, PanelSection, Presence, Select, SelectEvent, ShowAll,
-    Skeleton, Table, TableEvent, chip_label, reason_cell, reason_tooltip, slide_in, slide_out,
+    Skeleton, SnapshotRow, SnapshotRows, Table, TableEvent, chip_label, reason_cell,
+    reason_tooltip, slide_in, slide_out,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
@@ -49,21 +50,21 @@ const REASON: &str = "Reason";
 const YAML: &str = "YAML";
 const SUBTITLE_SEPARATOR: &str = " · ";
 
+type ResourceRow = SnapshotRow<Resource>;
+
 pub struct CustomResourcesScreen {
     cluster: Option<ClusterId>,
     cluster_name: String,
     crd: Option<Crd>,
-    rows: Vec<Resource>,
+    rows: Rc<SnapshotRows<Resource>>,
     cluster_namespaces: Vec<String>,
-    events: Vec<Event>,
-    related: Vec<Related>,
     shown: usize,
     namespace: Option<String>,
     awaiting: Option<String>,
     preferences: Preferences,
     selected: Option<(String, String)>,
     revealed: Option<(CrdKey, String, String)>,
-    tables: HashMap<CrdKey, Entity<Table<Resource>>>,
+    tables: HashMap<CrdKey, Entity<Table<ResourceRow>>>,
     namespaces: Entity<Select>,
     filter: Entity<FilterBar>,
     definitions: Entity<DefinitionsScreen>,
@@ -103,10 +104,8 @@ impl CustomResourcesScreen {
             cluster: None,
             cluster_name: String::new(),
             crd: None,
-            rows: Vec::new(),
+            rows: SnapshotRows::empty(),
             cluster_namespaces: Vec::new(),
-            events: Vec::new(),
-            related: Vec::new(),
             shown: 0,
             namespace: None,
             awaiting: None,
@@ -155,6 +154,7 @@ impl CustomResourcesScreen {
         }
         let shown: Vec<&Resource> = self
             .rows
+            .items()
             .iter()
             .filter(|row| self.in_namespace(row))
             .collect();
@@ -191,12 +191,10 @@ impl CustomResourcesScreen {
         &mut self,
         cluster: &ClusterSummary,
         crd: &Crd,
-        objects: Option<&CustomObjects>,
-        detail: Option<&ClusterDetail>,
+        snapshot: &Arc<Snapshot>,
         preferences: &Preferences,
         cx: &mut Context<Self>,
     ) {
-        let rows = objects.map_or(&[][..], |objects| objects.rows.as_slice());
         let list = crd.key.qualified();
         let namespace = preferences
             .namespace_selection(&list)
@@ -218,18 +216,12 @@ impl CustomResourcesScreen {
         };
         let rescoped = self.namespace != namespace;
         self.namespace = namespace;
-        let events = detail.map_or(&[][..], |detail| detail.events.as_slice());
-        if self.events != events {
-            self.events = events.to_vec();
-            cx.notify();
-        }
-        let related = detail.map_or(&[][..], |detail| detail.related.as_slice());
-        if self.related != related {
-            self.related = related.to_vec();
+        let fresh = !self.rows.from(snapshot);
+        if fresh {
             cx.notify();
         }
         let switched = self.crd.as_ref() != Some(crd) || self.cluster.as_ref() != Some(&cluster.id);
-        if !switched && !rescoped && self.rows == rows {
+        if !switched && !rescoped && !fresh {
             return;
         }
         if switched {
@@ -244,8 +236,17 @@ impl CustomResourcesScreen {
             self.show_namespace_of(&namespace, cx);
             self.selected = Some((namespace, name));
         }
-        self.rows = rows.to_vec();
-        self.cluster_namespaces = detail
+        let group = snapshot
+            .custom
+            .iter()
+            .position(|objects| objects.cluster == cluster.id && objects.key == crd.key);
+        self.rows = SnapshotRows::new(snapshot, move |snapshot| {
+            group
+                .and_then(|group| snapshot.custom.get(group))
+                .map_or(&[][..], |objects| objects.rows.as_slice())
+        });
+        self.cluster_namespaces = snapshot
+            .detail(&cluster.id)
             .into_iter()
             .flat_map(|detail| detail.namespaces.iter().map(|ns| ns.name.clone()))
             .collect();
@@ -259,11 +260,12 @@ impl CustomResourcesScreen {
         }
         let counts = namespace_counts(
             self.cluster_namespaces.iter().map(String::as_str),
-            self.rows.iter().map(|row| row.namespace.as_str()),
+            self.rows.items().iter().map(|row| row.namespace.as_str()),
             self.namespace.as_deref(),
         );
         let chosen = self.namespace.as_deref();
-        set_namespace_options(&self.namespaces, &counts, self.rows.len(), chosen, cx);
+        let total = self.rows.items().len();
+        set_namespace_options(&self.namespaces, &counts, total, chosen, cx);
     }
 
     pub fn reveal(&mut self, key: CrdKey, namespace: String, name: String, cx: &mut Context<Self>) {
@@ -324,7 +326,11 @@ impl CustomResourcesScreen {
 
     fn empty_with(&self, show_all: Option<ShowAll>, cx: &App) -> Option<EmptyState> {
         let namespace = self.namespace.as_deref().map(|namespace| {
-            let inside = self.rows.iter().filter(|r| r.namespace == namespace);
+            let inside = self
+                .rows
+                .items()
+                .iter()
+                .filter(|r| r.namespace == namespace);
             (namespace, inside.count())
         });
         let noun = self
@@ -333,7 +339,7 @@ impl CustomResourcesScreen {
             .map_or_else(|| Noun::of(Page::CustomResources), Crd::noun);
         let shape = ListShape {
             shown: self.shown,
-            total: self.rows.len(),
+            total: self.rows.items().len(),
             namespace,
             noun,
             cluster: &self.cluster_name,
@@ -341,7 +347,7 @@ impl CustomResourcesScreen {
         empty_list(&shape, &self.filter, show_all, cx)
     }
 
-    fn table(&mut self, cx: &mut Context<Self>) -> Option<Entity<Table<Resource>>> {
+    fn table(&mut self, cx: &mut Context<Self>) -> Option<Entity<Table<ResourceRow>>> {
         let crd = self.crd.clone()?;
         if let Some(table) = self.tables.get(&crd.key) {
             return Some(table.clone());
@@ -349,8 +355,8 @@ impl CustomResourcesScreen {
         let id = format!("{TABLE_PREFIX}-{}", crd.name());
         let table = cx.new(|cx| {
             Table::new(id, columns(&crd), cx)
-                .row_key(|r: &Resource| format!("{}/{}", r.namespace, r.name).into())
-                .row_status(|r: &Resource| (r.status != Status::Ok).then_some(r.status))
+                .row_key(|r: &ResourceRow| format!("{}/{}", r.namespace, r.name).into())
+                .row_status(|r: &ResourceRow| (r.status != Status::Ok).then_some(r.status))
         });
         let subscription = cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
             let ix = match *event {
@@ -370,8 +376,9 @@ impl CustomResourcesScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        let resources = self.rows.items();
         let labels = label_values(
-            self.rows
+            resources
                 .iter()
                 .filter(|row| self.in_namespace(row))
                 .map(|row| &row.labels),
@@ -381,16 +388,19 @@ impl CustomResourcesScreen {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let base = filter_resources(&self.rows, self.namespace.as_deref(), &query);
-        let chips = filter_counts(&base)
+        let base = filter_resources(resources, self.namespace.as_deref(), &query);
+        let chips = filter_counts(base.iter().filter_map(|&ix| resources.get(ix)))
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))
             .collect();
         let chip = StatusFilter::at(chip);
-        let rows: Vec<Resource> = base.into_iter().filter(|r| chip.keeps(r.status)).collect();
+        let kept = base
+            .into_iter()
+            .filter(|&ix| resources.get(ix).is_some_and(|r| chip.keeps(r.status)));
+        let rows = self.rows.rows(kept);
         let shown = rows.len();
         self.shown = shown;
-        let total = self.rows.len();
+        let total = resources.len();
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
             bar.set_matches(shown, total, cx);
@@ -448,9 +458,20 @@ impl CustomResourcesScreen {
         self.select(None, cx);
     }
 
+    fn detail(&self) -> Option<&ClusterDetail> {
+        let cluster = self.cluster.as_ref()?;
+        self.rows.snapshot().detail(cluster)
+    }
+
+    fn events(&self) -> &[Event] {
+        self.detail()
+            .map_or(&[][..], |detail| detail.events.as_slice())
+    }
+
     fn selected_row(&self) -> Option<&Resource> {
         let (ns, name) = self.selected.as_ref()?;
         self.rows
+            .items()
             .iter()
             .find(|r| &r.namespace == ns && &r.name == name)
     }
@@ -463,11 +484,11 @@ impl CustomResourcesScreen {
     fn row_actions(
         &self,
         cx: &mut Context<Self>,
-    ) -> impl Fn(&Resource, &[&Resource]) -> Vec<MenuItem> + 'static {
+    ) -> impl Fn(&ResourceRow, &[&ResourceRow]) -> Vec<MenuItem> + 'static {
         let cluster = self.cluster.clone();
         let crd = self.crd.clone();
         let screen = cx.weak_entity();
-        move |row: &Resource, _: &[&Resource]| {
+        move |row: &ResourceRow, _: &[&ResourceRow]| {
             let (Some(cluster), Some(crd)) = (cluster.clone(), crd.as_ref()) else {
                 return Vec::new();
             };
@@ -510,7 +531,7 @@ impl CustomResourcesScreen {
                 .into_any_element()
         };
         let namespace = (!row.namespace.is_empty()).then_some(row.namespace.as_str());
-        let events: Vec<PodEvent> = diagnosis::about(&self.events, &kind, namespace, &row.name)
+        let events: Vec<PodEvent> = diagnosis::about(self.events(), &kind, namespace, &row.name)
             .into_iter()
             .map(PodEvent::from)
             .collect();
@@ -521,9 +542,10 @@ impl CustomResourcesScreen {
                 let _ = screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(command)));
             }
         });
-        let related = self
-            .target(row)
-            .and_then(|target| self.related.iter().find(|related| related.target == target));
+        let related = self.target(row).and_then(|target| {
+            let related = self.detail().map_or(&[][..], |d| d.related.as_slice());
+            related.iter().find(|related| related.target == target)
+        });
         let related = inspector_section(related, &pick, cx);
         let mut inspector = Inspector::new(INSPECTOR_ID, row.name.clone())
             .mono()
@@ -592,46 +614,47 @@ impl Render for CustomResourcesScreen {
     }
 }
 
-fn columns(crd: &Crd) -> Vec<Column<Resource>> {
+fn columns(crd: &Crd) -> Vec<Column<ResourceRow>> {
     let name = Column::status_text(
         "Name",
-        |r: &Resource| r.status,
-        |r: &Resource| r.name.clone().into(),
+        |r: &ResourceRow| r.status,
+        |r: &ResourceRow| r.name.clone().into(),
     )
     .highlight()
     .mono()
     .flex(NAME_WEIGHT, NAME_MIN)
-    .sort_by_key(|r: &Resource| r.name.clone());
+    .sort_by_key(|r: &ResourceRow| r.name.clone());
     let namespace = crd.namespaced.then(|| {
         Column::colored_text(
             "Namespace",
-            |r: &Resource| r.namespace.clone().into(),
+            |r: &ResourceRow| r.namespace.clone().into(),
             |_, p| p.fg2,
         )
         .highlight()
         .fixed(NAMESPACE_WIDTH)
-        .sort_by_key(|r: &Resource| r.namespace.clone())
+        .sort_by_key(|r: &ResourceRow| r.namespace.clone())
     });
     let cells = crd.columns.iter().enumerate().map(|(ix, column)| {
         Column::colored_text(
             column.name.clone(),
-            move |r: &Resource| r.cells.get(ix).cloned().unwrap_or_default().into(),
+            move |r: &ResourceRow| r.cells.get(ix).cloned().unwrap_or_default().into(),
             |_, p| p.fg2,
         )
         .mono()
         .flex(CELL_WEIGHT, CELL_MIN)
-        .sort_by_key(move |r: &Resource| r.cells.get(ix).cloned())
+        .sort_by_key(move |r: &ResourceRow| r.cells.get(ix).cloned())
     });
-    let reason = Column::new(REASON, |r: &Resource, palette| {
+    let reason = Column::new(REASON, |r: &ResourceRow, palette| {
         reason_cell(r.status, r.diagnosis.as_ref(), palette)
     })
-    .tooltip(|r: &Resource| reason_tooltip(r.diagnosis.as_ref()))
+    .tooltip(|r: &ResourceRow| reason_tooltip(r.diagnosis.as_ref()))
     .flex(REASON_WEIGHT, REASON_MIN)
-    .sort_by_key(|r: &Resource| r.diagnosis.as_ref().map(|d| d.reason.clone()));
-    let age_column = Column::colored_text("Age", |r: &Resource| age(r.age).into(), |_, p| p.mute)
-        .mono()
-        .fixed(AGE_WIDTH)
-        .sort_by_key(|r: &Resource| r.age);
+    .sort_by_key(|r: &ResourceRow| r.diagnosis.as_ref().map(|d| d.reason.clone()));
+    let age_column =
+        Column::colored_text("Age", |r: &ResourceRow| age(r.age).into(), |_, p| p.mute)
+            .mono()
+            .fixed(AGE_WIDTH)
+            .sort_by_key(|r: &ResourceRow| r.age);
     std::iter::once(name)
         .chain(namespace)
         .chain(cells)

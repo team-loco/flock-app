@@ -1,7 +1,10 @@
+use std::rc::Rc;
+use std::sync::Arc;
+
 use flock_core::emptiness::Noun;
 use flock_core::filter::StatusFilter;
 use flock_core::flux::HelmRevision;
-use flock_core::helm::{HelmKey, HelmRelease, HelmReleaseDetail, filter};
+use flock_core::helm::{HelmKey, HelmRelease, HelmReleaseDetail};
 use flock_core::time::age;
 use flock_core::{ClusterId, ClusterSummary, Command, Counts, Page, Snapshot, Status};
 use gpui::{
@@ -13,7 +16,7 @@ use gpui::{
 use super::{ListShape, ScreenEvent, empty_list, new_tab_item};
 use crate::kit::{
     Button, CodeView, Column, EmptyState, FilterBar, FilterEvent, MenuItem, PageHeader,
-    SectionHeader, Skeleton, StatusGlyph, Table, TableEvent, chip_label,
+    SectionHeader, Skeleton, SnapshotRow, SnapshotRows, StatusGlyph, Table, TableEvent, chip_label,
 };
 use crate::theme::{ActiveTheme, RULE, SPACE_3, SPACE_8};
 
@@ -30,6 +33,8 @@ const FLUX_MIN: Pixels = px(160.);
 const GLYPH_WIDTH: Pixels = px(24.);
 const DESCRIPTION_WEIGHT: f32 = 1.;
 const NOT_FLUX: &str = "—";
+
+type HelmRow = SnapshotRow<HelmRelease>;
 const OPEN_FLUX: &str = "Open Flux HelmRelease";
 const OPEN_FLUX_DESCRIPTION: &str = "Show the Flux object that manages this release.";
 const HISTORY: &str = "History";
@@ -53,9 +58,10 @@ fn flux_label(release: &HelmRelease) -> String {
 pub struct HelmReleasesScreen {
     cluster: Option<ClusterId>,
     cluster_name: String,
-    rows: Vec<HelmRelease>,
+    helm: Rc<SnapshotRows<HelmRelease>>,
+    releases: Vec<usize>,
     shown: usize,
-    table: Entity<Table<HelmRelease>>,
+    table: Entity<Table<HelmRow>>,
     filter: Entity<FilterBar>,
     _subscriptions: Vec<Subscription>,
 }
@@ -68,8 +74,8 @@ impl HelmReleasesScreen {
         let table = cx.new(|cx| {
             Table::new("helm-releases", columns(), cx)
                 .click_opens()
-                .row_key(|r: &HelmRelease| format!("{}/{}", r.key.namespace, r.key.name).into())
-                .row_status(|r: &HelmRelease| (r.status != Status::Ok).then_some(r.status))
+                .row_key(|r: &HelmRow| format!("{}/{}", r.key.namespace, r.key.name).into())
+                .row_status(|r: &HelmRow| (r.status != Status::Ok).then_some(r.status))
         });
         let subscriptions = vec![
             cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
@@ -87,7 +93,8 @@ impl HelmReleasesScreen {
         Self {
             cluster: None,
             cluster_name: String::new(),
-            rows: Vec::new(),
+            helm: SnapshotRows::empty(),
+            releases: Vec::new(),
             shown: 0,
             table,
             filter,
@@ -103,29 +110,43 @@ impl HelmReleasesScreen {
         gpui::Focusable::focus_handle(&self.table, cx)
     }
 
+    fn releases(&self) -> impl Iterator<Item = (usize, &HelmRelease)> {
+        let helm = self.helm.items();
+        self.releases
+            .iter()
+            .filter_map(|&ix| helm.get(ix).map(|release| (ix, release)))
+    }
+
     pub fn header_note(&self) -> String {
-        let counts = Counts::of(self.rows.iter().map(|row| row.status));
+        let counts = Counts::of(self.releases().map(|(_, row)| row.status));
         let flagged = counts.flagged();
         if flagged > 0 {
-            format!("{flagged} of {} need attention", self.rows.len())
+            format!("{flagged} of {} need attention", self.releases.len())
         } else {
-            self.rows.len().to_string()
+            self.releases.len().to_string()
         }
     }
 
-    pub fn set(&mut self, cluster: &ClusterSummary, snapshot: &Snapshot, cx: &mut Context<Self>) {
-        let rows: Vec<HelmRelease> = snapshot
-            .helm_releases(&cluster.id)
-            .into_iter()
-            .cloned()
-            .collect();
+    pub fn set(
+        &mut self,
+        cluster: &ClusterSummary,
+        snapshot: &Arc<Snapshot>,
+        cx: &mut Context<Self>,
+    ) {
         let switched = self.cluster.as_ref() != Some(&cluster.id);
-        if !switched && rows == self.rows {
+        if !switched && self.helm.from(snapshot) {
             return;
         }
         self.cluster = Some(cluster.id.clone());
         self.cluster_name.clone_from(&cluster.name);
-        self.rows = rows;
+        self.helm = SnapshotRows::new(snapshot, |snapshot| &snapshot.helm);
+        self.releases = snapshot
+            .helm
+            .iter()
+            .enumerate()
+            .filter(|(_, release)| release.key.cluster == cluster.id)
+            .map(|(ix, _)| ix)
+            .collect();
         self.refresh(cx);
     }
 
@@ -134,22 +155,29 @@ impl HelmReleasesScreen {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let base: Vec<HelmRelease> = filter(&self.rows, &query).into_iter().cloned().collect();
-        let chips = StatusFilter::counts(base.iter().map(|row| row.status))
+        let base: Vec<(usize, &HelmRelease)> = self
+            .releases()
+            .filter(|(_, release)| release.matches(&query))
+            .collect();
+        let chips = StatusFilter::counts(base.iter().map(|(_, row)| row.status))
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))
             .collect();
         let chip = StatusFilter::at(chip);
-        let rows: Vec<HelmRelease> = base.into_iter().filter(|r| chip.keeps(r.status)).collect();
+        let kept = base
+            .into_iter()
+            .filter(|(_, r)| chip.keeps(r.status))
+            .map(|(ix, _)| ix);
+        let rows = self.helm.rows(kept);
         self.shown = rows.len();
-        let (shown, total) = (self.shown, self.rows.len());
+        let (shown, total) = (self.shown, self.releases.len());
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
             bar.set_matches(shown, total, cx);
         });
         let scope = self.cluster.as_ref().map(|c| c.as_str().to_owned());
         let screen = cx.weak_entity();
-        let actions = move |row: &HelmRelease, _: &[&HelmRelease]| -> Vec<MenuItem> {
+        let actions = move |row: &HelmRow, _: &[&HelmRow]| -> Vec<MenuItem> {
             let open_screen = screen.clone();
             let open = new_tab_item(Command::OpenHelmRelease(row.key.clone()), move |c, cx| {
                 let _ = open_screen.update(cx, |_, cx| cx.emit(ScreenEvent::Command(c)));
@@ -179,7 +207,7 @@ impl HelmReleasesScreen {
     fn empty_state(&self, cx: &mut Context<Self>) -> Option<EmptyState> {
         let shape = ListShape {
             shown: self.shown,
-            total: self.rows.len(),
+            total: self.releases.len(),
             namespace: None,
             noun: Noun::of(Page::Releases),
             cluster: &self.cluster_name,
@@ -203,53 +231,49 @@ impl Render for HelmReleasesScreen {
     }
 }
 
-fn columns() -> Vec<Column<HelmRelease>> {
+fn columns() -> Vec<Column<HelmRow>> {
     vec![
         Column::status_text(
             "Name",
-            |r: &HelmRelease| r.status,
-            |r: &HelmRelease| r.key.name.clone().into(),
+            |r: &HelmRow| r.status,
+            |r: &HelmRow| r.key.name.clone().into(),
         )
         .highlight()
         .mono()
         .flex(NAME_WEIGHT, NAME_MIN)
-        .sort_by_key(|r: &HelmRelease| r.key.name.clone()),
+        .sort_by_key(|r: &HelmRow| r.key.name.clone()),
         Column::colored_text(
             "Namespace",
-            |r: &HelmRelease| r.key.namespace.clone().into(),
+            |r: &HelmRow| r.key.namespace.clone().into(),
             |_, p| p.fg2,
         )
         .highlight()
         .fixed(NAMESPACE_WIDTH)
-        .sort_by_key(|r: &HelmRelease| r.key.namespace.clone()),
-        Column::colored_text(
-            "Chart",
-            |r: &HelmRelease| r.chart_label().into(),
-            |_, p| p.fg2,
-        )
-        .mono()
-        .fixed(CHART_WIDTH)
-        .sort_by_key(HelmRelease::chart_label),
+        .sort_by_key(|r: &HelmRow| r.key.namespace.clone()),
+        Column::colored_text("Chart", |r: &HelmRow| r.chart_label().into(), |_, p| p.fg2)
+            .mono()
+            .fixed(CHART_WIDTH)
+            .sort_by_key(|r: &HelmRow| r.chart_label()),
         Column::colored_text(
             "App version",
-            |r: &HelmRelease| r.app_version.clone().into(),
+            |r: &HelmRow| r.app_version.clone().into(),
             |_, p| p.fg2,
         )
         .mono()
         .fixed(APP_WIDTH)
-        .sort_by_key(|r: &HelmRelease| r.app_version.clone()),
+        .sort_by_key(|r: &HelmRow| r.app_version.clone()),
         Column::colored_text(
             "Revision",
-            |r: &HelmRelease| r.revision.to_string().into(),
+            |r: &HelmRow| r.revision.to_string().into(),
             |_, p| p.fg2,
         )
         .mono()
         .end()
         .fixed(REVISION_WIDTH)
-        .sort_by_key(|r: &HelmRelease| r.revision),
+        .sort_by_key(|r: &HelmRow| r.revision),
         Column::colored_text(
             "Status",
-            |r: &HelmRelease| r.state.clone().into(),
+            |r: &HelmRow| r.state.clone().into(),
             |r, p| {
                 if r.status == Status::Ok {
                     p.fg2
@@ -260,23 +284,23 @@ fn columns() -> Vec<Column<HelmRelease>> {
         )
         .mono()
         .fixed(STATE_WIDTH)
-        .sort_by_key(|r: &HelmRelease| r.state.clone()),
+        .sort_by_key(|r: &HelmRow| r.state.clone()),
         Column::colored_text(
             "Updated",
-            |r: &HelmRelease| r.updated.map(age).unwrap_or_default().into(),
+            |r: &HelmRow| r.updated.map(age).unwrap_or_default().into(),
             |_, p| p.mute,
         )
         .mono()
         .fixed(AGE_WIDTH)
-        .sort_by_key(|r: &HelmRelease| r.updated),
+        .sort_by_key(|r: &HelmRow| r.updated),
         Column::colored_text(
             "Flux",
-            |r: &HelmRelease| flux_label(r).into(),
+            |r: &HelmRow| flux_label(r).into(),
             |r, p| if r.flux.is_some() { p.acc } else { p.mute },
         )
         .mono()
         .flex(FLUX_WEIGHT, FLUX_MIN)
-        .sort_by_key(flux_label),
+        .sort_by_key(|r: &HelmRow| flux_label(r)),
     ]
 }
 

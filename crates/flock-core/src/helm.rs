@@ -79,13 +79,6 @@ pub struct HelmReleaseDetail {
     pub manifest: String,
 }
 
-pub fn filter<'a>(releases: &'a [HelmRelease], query: &TextFilter) -> Vec<&'a HelmRelease> {
-    releases
-        .iter()
-        .filter(|release| release.matches(query))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,8 +104,10 @@ mod tests {
             release("monitoring", "grafana", "grafana"),
         ];
         let names = |query: &str| -> Vec<String> {
-            filter(&releases, &TextFilter::parse(query))
-                .into_iter()
+            let query = TextFilter::parse(query);
+            releases
+                .iter()
+                .filter(|r| r.matches(&query))
                 .map(|r| r.key.name.clone())
                 .collect()
         };

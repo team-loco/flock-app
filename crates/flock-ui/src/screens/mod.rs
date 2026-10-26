@@ -254,7 +254,7 @@ impl ClusterPages {
             && is_flux_list(page)
         {
             self.flux.update(cx, |screen, cx| {
-                screen.set(cluster, page, &snapshot.flux, cx);
+                screen.set(cluster, page, snapshot, cx);
             });
             return;
         }
@@ -267,18 +267,25 @@ impl ClusterPages {
                 .overview
                 .update(cx, |screen, cx| screen.set(cluster, detail, cx)),
             Page::Nodes => self.nodes.update(cx, |screen, cx| {
-                screen.set(cluster, detail, confirm_destructive, cx);
+                screen.set(cluster, snapshot, confirm_destructive, cx);
             }),
             Page::Namespaces => self
                 .namespaces
-                .update(cx, |screen, cx| screen.set(cluster, detail, cx)),
+                .update(cx, |screen, cx| screen.set(cluster, snapshot, cx)),
             Page::Events => self.events.update(cx, |screen, cx| {
-                screen.set(cluster, detail, preferences, cx);
+                screen.set(cluster, snapshot, preferences, cx);
             }),
             other => {
                 if let Some(kind) = ResourceKind::for_page(other) {
                     self.resources.update(cx, |screen, cx| {
-                        screen.set(cluster, kind, detail, confirm_destructive, preferences, cx);
+                        screen.set(
+                            cluster,
+                            kind,
+                            snapshot,
+                            confirm_destructive,
+                            preferences,
+                            cx,
+                        );
                     });
                 }
             }
@@ -289,7 +296,7 @@ impl ClusterPages {
         &self,
         cluster: Option<&ClusterSummary>,
         crd: Option<&flock_core::crd::CrdKey>,
-        snapshot: &Snapshot,
+        snapshot: &Arc<Snapshot>,
         preferences: &flock_core::Preferences,
         cx: &mut App,
     ) {
@@ -306,10 +313,8 @@ impl ClusterPages {
         let Some(definition) = snapshot.crd(&cluster.id, key) else {
             return;
         };
-        let objects = snapshot.custom_objects(&cluster.id, key);
-        let detail = snapshot.detail(&cluster.id);
         self.custom.update(cx, |screen, cx| {
-            screen.set(cluster, definition, objects, detail, preferences, cx);
+            screen.set(cluster, definition, snapshot, preferences, cx);
         });
     }
 

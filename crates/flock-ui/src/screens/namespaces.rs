@@ -1,11 +1,12 @@
+use std::rc::Rc;
+use std::sync::Arc;
+
 use flock_core::cluster::Namespace;
 use flock_core::emptiness::Noun;
 use flock_core::filter::{StatusFilter, label_values};
 use flock_core::related::NAMESPACE;
 use flock_core::time::age;
-use flock_core::{
-    ClusterDetail, ClusterId, ClusterSummary, Command, Counts, Page, ResourceRef, Status,
-};
+use flock_core::{ClusterId, ClusterSummary, Command, Counts, Page, ResourceRef, Snapshot, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
     Render, Styled, Window, div, px,
@@ -13,7 +14,10 @@ use gpui::{
 
 use super::{ListShape, ScreenEvent, empty_list};
 use crate::kit::status_symbols;
-use crate::kit::{Column, FilterBar, FilterEvent, StatusGlyph, Table, TableEvent, chip_label};
+use crate::kit::{
+    Column, FilterBar, FilterEvent, SnapshotRow, SnapshotRows, StatusGlyph, Table, TableEvent,
+    chip_label,
+};
 use crate::theme::{ActiveTheme, FONT_MONO, GLYPH_SLOT, Palette, SPACE_4};
 
 const NAME_WEIGHT: f32 = 1.4;
@@ -24,6 +28,8 @@ const PODS_WIDTH: Pixels = px(52.);
 const CPU_WIDTH: Pixels = px(84.);
 const MEMORY_WIDTH: Pixels = px(84.);
 const AGE_WIDTH: Pixels = px(44.);
+
+type NamespaceRow = SnapshotRow<Namespace>;
 
 fn namespace_ref((name, cluster): (String, ClusterId)) -> ResourceRef {
     ResourceRef {
@@ -38,8 +44,8 @@ pub struct NamespacesScreen {
     cluster: Option<ClusterId>,
     cluster_name: String,
     shown: usize,
-    namespaces: Vec<Namespace>,
-    table: Entity<Table<Namespace>>,
+    namespaces: Rc<SnapshotRows<Namespace>>,
+    table: Entity<Table<NamespaceRow>>,
     filter: Entity<FilterBar>,
 }
 
@@ -54,7 +60,7 @@ impl NamespacesScreen {
         let table = cx.new(|cx| {
             Table::new("namespaces", columns(), cx)
                 .click_opens()
-                .row_key(|n: &Namespace| n.name.clone().into())
+                .row_key(|n: &NamespaceRow| n.name.clone().into())
         });
         cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
             let TableEvent::Opened(ix) = *event else {
@@ -75,7 +81,7 @@ impl NamespacesScreen {
             cluster: None,
             cluster_name: String::new(),
             shown: 0,
-            namespaces: Vec::new(),
+            namespaces: SnapshotRows::empty(),
             table,
             filter,
         }
@@ -86,30 +92,31 @@ impl NamespacesScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let labels = label_values(self.namespaces.iter().map(|namespace| &namespace.labels));
+        let namespaces = self.namespaces.items();
+        let labels = label_values(namespaces.iter().map(|namespace| &namespace.labels));
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let base: Vec<&Namespace> = self
-            .namespaces
+        let base: Vec<(usize, &Namespace)> = namespaces
             .iter()
-            .filter(|n| n.matches(&query))
+            .enumerate()
+            .filter(|(_, n)| n.matches(&query))
             .collect();
-        let chips = StatusFilter::counts(base.iter().map(|n| n.status))
+        let chips = StatusFilter::counts(base.iter().map(|(_, n)| n.status))
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))
             .collect();
         let chip = StatusFilter::at(chip);
-        let rows: Vec<Namespace> = base
+        let kept = base
             .into_iter()
-            .filter(|n| chip.keeps(n.status))
-            .cloned()
-            .collect();
+            .filter(|(_, n)| chip.keeps(n.status))
+            .map(|(ix, _)| ix);
+        let rows = self.namespaces.rows(kept);
         let shown = rows.len();
         self.shown = shown;
-        let total = self.namespaces.len();
+        let total = namespaces.len();
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
             bar.set_matches(shown, total, cx);
@@ -125,23 +132,29 @@ impl NamespacesScreen {
     pub fn set(
         &mut self,
         cluster: &ClusterSummary,
-        detail: &ClusterDetail,
+        snapshot: &Arc<Snapshot>,
         cx: &mut Context<Self>,
     ) {
+        let switched = self.cluster.as_ref() != Some(&cluster.id);
         self.cluster = Some(cluster.id.clone());
         self.cluster_name.clone_from(&cluster.name);
         let scope = cluster.id.as_str().to_owned();
         self.table
             .update(cx, |table, cx| table.set_scope(scope, cx));
-        if self.namespaces == detail.namespaces {
+        if !switched && self.namespaces.from(snapshot) {
             return;
         }
-        self.namespaces.clone_from(&detail.namespaces);
+        let id = cluster.id.clone();
+        self.namespaces = SnapshotRows::new(snapshot, move |snapshot| {
+            snapshot
+                .detail(&id)
+                .map_or(&[][..], |detail| detail.namespaces.as_slice())
+        });
         self.refresh(cx);
     }
 
     pub fn header_note(&self) -> String {
-        let counts = Counts::of(self.namespaces.iter().map(|n| n.status));
+        let counts = Counts::of(self.namespaces.items().iter().map(|n| n.status));
         format!("{} with problems", counts.flagged())
     }
 }
@@ -150,7 +163,7 @@ impl Render for NamespacesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let shape = ListShape {
             shown: self.shown,
-            total: self.namespaces.len(),
+            total: self.namespaces.items().len(),
             namespace: None,
             noun: Noun::of(Page::Namespaces),
             cluster: &self.cluster_name,
@@ -219,44 +232,47 @@ fn name_cell(namespace: &Namespace, palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
-fn columns() -> Vec<Column<Namespace>> {
+fn columns() -> Vec<Column<NamespaceRow>> {
     vec![
-        Column::new("Name", name_cell)
-            .fit_by(|n: &Namespace| n.name.clone().into(), GLYPH_SLOT + SPACE_4)
+        Column::new("Name", |n: &NamespaceRow, palette| name_cell(n, palette))
+            .fit_by(
+                |n: &NamespaceRow| n.name.clone().into(),
+                GLYPH_SLOT + SPACE_4,
+            )
             .mono()
             .flex(NAME_WEIGHT, NAME_MIN)
-            .sort_by_key(|n: &Namespace| n.name.clone()),
-        Column::new("Problems", |n: &Namespace, _| problems(n))
+            .sort_by_key(|n: &NamespaceRow| n.name.clone()),
+        Column::new("Problems", |n: &NamespaceRow, _| problems(n))
             .flex(PROBLEMS_WEIGHT, PROBLEMS_MIN)
-            .sort_by_key(|n: &Namespace| std::cmp::Reverse(n.status)),
-        Column::text("Pods", |n: &Namespace| n.pods.to_string().into())
+            .sort_by_key(|n: &NamespaceRow| std::cmp::Reverse(n.status)),
+        Column::text("Pods", |n: &NamespaceRow| n.pods.to_string().into())
             .mono()
             .end()
             .fixed(PODS_WIDTH)
-            .sort_by_key(|n: &Namespace| n.pods),
-        Column::amount("CPU", Namespace::cpu_label)
+            .sort_by_key(|n: &NamespaceRow| n.pods),
+        Column::amount("CPU", |n: &NamespaceRow| n.cpu_label())
             .mono()
             .end()
             .fixed(CPU_WIDTH)
-            .tooltip(|n: &Namespace| n.cpu_note().into())
-            .sortable(|a: &Namespace, b: &Namespace| {
+            .tooltip(|n: &NamespaceRow| n.cpu_note().into())
+            .sortable(|a: &NamespaceRow, b: &NamespaceRow| {
                 a.cpu
                     .unwrap_or_default()
                     .total_cmp(&b.cpu.unwrap_or_default())
             }),
-        Column::amount("Memory", Namespace::memory_label)
+        Column::amount("Memory", |n: &NamespaceRow| n.memory_label())
             .mono()
             .end()
             .fixed(MEMORY_WIDTH)
-            .tooltip(|n: &Namespace| n.memory_note().into())
-            .sortable(|a: &Namespace, b: &Namespace| {
+            .tooltip(|n: &NamespaceRow| n.memory_note().into())
+            .sortable(|a: &NamespaceRow, b: &NamespaceRow| {
                 a.memory
                     .unwrap_or_default()
                     .total_cmp(&b.memory.unwrap_or_default())
             }),
-        Column::colored_text("Age", |n: &Namespace| age(n.age).into(), |_, p| p.mute)
+        Column::colored_text("Age", |n: &NamespaceRow| age(n.age).into(), |_, p| p.mute)
             .mono()
             .fixed(AGE_WIDTH)
-            .sort_by_key(|n: &Namespace| n.age),
+            .sort_by_key(|n: &NamespaceRow| n.age),
     ]
 }

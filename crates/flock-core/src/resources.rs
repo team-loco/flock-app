@@ -210,10 +210,11 @@ pub fn filter_resources(
     rows: &[Resource],
     namespace: Option<&str>,
     query: &TextFilter,
-) -> Vec<Resource> {
+) -> Vec<usize> {
     rows.iter()
-        .filter(|row| row.matches(namespace, query))
-        .cloned()
+        .enumerate()
+        .filter(|(_, row)| row.matches(namespace, query))
+        .map(|(ix, _)| ix)
         .collect()
 }
 
@@ -230,8 +231,10 @@ pub fn explain(resources: &mut BTreeMap<ResourceKind, Vec<Resource>>, events: &[
     }
 }
 
-pub fn filter_counts(rows: &[Resource]) -> Vec<(StatusFilter, usize)> {
-    StatusFilter::counts(rows.iter().map(|row| row.status))
+pub fn filter_counts<'a>(
+    rows: impl IntoIterator<Item = &'a Resource>,
+) -> Vec<(StatusFilter, usize)> {
+    StatusFilter::counts(rows.into_iter().map(|row| row.status))
 }
 
 #[cfg(test)]
@@ -332,7 +335,12 @@ pub(crate) mod tests {
             resource("payments", "payments-worker", Status::Ok),
             resource("web", "web-frontend", Status::Ok),
         ];
-        let names = |found: Vec<Resource>| found.into_iter().map(|r| r.name).collect::<Vec<_>>();
+        let names = |found: Vec<usize>| {
+            found
+                .into_iter()
+                .map(|ix| rows[ix].name.as_str())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
             names(filter_resources(
                 &rows,

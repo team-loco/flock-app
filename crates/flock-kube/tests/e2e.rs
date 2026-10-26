@@ -344,7 +344,8 @@ fn listed(snapshot: &flock_core::Snapshot, kind: ResourceKind) -> Option<Vec<Res
 fn names_in(rows: &[Resource], namespace: &str) -> Vec<String> {
     let mut names: Vec<String> = filter_resources(rows, Some(namespace), &TextFilter::default())
         .into_iter()
-        .map(|row| row.name)
+        .filter_map(|ix| rows.get(ix))
+        .map(|row| row.name.clone())
         .collect();
     names.sort();
     names

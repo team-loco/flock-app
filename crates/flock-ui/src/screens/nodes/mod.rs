@@ -1,3 +1,6 @@
+use std::rc::Rc;
+use std::sync::Arc;
+
 use flock_core::emptiness::Noun;
 use flock_core::events::Event;
 use flock_core::filter::{label_values, node_query};
@@ -7,9 +10,7 @@ use flock_core::overview::{Commitment, percent};
 use flock_core::pods::{POD_KIND, PodEvent};
 use flock_core::time::age;
 use flock_core::units::{Amount, CPU_UNIT, MEMORY_UNIT, NOT_MEASURED, amount, figure};
-use flock_core::{
-    ClusterDetail, ClusterId, ClusterSummary, Command, Page, ResourceRef, Seen, Status,
-};
+use flock_core::{ClusterId, ClusterSummary, Command, Page, ResourceRef, Seen, Snapshot, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, Hsla, InteractiveElement, IntoElement,
     ParentElement, Pixels, Render, SharedString, Styled, WeakEntity, Window, div, px,
@@ -21,8 +22,8 @@ use super::{ALL_LINK, NODE_KIND, ScreenEvent};
 use crate::kit::{
     ActionMenu, Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, FilterBar,
     FilterEvent, Inspector, KeyValue, LabelChips, Link, MenuItem, Meter, MiniMeter, PanelSection,
-    Presence, Select, SelectEvent, Table, TableEvent, Terminal, chip_label, confirm, slide_in,
-    slide_out,
+    Presence, Select, SelectEvent, SnapshotRow, SnapshotRows, Table, TableEvent, Terminal,
+    chip_label, confirm, slide_in, slide_out,
 };
 use crate::screens::edit::edit_command;
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
@@ -66,8 +67,7 @@ pub struct NodesScreen {
     control_plane: Option<String>,
     shown: usize,
     summary: NodeSummary,
-    nodes: Vec<Node>,
-    events: Vec<Event>,
+    nodes: Rc<SnapshotRows<Node>>,
     confirm_destructive: bool,
     selected: Option<String>,
     pool: Option<String>,
@@ -81,9 +81,9 @@ pub struct NodesScreen {
     dock: Entity<DockState>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 struct NodeRow {
-    node: Node,
+    node: SnapshotRow<Node>,
     skewed: bool,
 }
 
@@ -166,8 +166,7 @@ impl NodesScreen {
             control_plane: None,
             shown: 0,
             summary: NodeSummary::default(),
-            nodes: Vec::new(),
-            events: Vec::new(),
+            nodes: SnapshotRows::empty(),
             confirm_destructive: true,
             selected: None,
             pool: None,
@@ -185,31 +184,34 @@ impl NodesScreen {
     pub fn set(
         &mut self,
         cluster: &ClusterSummary,
-        detail: &ClusterDetail,
+        snapshot: &Arc<Snapshot>,
         confirm_destructive: bool,
         cx: &mut Context<Self>,
     ) {
         self.selected = kept_selection(self.cluster.as_ref(), &cluster.id, self.selected.take());
+        let switched = self.cluster.as_ref() != Some(&cluster.id);
         self.cluster = Some(cluster.id.clone());
         self.cluster_name.clone_from(&cluster.name);
-        let changed = self.confirm_destructive != confirm_destructive
+        let changed = switched
+            || self.confirm_destructive != confirm_destructive
             || self.control_plane != cluster.version
-            || self.nodes != detail.nodes;
+            || !self.nodes.from(snapshot);
         self.confirm_destructive = confirm_destructive;
         self.control_plane.clone_from(&cluster.version);
-        if self.events != detail.events {
-            self.events.clone_from(&detail.events);
-            cx.notify();
-        }
         if !changed {
             return;
         }
-        self.nodes.clone_from(&detail.nodes);
-        self.summary = detail.node_summary();
+        let id = cluster.id.clone();
+        self.nodes = SnapshotRows::new(snapshot, move |snapshot| {
+            snapshot
+                .detail(&id)
+                .map_or(&[][..], |detail| detail.nodes.as_slice())
+        });
+        self.summary = NodeSummary::of(self.nodes.items());
         if self
             .selected
             .as_ref()
-            .is_some_and(|name| !self.nodes.iter().any(|n| &n.name == name))
+            .is_some_and(|name| !self.nodes.items().iter().any(|n| &n.name == name))
         {
             self.selected = None;
         }
@@ -222,7 +224,7 @@ impl NodesScreen {
     }
 
     fn set_pools(&mut self, cx: &mut Context<Self>) {
-        let counts = pool_counts(&self.nodes);
+        let counts = pool_counts(self.nodes.items());
         if self
             .pool
             .as_ref()
@@ -233,7 +235,7 @@ impl NodesScreen {
         let options: Vec<SharedString> = std::iter::once(ALL_POOLS.into())
             .chain(counts.iter().map(|(name, _)| name.clone().into()))
             .collect();
-        let numbers: Vec<usize> = std::iter::once(self.nodes.len())
+        let numbers: Vec<usize> = std::iter::once(self.nodes.items().len())
             .chain(counts.iter().map(|(_, count)| *count))
             .collect();
         let selected = self
@@ -249,7 +251,8 @@ impl NodesScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let node_labels: Vec<_> = self.nodes.iter().map(Node::label_map).collect();
+        let nodes = self.nodes.items();
+        let node_labels: Vec<_> = nodes.iter().map(Node::label_map).collect();
         let labels = label_values(&node_labels);
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let (query, chip) = {
@@ -257,29 +260,37 @@ impl NodesScreen {
             (bar.query().clone(), bar.chip())
         };
         let pool = self.pool.as_deref();
-        let base: Vec<&Node> = self
-            .nodes
+        let base: Vec<(usize, &Node)> = nodes
             .iter()
-            .filter(|n| pool.is_none_or(|pool| n.pool() == pool))
-            .filter(|n| n.matches(&query))
+            .enumerate()
+            .filter(|(_, n)| pool.is_none_or(|pool| n.pool() == pool))
+            .filter(|(_, n)| n.matches(&query))
             .collect();
-        let chips = NodeFilter::counts(&base)
+        let base_nodes: Vec<&Node> = base.iter().map(|(_, node)| *node).collect();
+        let chips = NodeFilter::counts(&base_nodes)
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))
             .collect();
         let chip = NodeFilter::at(chip);
         let control_plane = self.control_plane.as_deref();
-        let rows: Vec<NodeRow> = base
+        let kept: Vec<usize> = base
             .into_iter()
-            .filter(|n| chip.keeps(n))
-            .map(|node| NodeRow {
-                node: node.clone(),
-                skewed: control_plane.is_some_and(|server| kubelet_skewed(&node.version, server)),
+            .filter(|(_, n)| chip.keeps(n))
+            .map(|(ix, _)| ix)
+            .collect();
+        let rows: Vec<NodeRow> = self
+            .nodes
+            .rows(kept)
+            .into_iter()
+            .map(|node| {
+                let skewed =
+                    control_plane.is_some_and(|server| kubelet_skewed(&node.version, server));
+                NodeRow { node, skewed }
             })
             .collect();
         let shown = rows.len();
         self.shown = shown;
-        let total = self.nodes.len();
+        let total = nodes.len();
         self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
             bar.set_matches(shown, total, cx);
@@ -348,7 +359,15 @@ impl NodesScreen {
 
     fn selected_node(&self) -> Option<&Node> {
         let name = self.selected.as_ref()?;
-        self.nodes.iter().find(|n| &n.name == name)
+        self.nodes.items().iter().find(|n| &n.name == name)
+    }
+
+    fn events(&self) -> &[Event] {
+        let detail = self
+            .cluster
+            .as_ref()
+            .and_then(|cluster| self.nodes.snapshot().detail(cluster));
+        detail.map_or(&[][..], |detail| detail.events.as_slice())
     }
 
     fn skewed(&self, node: &Node) -> bool {
@@ -408,7 +427,7 @@ impl NodesScreen {
             .text("runtime", node.runtime.clone())
             .text("age", age(node.age));
         let events: Vec<PodEvent> =
-            flock_core::diagnosis::about(&self.events, NODE_KIND, None, &node.name)
+            flock_core::diagnosis::about(self.events(), NODE_KIND, None, &node.name)
                 .into_iter()
                 .map(PodEvent::from)
                 .collect();
@@ -540,7 +559,7 @@ impl Render for NodesScreen {
         let palette = *cx.palette();
         let shape = ListShape {
             shown: self.shown,
-            total: self.nodes.len(),
+            total: self.nodes.items().len(),
             namespace: None,
             noun: Noun::of(Page::Nodes),
             cluster: &self.cluster_name,
@@ -556,7 +575,7 @@ impl Render for NodesScreen {
             .font_family(FONT_MONO)
             .text_size(TEXT_LABEL)
             .text_color(palette.mute)
-            .child(footer_line(self.shown, self.nodes.len()));
+            .child(footer_line(self.shown, self.nodes.items().len()));
         let current = self.selected_node().cloned();
         let shown = current.as_ref().map(|node| (node, node.name.as_str()));
         let motion = self.presence.track(shown, presence, cx);
