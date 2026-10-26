@@ -68,7 +68,7 @@ depends = ["fmt", "lint", "test", "typos", "deny"]
 
 [env]
 FLOCK_SCALE_IMAGE = "registry.k8s.io/pause:3.10"
-LOCO_REF = "v0.0.119"
+LOCO_REF = "v0.0.135"
 
 [tasks."gen:keys"]
 description = "Regenerate docs/keyboard.md from the binding table"
