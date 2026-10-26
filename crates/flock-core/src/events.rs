@@ -1,8 +1,9 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use crate::filter::{FilterSpec, TextFilter};
+use crate::filter::{FilterSpec, Labels, Searchable};
 use crate::{ClusterId, Command, Counts, FluxKey, FluxKind, ResourceRef, Status};
 
 pub const FLUX_EVENT_KINDS: [&str; 6] = [
@@ -110,8 +111,10 @@ impl Event {
     pub fn is_warning(&self) -> bool {
         self.status != Status::Ok
     }
+}
 
-    pub const FILTER: FilterSpec<Self> = FilterSpec {
+impl Searchable for Event {
+    const FILTER: FilterSpec<Self> = FilterSpec {
         fields: &[
             ("reason", |e, (), out| out.push(e.reason.as_str().into())),
             ("object", |e, (), out| out.push(e.object.as_str().into())),
@@ -124,9 +127,12 @@ impl Event {
         labels: true,
     };
 
-    fn matches(&self, filter: EventFilter, query: &TextFilter) -> bool {
-        filter.keeps(self)
-            && Self::FILTER.matches(self, query, self.namespace.as_deref(), &[&self.labels])
+    fn namespace(&self) -> Option<&str> {
+        self.namespace.as_deref()
+    }
+
+    fn labels(&self) -> Option<Cow<'_, Labels>> {
+        Some(Cow::Borrowed(&self.labels))
     }
 }
 
@@ -158,16 +164,8 @@ impl EventFilter {
     }
 }
 
-pub fn filter_counts(
-    events: &[Event],
-    scoped: &[usize],
-    query: &TextFilter,
-) -> Vec<(EventFilter, usize)> {
-    let matching: Vec<&Event> = scoped
-        .iter()
-        .filter_map(|&ix| events.get(ix))
-        .filter(|e| e.matches(EventFilter::All, query))
-        .collect();
+pub fn filter_counts<'a>(events: impl IntoIterator<Item = &'a Event>) -> Vec<(EventFilter, usize)> {
+    let matching: Vec<&Event> = events.into_iter().collect();
     EventFilter::ALL
         .iter()
         .map(|filter| (*filter, matching.iter().filter(|e| filter.keeps(e)).count()))
@@ -195,27 +193,26 @@ pub fn counts(events: &[Event]) -> Counts {
     }
 }
 
-pub fn in_namespace(events: &[Event], namespace: Option<&str>) -> Vec<usize> {
-    events
-        .iter()
-        .enumerate()
-        .filter(|(_, event)| {
-            namespace.is_none_or(|namespace| event.namespace.as_deref() == Some(namespace))
+pub fn in_namespace(
+    events: &[Event],
+    candidates: impl IntoIterator<Item = usize>,
+    namespace: Option<&str>,
+) -> Vec<usize> {
+    candidates
+        .into_iter()
+        .filter(|&ix| {
+            events.get(ix).is_some_and(|event| {
+                namespace.is_none_or(|namespace| event.namespace.as_deref() == Some(namespace))
+            })
         })
-        .map(|(ix, _)| ix)
         .collect()
 }
 
-pub fn filter_events(
-    events: &[Event],
-    scoped: &[usize],
-    filter: EventFilter,
-    query: &TextFilter,
-) -> Vec<usize> {
-    let mut kept: Vec<(usize, &Event)> = scoped
+pub fn filter_events(events: &[Event], matched: &[usize], filter: EventFilter) -> Vec<usize> {
+    let mut kept: Vec<(usize, &Event)> = matched
         .iter()
         .filter_map(|&ix| events.get(ix).map(|event| (ix, event)))
-        .filter(|(_, event)| event.matches(filter, query))
+        .filter(|(_, event)| filter.keeps(event))
         .collect();
     kept.sort_by(|(_, a), (_, b)| warnings_order(a, b));
     kept.into_iter().map(|(ix, _)| ix).collect()
@@ -251,8 +248,10 @@ impl ClusterEvent {
         let key = FluxKey::new(self.cluster.as_str(), kind, namespace, target.name);
         Some(Command::OpenFluxObject(key))
     }
+}
 
-    pub const FILTER: FilterSpec<Self> = FilterSpec {
+impl Searchable for ClusterEvent {
+    const FILTER: FilterSpec<Self> = FilterSpec {
         fields: &[
             ("cluster", |e, (), out| {
                 out.push(e.cluster_name.as_str().into());
@@ -273,10 +272,12 @@ impl ClusterEvent {
         labels: true,
     };
 
-    fn matches(&self, filter: EventFilter, query: &TextFilter) -> bool {
-        let event = &self.event;
-        filter.keeps(event)
-            && Self::FILTER.matches(self, query, event.namespace.as_deref(), &[&event.labels])
+    fn namespace(&self) -> Option<&str> {
+        self.event.namespace.as_deref()
+    }
+
+    fn labels(&self) -> Option<Cow<'_, Labels>> {
+        Some(Cow::Borrowed(&self.event.labels))
     }
 }
 
@@ -294,34 +295,22 @@ pub fn newest_first(events: &mut [ClusterEvent]) {
 
 pub fn filter_cluster_events(
     events: &[ClusterEvent],
+    matched: &[usize],
     filter: EventFilter,
-    query: &TextFilter,
 ) -> Vec<usize> {
-    let mut kept: Vec<(usize, &ClusterEvent)> = events
+    let mut kept: Vec<(usize, &ClusterEvent)> = matched
         .iter()
-        .enumerate()
-        .filter(|(_, event)| event.matches(filter, query))
+        .filter_map(|&ix| events.get(ix).map(|event| (ix, event)))
+        .filter(|(_, event)| filter.keeps(&event.event))
         .collect();
     kept.sort_by(|(_, a), (_, b)| newest_order(a, b));
     kept.into_iter().map(|(ix, _)| ix).collect()
 }
 
-pub fn cluster_filter_counts(
-    events: &[ClusterEvent],
-    query: &TextFilter,
-) -> Vec<(EventFilter, usize)> {
-    EventFilter::ALL
-        .iter()
-        .map(|filter| {
-            let n = events.iter().filter(|e| e.matches(*filter, query)).count();
-            (*filter, n)
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filter::{Search, TextFilter};
 
     const MINUTE: u64 = 60;
 
@@ -344,9 +333,8 @@ mod tests {
     }
 
     fn filtered<'a>(events: &'a [Event], filter: EventFilter, query: &str) -> Vec<&'a str> {
-        let all: Vec<usize> = (0..events.len()).collect();
-        let query = TextFilter::parse(query);
-        filter_events(events, &all, filter, &query)
+        let matched = Search::default().matching(events, &TextFilter::parse(query));
+        filter_events(events, &matched, filter)
             .into_iter()
             .map(|ix| events[ix].reason.as_str())
             .collect()
@@ -356,8 +344,8 @@ mod tests {
     fn list_label_tokens_match_metadata() {
         let mut event = event(Status::Ok, "Created", 1);
         event.labels.insert("team".into(), "checkout".into());
-        assert!(event.matches(EventFilter::All, &TextFilter::parse("label:team=checkout")));
-        assert!(!event.matches(EventFilter::All, &TextFilter::parse("l:team=platform")));
+        assert!(event.matches(&TextFilter::parse("label:team=checkout")));
+        assert!(!event.matches(&TextFilter::parse("l:team=platform")));
     }
 
     #[test]
@@ -366,9 +354,13 @@ mod tests {
         let mut other = rows[0].clone();
         other.namespace = Some("default".into());
         rows.push(other);
-        assert_eq!(in_namespace(&rows, None), [0, 1]);
-        assert_eq!(in_namespace(&rows, Some("payments")), [0]);
-        assert_eq!(in_namespace(&rows, Some("missing")), [0_usize; 0]);
+        assert_eq!(in_namespace(&rows, 0..rows.len(), None), [0, 1]);
+        assert_eq!(in_namespace(&rows, 0..rows.len(), Some("payments")), [0]);
+        assert_eq!(in_namespace(&rows, [1], Some("payments")), [0_usize; 0]);
+        assert_eq!(
+            in_namespace(&rows, 0..rows.len(), Some("missing")),
+            [0_usize; 0]
+        );
     }
 
     #[test]
@@ -455,10 +447,7 @@ mod tests {
             ["FailedMount"]
         );
         assert_eq!(filtered(&events, EventFilter::Normal, "backoff"), [""; 0]);
-        assert_eq!(
-            filter_events(&events, &[2, 0], EventFilter::All, &TextFilter::default()),
-            [2, 0]
-        );
+        assert_eq!(filter_events(&events, &[2, 0], EventFilter::All), [2, 0]);
     }
 
     fn flux_event(cluster: &str, kind: &str, reason: &str, minutes: u64) -> ClusterEvent {
@@ -483,7 +472,12 @@ mod tests {
             failing,
             flux_event("east", "GitRepository", "NewArtifact", 1),
         ];
-        let all = filter_cluster_events(&rows, EventFilter::All, &TextFilter::default());
+        let search = Search::default();
+        let flux = |filter: EventFilter, query: &str| {
+            let matched = search.matching(&rows, &TextFilter::parse(query));
+            filter_cluster_events(&rows, &matched, filter)
+        };
+        let all = flux(EventFilter::All, "");
         let reasons: Vec<&str> = all
             .iter()
             .map(|&ix| rows[ix].event.reason.as_str())
@@ -492,21 +486,11 @@ mod tests {
             reasons,
             ["NewArtifact", "UpgradeFailed", "ReconciliationSucceeded"]
         );
-        let west = filter_cluster_events(&rows, EventFilter::All, &TextFilter::parse("west"));
-        assert_eq!(west.len(), 1);
-        let kind = TextFilter::parse("kustomization");
-        assert_eq!(
-            filter_cluster_events(&rows, EventFilter::All, &kind).len(),
-            1
-        );
-        let warnings = filter_cluster_events(&rows, EventFilter::Warnings, &TextFilter::default());
-        assert_eq!(warnings.len(), 1);
-        let namespace = TextFilter::parse("ns:flux-system ");
-        assert_eq!(
-            filter_cluster_events(&rows, EventFilter::All, &namespace).len(),
-            3
-        );
-        let counts = cluster_filter_counts(&rows, &TextFilter::default());
+        assert_eq!(flux(EventFilter::All, "west").len(), 1);
+        assert_eq!(flux(EventFilter::All, "kustomization").len(), 1);
+        assert_eq!(flux(EventFilter::Warnings, "").len(), 1);
+        assert_eq!(flux(EventFilter::All, "ns:flux-system ").len(), 3);
+        let counts = filter_counts(rows.iter().map(|row| &row.event));
         assert_eq!(counts[1], (EventFilter::Warnings, 1));
     }
 

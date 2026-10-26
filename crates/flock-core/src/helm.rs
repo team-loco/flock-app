@@ -1,8 +1,9 @@
+use std::borrow::Cow;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::filter::{FilterSpec, TextFilter};
+use crate::filter::{FilterSpec, Labels, Searchable};
 use crate::flux::HelmRevision;
 use crate::{ClusterId, FluxKey, Status};
 
@@ -48,8 +49,10 @@ impl HelmRelease {
     pub fn chart_label(&self) -> String {
         format!("{}-{}", self.chart, self.chart_version)
     }
+}
 
-    pub const FILTER: FilterSpec<Self> = FilterSpec {
+impl Searchable for HelmRelease {
+    const FILTER: FilterSpec<Self> = FilterSpec {
         fields: &[
             ("name", |r, (), out| out.push(r.key.name.as_str().into())),
             ("namespace", |r, (), out| {
@@ -65,8 +68,12 @@ impl HelmRelease {
         labels: false,
     };
 
-    pub fn matches(&self, query: &TextFilter) -> bool {
-        Self::FILTER.matches(self, query, Some(&self.key.namespace), &[])
+    fn namespace(&self) -> Option<&str> {
+        Some(&self.key.namespace)
+    }
+
+    fn labels(&self) -> Option<Cow<'_, Labels>> {
+        None
     }
 }
 
@@ -82,6 +89,7 @@ pub struct HelmReleaseDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filter::TextFilter;
 
     fn release(namespace: &str, name: &str, chart: &str) -> HelmRelease {
         HelmRelease {

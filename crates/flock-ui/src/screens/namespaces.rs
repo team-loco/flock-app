@@ -74,7 +74,7 @@ impl NamespacesScreen {
         .detach();
         let filter = cx.new(|cx| FilterBar::new("namespace-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
-            this.refresh(cx);
+            this.refresh_rows(cx);
         })
         .detach();
         Self {
@@ -95,14 +95,19 @@ impl NamespacesScreen {
         let namespaces = self.namespaces.items();
         let labels = label_values(namespaces.iter().map(|namespace| &namespace.labels));
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        self.refresh_rows(cx);
+    }
+
+    fn refresh_rows(&mut self, cx: &mut Context<Self>) {
+        let namespaces = self.namespaces.items();
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let base: Vec<(usize, &Namespace)> = namespaces
+        let matched = self.namespaces.matching(&query);
+        let base: Vec<(usize, &Namespace)> = matched
             .iter()
-            .enumerate()
-            .filter(|(_, n)| n.matches(&query))
+            .filter_map(|&ix| namespaces.get(ix).map(|n| (ix, n)))
             .collect();
         let chips = StatusFilter::counts(base.iter().map(|(_, n)| n.status))
             .into_iter()

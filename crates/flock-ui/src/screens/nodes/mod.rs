@@ -143,12 +143,12 @@ impl NodesScreen {
             this.pool = (select.selected_index() > 0)
                 .then(|| select.selected_label().map(ToString::to_string))
                 .flatten();
-            this.refresh(cx);
+            this.refresh_rows(cx);
         })
         .detach();
         let filter = cx.new(|cx| FilterBar::new("node-filter", window, cx).scope(pools.clone()));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
-            this.refresh(cx);
+            this.refresh_rows(cx);
         })
         .detach();
         let actions = cx.new(|cx| ActionMenu::new(ACTIONS_ID, cx));
@@ -255,16 +255,21 @@ impl NodesScreen {
         let node_labels: Vec<_> = nodes.iter().map(Node::label_map).collect();
         let labels = label_values(&node_labels);
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        self.refresh_rows(cx);
+    }
+
+    fn refresh_rows(&mut self, cx: &mut Context<Self>) {
+        let nodes = self.nodes.items();
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
         let pool = self.pool.as_deref();
-        let base: Vec<(usize, &Node)> = nodes
+        let matched = self.nodes.matching(&query);
+        let base: Vec<(usize, &Node)> = matched
             .iter()
-            .enumerate()
+            .filter_map(|&ix| nodes.get(ix).map(|n| (ix, n)))
             .filter(|(_, n)| pool.is_none_or(|pool| n.pool() == pool))
-            .filter(|(_, n)| n.matches(&query))
             .collect();
         let base_nodes: Vec<&Node> = base.iter().map(|(_, node)| *node).collect();
         let chips = NodeFilter::counts(&base_nodes)

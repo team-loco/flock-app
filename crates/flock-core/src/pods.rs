@@ -1,10 +1,10 @@
-use std::cell::OnceCell;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use std::time::Duration;
 
 use crate::diagnosis::{self, Condition, Diagnosis};
-use crate::filter::{FilterSpec, StatusFilter, TextFilter};
+use crate::filter::{FilterSpec, Labels, Searchable, StatusFilter, TextFilter};
 use crate::issue::{Issue, object_line};
 use crate::overview::plural;
 use crate::related::{DEPLOYMENT, REPLICA_SET, deployment_name};
@@ -485,8 +485,8 @@ pub fn nav_counts(pods: &[Pod], cluster: &ClusterId) -> Counts {
     Counts::total(tally(&|_| true)).with_err(tally(&failing))
 }
 
-impl Pod {
-    pub const FILTER: FilterSpec<Self> = FilterSpec {
+impl Searchable for Pod {
+    const FILTER: FilterSpec<Self> = FilterSpec {
         fields: &[
             ("name", |p, (), out| out.push(p.name.as_str().into())),
             ("namespace", |p, (), out| {
@@ -502,20 +502,13 @@ impl Pod {
         namespace: true,
         labels: true,
     };
-}
 
-#[derive(Debug, Default)]
-pub struct PodSearch {
-    texts: OnceCell<Vec<String>>,
-}
+    fn namespace(&self) -> Option<&str> {
+        Some(&self.namespace)
+    }
 
-impl PodSearch {
-    fn texts(&self, pods: &[Pod]) -> &[String] {
-        self.texts.get_or_init(|| {
-            pods.iter()
-                .map(|pod| Pod::FILTER.search_text(pod))
-                .collect()
-        })
+    fn labels(&self) -> Option<Cow<'_, Labels>> {
+        Some(Cow::Borrowed(&self.labels))
     }
 }
 
@@ -527,45 +520,20 @@ pub struct PodQuery {
 }
 
 impl PodQuery {
-    pub fn base(&self, pods: &[Pod], search: &PodSearch, cluster: &ClusterId) -> Vec<usize> {
-        self.base_within(pods, search, cluster, 0..pods.len())
-    }
-
-    pub fn base_within(
-        &self,
-        pods: &[Pod],
-        search: &PodSearch,
-        cluster: &ClusterId,
-        candidates: impl IntoIterator<Item = usize>,
-    ) -> Vec<usize> {
-        let texts = (!self.text.words.is_empty()).then(|| search.texts(pods));
-        candidates
-            .into_iter()
+    pub fn base(&self, pods: &[Pod], matched: &[usize], cluster: &ClusterId) -> Vec<usize> {
+        matched
+            .iter()
+            .copied()
             .filter(|&ix| {
-                let Some(pod) = pods.get(ix) else {
-                    return false;
-                };
-                let text = texts
-                    .and_then(|texts| texts.get(ix))
-                    .map_or("", String::as_str);
-                &pod.cluster == cluster
-                    && self
-                        .namespace
-                        .as_ref()
-                        .is_none_or(|namespace| &pod.namespace == namespace)
-                    && Pod::FILTER.matches_search(
-                        pod,
-                        &self.text,
-                        Some(&pod.namespace),
-                        &[&pod.labels],
-                        text,
-                    )
+                pods.get(ix).is_some_and(|pod| {
+                    &pod.cluster == cluster
+                        && self
+                            .namespace
+                            .as_ref()
+                            .is_none_or(|namespace| &pod.namespace == namespace)
+                })
             })
             .collect()
-    }
-
-    pub fn narrows(&self, previous: &Self) -> bool {
-        self.namespace == previous.namespace && self.text.narrows(&previous.text)
     }
 
     pub fn failing_elsewhere(&self, pods: &[Pod], cluster: &ClusterId) -> Option<FailingElsewhere> {
@@ -597,6 +565,7 @@ impl PodQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filter::Search;
 
     fn port(port: u16) -> ContainerPort {
         ContainerPort {
@@ -945,8 +914,9 @@ mod tests {
             ..PodQuery::default()
         };
         let pods = std::slice::from_ref(pod);
-        let matched = query.base(pods, &PodSearch::default(), &pod.cluster);
-        let expected = Pod::FILTER.matches(pod, text, Some(&pod.namespace), &[&pod.labels]);
+        let matched = Search::default().matching(pods, text);
+        let matched = query.base(pods, &matched, &pod.cluster);
+        let expected = pod.matches(text);
         assert_eq!(matched.is_empty(), !expected, "{text:?}");
         !matched.is_empty()
     }
@@ -994,8 +964,8 @@ mod tests {
             namespace: Some("web".into()),
             ..PodQuery::default()
         };
-        let search = PodSearch::default();
-        let base = query.base(&pods, &search, &prod);
+        let all: Vec<usize> = (0..pods.len()).collect();
+        let base = query.base(&pods, &all, &prod);
         let names: Vec<&str> = query
             .apply(&pods, &base)
             .iter()
@@ -1007,53 +977,9 @@ mod tests {
             filter: PodFilter::Pending,
             ..PodQuery::default()
         };
-        let base = pending.base(&pods, &search, &prod);
+        let base = pending.base(&pods, &all, &prod);
         assert_eq!(pending.apply(&pods, &base).len(), 1);
         assert_eq!(base.len(), 3);
-    }
-
-    #[test]
-    fn a_longer_query_narrows_the_previous_matches_to_the_same_result() {
-        let mut other = healthy("checkout-elsewhere", "web");
-        other.cluster = ClusterId::new("staging");
-        let pods = vec![
-            crashing(),
-            healthy("checkout-web", "web"),
-            healthy("cart", "web"),
-            pending(),
-            other,
-        ];
-        let prod = ClusterId::new("prod");
-        let search = PodSearch::default();
-        let query = |text: &str| PodQuery {
-            text: TextFilter::parse(text),
-            ..PodQuery::default()
-        };
-        let mut previous = query("");
-        let mut matched = previous.base(&pods, &search, &prod);
-        for typed in [
-            "c",
-            "ch",
-            "che",
-            "check",
-            "checko",
-            "checkout",
-            "checkout w",
-        ] {
-            let next = query(typed);
-            assert!(next.narrows(&previous), "{typed}");
-            let narrowed = next.base_within(&pods, &search, &prod, matched.iter().copied());
-            assert_eq!(narrowed, next.base(&pods, &search, &prod), "{typed}");
-            previous = next;
-            matched = narrowed;
-        }
-        assert_eq!(matched, [1]);
-        let other_namespace = PodQuery {
-            namespace: Some("web".into()),
-            ..query("checkout w")
-        };
-        assert!(!other_namespace.narrows(&previous));
-        assert!(!query("checkout").narrows(&previous));
     }
 
     #[test]

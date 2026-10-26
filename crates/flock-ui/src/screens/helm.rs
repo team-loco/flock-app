@@ -155,9 +155,12 @@ impl HelmReleasesScreen {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let base: Vec<(usize, &HelmRelease)> = self
-            .releases()
-            .filter(|(_, release)| release.matches(&query))
+        let helm = self.helm.items();
+        let matched = self.helm.matching(&query);
+        let base: Vec<(usize, &HelmRelease)> = matched
+            .iter()
+            .filter(|ix| self.releases.binary_search(ix).is_ok())
+            .filter_map(|&ix| helm.get(ix).map(|release| (ix, release)))
             .collect();
         let chips = StatusFilter::counts(base.iter().map(|(_, row)| row.status))
             .into_iter()

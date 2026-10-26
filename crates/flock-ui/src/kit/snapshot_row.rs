@@ -3,12 +3,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use flock_core::Snapshot;
+use flock_core::filter::{Search, Searchable, TextFilter};
 
 type Items<T> = Box<dyn Fn(&Snapshot) -> &[T]>;
 
 pub struct SnapshotRows<T: 'static> {
     snapshot: Arc<Snapshot>,
     items: Items<T>,
+    search: Search<T>,
 }
 
 impl<T: 'static> SnapshotRows<T> {
@@ -16,6 +18,7 @@ impl<T: 'static> SnapshotRows<T> {
         Rc::new(Self {
             snapshot: Arc::clone(snapshot),
             items: Box::new(items),
+            search: Search::default(),
         })
     }
 
@@ -45,6 +48,13 @@ impl<T: 'static> SnapshotRows<T> {
                 ix,
             })
             .collect()
+    }
+
+    pub fn matching(&self, query: &TextFilter) -> Rc<[usize]>
+    where
+        T: Searchable,
+    {
+        self.search.matching(self.items(), query)
     }
 
     pub fn all(self: &Rc<Self>) -> Vec<SnapshotRow<T>> {
@@ -141,6 +151,7 @@ pub(crate) mod tests {
         );
         assert_eq!(rows.first().map(SnapshotRow::index), Some(1));
         assert_eq!(source.all().len(), 2);
+        assert_eq!(*source.matching(&TextFilter::parse("SEC")), [1]);
     }
 
     #[test]

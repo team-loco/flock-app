@@ -1,9 +1,10 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::events::{self, Event};
-use crate::filter::{FilterSpec, TextFilter};
+use crate::filter::{FilterSpec, Labels, Searchable};
 use crate::namespace::NamespaceDetail;
 use crate::nodes::{Node, NodeSummary};
 use crate::overview::{Capacity, Overview, WorkloadHealth};
@@ -32,25 +33,26 @@ pub struct Namespace {
     pub age: Duration,
 }
 
-impl Namespace {
-    pub const FILTER: FilterSpec<Self> = FilterSpec {
+impl Searchable for Namespace {
+    const FILTER: FilterSpec<Self> = FilterSpec {
         fields: &[
             ("name", |n, (), out| out.push(n.name.as_str().into())),
             ("phase", |n, (), out| out.push(n.phase.as_str().into())),
         ],
-        namespace: false,
+        namespace: true,
         labels: true,
     };
 
-    pub fn matches(&self, query: &TextFilter) -> bool {
-        let name_ok = query.matches_namespace(Some(&self.name));
-        let rest = TextFilter {
-            namespace: None,
-            ..query.clone()
-        };
-        name_ok && Self::FILTER.matches(self, &rest, Some(&self.name), &[&self.labels])
+    fn namespace(&self) -> Option<&str> {
+        Some(&self.name)
     }
 
+    fn labels(&self) -> Option<Cow<'_, Labels>> {
+        Some(Cow::Borrowed(&self.labels))
+    }
+}
+
+impl Namespace {
     pub fn cpu_label(&self) -> Amount {
         self.cpu.map_or_else(Amount::missing, |cpu| {
             Amount::of(units::figure(cpu), CPU_UNIT)
@@ -250,6 +252,7 @@ impl ClusterDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filter::TextFilter;
     use crate::nodes::tests::node;
     use crate::overview::PodPhases;
     use crate::resources::tests::resource;

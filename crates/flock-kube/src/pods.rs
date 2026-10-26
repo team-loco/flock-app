@@ -462,7 +462,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use flock_core::Counts;
-    use flock_core::pods::{PodFilter, PodQuery, PodSearch, nav_counts};
+    use flock_core::pods::{PodFilter, PodQuery, nav_counts};
     use flock_core::problem_groups::causes;
 
     use super::*;
@@ -671,7 +671,8 @@ mod tests {
             ..PodQuery::default()
         };
         assert_eq!(nav_counts(&rows, &cluster()), Counts::total(3).with_err(1));
-        let base = pending.base(&rows, &PodSearch::default(), &cluster());
+        let all: Vec<usize> = (0..rows.len()).collect();
+        let base = pending.base(&rows, &all, &cluster());
         assert_eq!(pending.apply(&rows, &base).len(), 1);
     }
 }
