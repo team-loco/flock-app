@@ -1281,6 +1281,16 @@ fn scroll_overview_to_the_end(ui: &mut Ui) -> anyhow::Result<()> {
 
 const OVERVIEW_NAMESPACES_TOP: f32 = 200.;
 
+#[test]
+fn the_overview_scroller_fills_the_page_viewport() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    assert_eq!(ui.state().location().page, Page::ClusterOverview);
+    let page = bounds_of(&mut ui, "page-content")?;
+    let overview = bounds_of(&mut ui, "overview-scroll")?;
+    assert_eq!(overview, page);
+    Ok(())
+}
+
 fn show_overview_namespaces(ui: &mut Ui) -> anyhow::Result<()> {
     let head = ui
         .bounds("overview-ns-sort-0")

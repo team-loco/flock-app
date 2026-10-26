@@ -32,7 +32,9 @@ use gpui::{
 };
 
 use super::ScreenEvent;
-use crate::kit::{Activate, Link, SectionLabel, Segmented, problem_link, status_symbols};
+use crate::kit::{
+    Activate, Link, SectionLabel, Segmented, problem_link, scroll_viewport, status_symbols,
+};
 use crate::theme::{
     ActiveTheme, FONT_MONO, Palette, RULE, SPACE_3, SPACE_4, SPACE_5, SPACE_7, SPACE_8,
     TEXT_CONTROL, TEXT_SMALL,
@@ -266,14 +268,7 @@ impl Render for OverviewScreen {
             .tab_group()
             .pb(SPACE_8)
             .children(sections.into_iter().flatten());
-        let scroll = div()
-            .debug_selector(|| SCROLL.to_owned())
-            .id(SCROLL)
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .overflow_y_scroll()
-            .child(content);
+        let scroll = scroll_viewport(SCROLL, content).flex_1().min_w_0().h_full();
         let drill = self
             .drill
             .then(|| api_drill::render(&data.control_plane, self.code.as_deref(), &palette, cx));
