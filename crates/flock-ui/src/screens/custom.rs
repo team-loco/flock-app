@@ -97,7 +97,7 @@ impl CustomResourcesScreen {
                 this.choose_namespace(choice, cx);
             }),
             cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
-                this.refresh(cx);
+                this.refresh_rows(cx);
             }),
         ];
         Self {
@@ -384,11 +384,17 @@ impl CustomResourcesScreen {
                 .map(|row| &row.labels),
         );
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        self.refresh_rows(cx);
+    }
+
+    fn refresh_rows(&mut self, cx: &mut Context<Self>) {
+        let resources = self.rows.items();
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let base = filter_resources(resources, self.namespace.as_deref(), &query);
+        let matched = self.rows.matching(&query);
+        let base = filter_resources(resources, &matched, self.namespace.as_deref());
         let chips = filter_counts(base.iter().filter_map(|&ix| resources.get(ix)))
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))

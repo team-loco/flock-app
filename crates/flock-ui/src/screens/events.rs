@@ -122,7 +122,7 @@ impl EventsScreen {
         let filter =
             cx.new(|cx| FilterBar::new("event-filter", window, cx).scope(namespaces.clone()));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
-            this.refresh(cx);
+            this.refresh_rows(cx);
         })
         .detach();
         Self {
@@ -206,10 +206,17 @@ impl EventsScreen {
         let events = self.events.items();
         let labels = label_values(events.iter().map(|event| &event.labels));
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        self.refresh_rows(cx);
+    }
+
+    fn refresh_rows(&mut self, cx: &mut Context<Self>) {
+        let events = self.events.items();
         let scope = self.preferences.namespace_selection(EVENT_LIST);
-        let scoped = events::in_namespace(events, scope.namespace());
+        let in_scope = events::in_namespace(events, 0..events.len(), scope.namespace()).len();
         let query = self.filter.read(cx).query().clone();
-        let chips = filter_counts(events, &scoped, &query)
+        let matched = self.events.matching(&query);
+        let scoped = events::in_namespace(events, matched.iter().copied(), scope.namespace());
+        let chips = filter_counts(scoped.iter().filter_map(|&ix| events.get(ix)))
             .into_iter()
             .map(|(filter, count)| chip_label(filter.label(), count))
             .collect();
@@ -225,12 +232,12 @@ impl EventsScreen {
             bar.chip()
         });
         let filter = EventFilter::ALL.get(chip).copied().unwrap_or_default();
-        let matched = filter_events(self.events.items(), &scoped, filter, &query);
-        let rows = self.events.rows(matched);
+        let kept = filter_events(events, &scoped, filter);
+        let rows = self.events.rows(kept);
         let shown = rows.len();
         self.shown = shown;
-        self.in_scope = scoped.len();
-        let total = scoped.len();
+        self.in_scope = in_scope;
+        let total = in_scope;
         self.filter
             .update(cx, |bar, cx| bar.set_matches(shown, total, cx));
         if self

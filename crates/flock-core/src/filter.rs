@@ -1,6 +1,9 @@
 use std::borrow::Cow;
+use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
+use std::marker::PhantomData;
 use std::ops::Range;
+use std::rc::Rc;
 
 use crate::Status;
 
@@ -16,6 +19,7 @@ const TOKEN_KEYWORDS: [(&str, &str); 4] = [
 ];
 
 pub type LabelMatch = (String, Option<String>);
+pub type Labels = BTreeMap<String, String>;
 
 pub fn namespace_token(token: &str) -> Option<String> {
     token
@@ -209,7 +213,7 @@ impl<T> FilterSpec<T> {
         self.matches_in(row, &(), query, namespace, label_sets)
     }
 
-    pub fn search_text(&self, row: &T) -> String {
+    fn search_text(&self, row: &T) -> String {
         let mut values = FieldValues::new();
         for (_, field) in self.fields {
             field(row, &(), &mut values);
@@ -218,17 +222,84 @@ impl<T> FilterSpec<T> {
         text.make_ascii_lowercase();
         text
     }
+}
 
-    pub fn matches_search(
-        &self,
-        row: &T,
-        query: &TextFilter,
-        namespace: Option<&str>,
-        label_sets: &[&BTreeMap<String, String>],
-        search_text: &str,
-    ) -> bool {
-        self.scope_matches(row, &(), query, namespace, label_sets)
-            && query.matches_search_text(search_text)
+pub trait Searchable: Sized + 'static {
+    const FILTER: FilterSpec<Self>;
+
+    fn namespace(&self) -> Option<&str>;
+
+    fn labels(&self) -> Option<Cow<'_, Labels>>;
+
+    fn matches(&self, query: &TextFilter) -> bool {
+        let labels = self.labels();
+        let label_sets: Vec<&Labels> = labels.iter().map(AsRef::as_ref).collect();
+        Self::FILTER.matches(self, query, self.namespace(), &label_sets)
+    }
+}
+
+fn matches_search<T: Searchable>(row: &T, query: &TextFilter, search_text: &str) -> bool {
+    let labels = if query.labels.is_empty() {
+        None
+    } else {
+        row.labels()
+    };
+    let label_sets: Vec<&Labels> = labels.iter().map(AsRef::as_ref).collect();
+    T::FILTER.scope_matches(row, &(), query, row.namespace(), &label_sets)
+        && query.matches_search_text(search_text)
+}
+
+struct Matched {
+    query: TextFilter,
+    rows: Rc<[usize]>,
+}
+
+pub struct Search<T> {
+    texts: OnceCell<Vec<String>>,
+    matched: RefCell<Option<Matched>>,
+    rows: PhantomData<fn(&T)>,
+}
+
+impl<T> Default for Search<T> {
+    fn default() -> Self {
+        Self {
+            texts: OnceCell::new(),
+            matched: RefCell::new(None),
+            rows: PhantomData,
+        }
+    }
+}
+
+impl<T: Searchable> Search<T> {
+    pub fn matching(&self, rows: &[T], query: &TextFilter) -> Rc<[usize]> {
+        let previous = self.matched.borrow_mut().take();
+        let candidates: Box<dyn Iterator<Item = usize>> = match &previous {
+            Some(previous) if query.narrows(&previous.query) => {
+                Box::new(previous.rows.iter().copied())
+            }
+            _ => Box::new(0..rows.len()),
+        };
+        let texts = (!query.words.is_empty()).then(|| self.texts(rows));
+        let kept: Rc<[usize]> = candidates
+            .filter(|&ix| {
+                let text = texts
+                    .and_then(|texts| texts.get(ix))
+                    .map_or("", String::as_str);
+                rows.get(ix)
+                    .is_some_and(|row| matches_search(row, query, text))
+            })
+            .collect();
+        let matched = Matched {
+            query: query.clone(),
+            rows: Rc::clone(&kept),
+        };
+        self.matched.replace(Some(matched));
+        kept
+    }
+
+    fn texts(&self, rows: &[T]) -> &[String] {
+        self.texts
+            .get_or_init(|| rows.iter().map(|row| T::FILTER.search_text(row)).collect())
     }
 }
 
@@ -566,14 +637,24 @@ mod tests {
         labels: BTreeMap<String, String>,
     }
 
-    const TOY: FilterSpec<Toy> = FilterSpec {
-        fields: &[
-            ("title", |t, (), out| out.push(t.title.as_str().into())),
-            ("owner", |t, (), out| out.push(t.owner.as_str().into())),
-        ],
-        namespace: false,
-        labels: true,
-    };
+    impl Searchable for Toy {
+        const FILTER: FilterSpec<Self> = FilterSpec {
+            fields: &[
+                ("title", |t, (), out| out.push(t.title.as_str().into())),
+                ("owner", |t, (), out| out.push(t.owner.as_str().into())),
+            ],
+            namespace: false,
+            labels: true,
+        };
+
+        fn namespace(&self) -> Option<&str> {
+            Some(&self.namespace)
+        }
+
+        fn labels(&self) -> Option<Cow<'_, Labels>> {
+            Some(Cow::Borrowed(&self.labels))
+        }
+    }
 
     fn toy() -> Toy {
         Toy {
@@ -586,9 +667,7 @@ mod tests {
     }
 
     fn toy_matches(query: &str) -> bool {
-        let row = toy();
-        let query = TextFilter::parse(query);
-        TOY.matches(&row, &query, Some(&row.namespace), &[&row.labels])
+        toy().matches(&TextFilter::parse(query))
     }
 
     #[test]
@@ -619,37 +698,33 @@ mod tests {
     }
 
     #[test]
-    fn search_text_matches_like_the_fields_it_joins() {
-        let row = Toy {
-            title: "Checkout-API".into(),
-            ..toy()
-        };
-        let text = TOY.search_text(&row);
-        let queries = [
-            "",
-            "check",
-            "API",
-            "checkout-api",
-            "beta",
-            "api beta",
-            "tbeta",
-            "api\nbeta",
-            "gamma",
-            "label:team=core",
-            "label:team=web",
-            "ns:delta",
-            "node:beta",
+    fn search_matches_cached_text_and_narrows_typed_queries() {
+        let rows = [
+            Toy {
+                title: "Checkout-API".into(),
+                ..toy()
+            },
+            Toy {
+                title: "cart".into(),
+                labels: labels(&[("team", "web")]),
+                ..toy()
+            },
+            toy(),
         ];
-        for query in queries {
-            let query = TextFilter::parse(query);
-            let namespace = Some(row.namespace.as_str());
-            let labels = [&row.labels];
-            assert_eq!(
-                TOY.matches_search(&row, &query, namespace, &labels, &text),
-                TOY.matches(&row, &query, namespace, &labels),
-                "{query:?}"
-            );
-        }
+        let search = Search::default();
+        let matching = |query: &str| search.matching(&rows, &TextFilter::parse(query)).to_vec();
+        assert_eq!(matching(""), [0, 1, 2]);
+        assert_eq!(matching("c"), [0, 1]);
+        assert_eq!(matching("ch"), [0]);
+        assert_eq!(matching("CHECKOUT-api"), [0]);
+        assert_eq!(matching("c"), [0, 1]);
+        assert_eq!(matching("api\nbeta"), [0]);
+        assert_eq!(matching("beta"), [0, 1, 2]);
+        assert_eq!(matching("tbeta"), Vec::<usize>::new());
+        assert_eq!(matching("label:team=web"), [1]);
+        assert_eq!(matching("gamma"), Vec::<usize>::new());
+        assert_eq!(matching("ns:delta"), Vec::<usize>::new());
+        assert_eq!(matching("a"), [0, 1, 2]);
     }
 
     #[test]

@@ -53,7 +53,7 @@ impl FluxListScreen {
         });
         let filter = cx.new(|cx| FilterBar::new("flux-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
-            this.refresh(cx);
+            this.refresh_rows(cx);
         })
         .detach();
         cx.subscribe(&table, |_, table, event: &TableEvent, cx| {
@@ -120,19 +120,27 @@ impl FluxListScreen {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let flux = self.flux.items();
-        let objects = || {
+        let labels = label_values(
             self.objects
                 .iter()
-                .filter_map(|&ix| flux.get(ix).map(|o| (ix, o)))
-        };
-        let labels = label_values(objects().map(|(_, object)| &object.labels));
+                .filter_map(|&ix| flux.get(ix))
+                .map(|object| &object.labels),
+        );
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        self.refresh_rows(cx);
+    }
+
+    fn refresh_rows(&mut self, cx: &mut Context<Self>) {
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let base: Vec<(usize, &FluxObject)> =
-            objects().filter(|(_, o)| o.matches(&query)).collect();
+        let base: Vec<(usize, &FluxObject)> = self
+            .flux
+            .matched_items(&query)
+            .into_iter()
+            .filter(|(ix, _)| self.objects.binary_search(ix).is_ok())
+            .collect();
         let chips = StatusFilter::counts(base.iter().map(|(_, o)| o.status()))
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))

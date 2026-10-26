@@ -1,6 +1,5 @@
-use flock_core::filter::TextFilter;
 use flock_core::overview::TimeRange;
-use flock_core::resources::{Resource, filter_resources};
+use flock_core::resources::Resource;
 use flock_core::{Backend, ClusterId, Command, ContextRef, NewCluster, Page, ResourceKind, Update};
 use flock_kube::LiveBackend;
 use flock_kube::checks::{CheckKind, CheckStatus, Verdict, run_checks};
@@ -342,9 +341,9 @@ fn listed(snapshot: &flock_core::Snapshot, kind: ResourceKind) -> Option<Vec<Res
 }
 
 fn names_in(rows: &[Resource], namespace: &str) -> Vec<String> {
-    let mut names: Vec<String> = filter_resources(rows, Some(namespace), &TextFilter::default())
-        .into_iter()
-        .filter_map(|ix| rows.get(ix))
+    let mut names: Vec<String> = rows
+        .iter()
+        .filter(|row| row.namespace == namespace)
         .map(|row| row.name.clone())
         .collect();
     names.sort();

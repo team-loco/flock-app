@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use flock_core::events::{ClusterEvent, EventFilter, cluster_filter_counts, filter_cluster_events};
+use flock_core::events::{ClusterEvent, EventFilter, filter_cluster_events, filter_counts};
 use flock_core::filter::label_values;
 use flock_core::time::age;
 use flock_core::{Command, Snapshot, Status};
@@ -57,7 +57,7 @@ impl FluxEventsScreen {
         .detach();
         let filter = cx.new(|cx| FilterBar::new("flux-events-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
-            this.refresh(cx);
+            this.refresh_rows(cx);
         })
         .detach();
         Self {
@@ -88,19 +88,30 @@ impl FluxEventsScreen {
         let events = self.events.items();
         let labels = label_values(events.iter().map(|row| &row.event.labels));
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        self.refresh_rows(cx);
+    }
+
+    fn refresh_rows(&mut self, cx: &mut Context<Self>) {
+        let events = self.events.items();
         let query = self.filter.read(cx).query().clone();
-        let chips = cluster_filter_counts(events, &query)
-            .into_iter()
-            .map(|(filter, count)| chip_label(filter.label(), count))
-            .collect();
+        let matched = self.events.matching(&query);
+        let chips = filter_counts(
+            matched
+                .iter()
+                .filter_map(|&ix| events.get(ix))
+                .map(|row| &row.event),
+        )
+        .into_iter()
+        .map(|(filter, count)| chip_label(filter.label(), count))
+        .collect();
         let chip = self.filter.update(cx, |bar, cx| {
             bar.set_chips(chips, cx);
             bar.chip()
         });
         let filter = EventFilter::ALL.get(chip).copied().unwrap_or_default();
-        let matched = filter_cluster_events(events, filter, &query);
+        let kept = filter_cluster_events(events, &matched, filter);
         let total = events.len();
-        let rows = self.events.rows(matched);
+        let rows = self.events.rows(kept);
         self.shown = rows.len();
         let shown = rows.len();
         self.filter

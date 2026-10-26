@@ -1,9 +1,10 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::diagnosis::{self, Condition, Diagnosis};
 use crate::events::Event;
-use crate::filter::{FilterSpec, StatusFilter, TextFilter};
+use crate::filter::{FilterSpec, Labels, Searchable, StatusFilter};
 use crate::issue::{Issue, named};
 use crate::nodes::NodeFilter;
 use crate::pods::PodFilter;
@@ -188,8 +189,25 @@ impl Resource {
     pub fn events<'a>(&self, kind: ResourceKind, events: &'a [Event]) -> Vec<&'a Event> {
         diagnosis::about(events, kind.name(), Some(&self.namespace), &self.name)
     }
+}
 
-    pub const FILTER: FilterSpec<Self> = FilterSpec {
+pub fn filter_resources(
+    rows: &[Resource],
+    matched: &[usize],
+    namespace: Option<&str>,
+) -> Vec<usize> {
+    matched
+        .iter()
+        .copied()
+        .filter(|&ix| {
+            rows.get(ix)
+                .is_some_and(|row| namespace.is_none_or(|ns| ns == row.namespace))
+        })
+        .collect()
+}
+
+impl Searchable for Resource {
+    const FILTER: FilterSpec<Self> = FilterSpec {
         fields: &[
             ("name", |r, (), out| out.push(r.name.as_str().into())),
             ("namespace", |r, (), out| {
@@ -200,22 +218,13 @@ impl Resource {
         labels: true,
     };
 
-    pub fn matches(&self, namespace: Option<&str>, query: &TextFilter) -> bool {
-        let in_namespace = namespace.is_none_or(|ns| ns == self.namespace);
-        in_namespace && Self::FILTER.matches(self, query, Some(&self.namespace), &[&self.labels])
+    fn namespace(&self) -> Option<&str> {
+        Some(&self.namespace)
     }
-}
 
-pub fn filter_resources(
-    rows: &[Resource],
-    namespace: Option<&str>,
-    query: &TextFilter,
-) -> Vec<usize> {
-    rows.iter()
-        .enumerate()
-        .filter(|(_, row)| row.matches(namespace, query))
-        .map(|(ix, _)| ix)
-        .collect()
+    fn labels(&self) -> Option<Cow<'_, Labels>> {
+        Some(Cow::Borrowed(&self.labels))
+    }
 }
 
 pub fn explain(resources: &mut BTreeMap<ResourceKind, Vec<Resource>>, events: &[Event]) {
@@ -240,6 +249,7 @@ pub fn filter_counts<'a>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::filter::{Search, TextFilter};
 
     #[test]
     fn namespaced_lists_remember_their_namespace_under_their_kind() {
@@ -313,10 +323,9 @@ pub(crate) mod tests {
     fn label_filters_match_resource_metadata() {
         let mut row = resource("payments", "checkout", Status::Ok);
         row.labels.insert("app".into(), "cart".into());
-        assert!(row.matches(None, &TextFilter::parse("checkout ns:pay label:app=cart")));
-        assert!(row.matches(None, &TextFilter::parse("l:app")));
-        assert!(!row.matches(None, &TextFilter::parse("l:app=web")));
-        assert!(!row.matches(Some("web"), &TextFilter::parse("l:app")));
+        assert!(row.matches(&TextFilter::parse("checkout ns:pay label:app=cart")));
+        assert!(row.matches(&TextFilter::parse("l:app")));
+        assert!(!row.matches(&TextFilter::parse("l:app=web")));
     }
 
     #[test]
@@ -335,40 +344,22 @@ pub(crate) mod tests {
             resource("payments", "payments-worker", Status::Ok),
             resource("web", "web-frontend", Status::Ok),
         ];
-        let names = |found: Vec<usize>| {
-            found
+        let search = Search::default();
+        let names = |namespace: Option<&str>, query: &str| {
+            let matched = search.matching(&rows, &TextFilter::parse(query));
+            filter_resources(&rows, &matched, namespace)
                 .into_iter()
                 .map(|ix| rows[ix].name.as_str())
                 .collect::<Vec<_>>()
         };
         assert_eq!(
-            names(filter_resources(
-                &rows,
-                Some("payments"),
-                &TextFilter::default()
-            )),
+            names(Some("payments"), ""),
             ["checkout-api", "payments-worker"]
         );
-        assert_eq!(
-            names(filter_resources(&rows, None, &TextFilter::parse(" WEB "))),
-            ["web-frontend"]
-        );
-        assert_eq!(
-            names(filter_resources(&rows, None, &TextFilter::parse("pay"))),
-            ["checkout-api", "payments-worker"]
-        );
-        assert_eq!(
-            names(filter_resources(
-                &rows,
-                Some("web"),
-                &TextFilter::parse("checkout")
-            )),
-            [""; 0]
-        );
-        assert_eq!(
-            names(filter_resources(&rows, None, &TextFilter::parse("ns:web"))),
-            ["web-frontend"]
-        );
+        assert_eq!(names(None, " WEB "), ["web-frontend"]);
+        assert_eq!(names(None, "pay"), ["checkout-api", "payments-worker"]);
+        assert_eq!(names(Some("web"), "checkout"), [""; 0]);
+        assert_eq!(names(None, "ns:web"), ["web-frontend"]);
         let counts: Vec<usize> = filter_counts(&rows).into_iter().map(|(_, n)| n).collect();
         assert_eq!(counts, [3, 1]);
     }

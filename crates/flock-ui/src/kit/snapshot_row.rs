@@ -3,12 +3,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use flock_core::Snapshot;
+use flock_core::filter::{Search, Searchable, TextFilter};
 
 type Items<T> = Box<dyn Fn(&Snapshot) -> &[T]>;
 
 pub struct SnapshotRows<T: 'static> {
     snapshot: Arc<Snapshot>,
     items: Items<T>,
+    search: Search<T>,
 }
 
 impl<T: 'static> SnapshotRows<T> {
@@ -16,6 +18,7 @@ impl<T: 'static> SnapshotRows<T> {
         Rc::new(Self {
             snapshot: Arc::clone(snapshot),
             items: Box::new(items),
+            search: Search::default(),
         })
     }
 
@@ -44,6 +47,24 @@ impl<T: 'static> SnapshotRows<T> {
                 rows: Rc::clone(self),
                 ix,
             })
+            .collect()
+    }
+
+    pub fn matching(&self, query: &TextFilter) -> Rc<[usize]>
+    where
+        T: Searchable,
+    {
+        self.search.matching(self.items(), query)
+    }
+
+    pub fn matched_items(&self, query: &TextFilter) -> Vec<(usize, &T)>
+    where
+        T: Searchable,
+    {
+        let items = self.items();
+        self.matching(query)
+            .iter()
+            .filter_map(|&ix| items.get(ix).map(|item| (ix, item)))
             .collect()
     }
 
@@ -141,6 +162,13 @@ pub(crate) mod tests {
         );
         assert_eq!(rows.first().map(SnapshotRow::index), Some(1));
         assert_eq!(source.all().len(), 2);
+        assert_eq!(*source.matching(&TextFilter::parse("SEC")), [1]);
+        let matched = source.matched_items(&TextFilter::parse("fir"));
+        let found: Vec<(usize, &str)> = matched
+            .iter()
+            .map(|(ix, event)| (*ix, event.reason.as_str()))
+            .collect();
+        assert_eq!(found, [(0, "first")]);
     }
 
     #[test]

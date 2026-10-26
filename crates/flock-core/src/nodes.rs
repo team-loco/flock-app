@@ -1,8 +1,9 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use crate::diagnosis::{self, Condition, Diagnosis};
-use crate::filter::{FilterSpec, TextFilter};
+use crate::filter::{FilterSpec, Labels, Searchable};
 use crate::issue::{Issue, named};
 use crate::overview::{Commitment, percent};
 use crate::related::NODE;
@@ -60,8 +61,8 @@ pub struct Node {
     pub top_pods: Vec<NodePod>,
 }
 
-impl Node {
-    pub const FILTER: FilterSpec<Self> = FilterSpec {
+impl Searchable for Node {
+    const FILTER: FilterSpec<Self> = FilterSpec {
         fields: &[
             ("name", |n, (), out| out.push(n.name.as_str().into())),
             ("status", |n, (), out| out.push(n.state.as_str().into())),
@@ -79,11 +80,16 @@ impl Node {
         labels: true,
     };
 
-    pub fn matches(&self, query: &TextFilter) -> bool {
-        let labels = self.label_map();
-        Self::FILTER.matches(self, query, None, &[&labels])
+    fn namespace(&self) -> Option<&str> {
+        None
     }
 
+    fn labels(&self) -> Option<Cow<'_, Labels>> {
+        Some(Cow::Owned(self.label_map()))
+    }
+}
+
+impl Node {
     pub fn label_map(&self) -> BTreeMap<String, String> {
         self.labels
             .iter()
@@ -290,6 +296,7 @@ impl NodeSummary {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::filter::TextFilter;
 
     pub(crate) fn node(name: &str, instance: &str, schedulable: bool, ready: bool) -> Node {
         let value = if ready { CONDITION_TRUE } else { "False" };

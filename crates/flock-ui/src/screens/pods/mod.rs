@@ -6,8 +6,8 @@ use flock_core::emptiness::Noun;
 use flock_core::filter::label_values;
 use flock_core::multilog::LabelSelector;
 use flock_core::pods::{
-    Container, FailingElsewhere, Pod, PodFilter, PodPhase, PodQuery, PodSearch, Usage,
-    filter_counts, nav_counts,
+    Container, FailingElsewhere, Pod, PodFilter, PodPhase, PodQuery, Usage, filter_counts,
+    nav_counts,
 };
 use flock_core::related::Related;
 use flock_core::resources::{NamespaceCount, POD_LIST, namespace_counts};
@@ -71,8 +71,7 @@ pub struct PodsScreen {
     cluster_namespaces: BTreeMap<ClusterId, Vec<String>>,
     shown: usize,
     query: PodQuery,
-    pod_search: PodSearch,
-    matched: Option<Matched>,
+    pods: Rc<SnapshotRows<Pod>>,
     selected: Option<ResourceRef>,
     panel_open: bool,
     related: Vec<Related>,
@@ -98,12 +97,6 @@ pub struct PodsScreen {
 }
 
 impl EventEmitter<Command> for PodsScreen {}
-
-struct Matched {
-    cluster: ClusterId,
-    query: PodQuery,
-    base: Vec<usize>,
-}
 
 type PodRow = SnapshotRow<Pod>;
 
@@ -184,8 +177,7 @@ impl PodsScreen {
             cluster_namespaces: BTreeMap::new(),
             shown: 0,
             query: PodQuery::default(),
-            pod_search: PodSearch::default(),
-            matched: None,
+            pods: SnapshotRows::empty(),
             selected: None,
             panel_open: true,
             related: Vec::new(),
@@ -213,8 +205,7 @@ impl PodsScreen {
 
     pub fn set_snapshot(&mut self, snapshot: &Arc<Snapshot>) {
         self.snapshot = Arc::clone(snapshot);
-        self.pod_search = PodSearch::default();
-        self.matched = None;
+        self.pods = SnapshotRows::new(snapshot, |snapshot| &snapshot.pods);
         self.related = snapshot
             .details
             .values()
@@ -331,27 +322,12 @@ impl PodsScreen {
         Some((target, label))
     }
 
-    fn base(&mut self) -> Vec<usize> {
-        let Some(cluster) = self.cluster.clone() else {
-            self.matched = None;
+    fn base(&self) -> Vec<usize> {
+        let Some(cluster) = &self.cluster else {
             return Vec::new();
         };
-        let pods = &self.snapshot.pods;
-        let base = match self.matched.take() {
-            Some(previous)
-                if previous.cluster == cluster && self.query.narrows(&previous.query) =>
-            {
-                self.query
-                    .base_within(pods, &self.pod_search, &cluster, previous.base)
-            }
-            _ => self.query.base(pods, &self.pod_search, &cluster),
-        };
-        self.matched = Some(Matched {
-            cluster,
-            query: self.query.clone(),
-            base: base.clone(),
-        });
-        base
+        let matched = self.pods.matching(&self.query.text);
+        self.query.base(self.pods.items(), &matched, cluster)
     }
 
     fn namespace_counts(&self) -> Vec<NamespaceCount> {
@@ -416,7 +392,7 @@ impl PodsScreen {
         let base = self.base();
         let pods = &self.snapshot.pods;
         let matched = self.query.apply(pods, &base);
-        let rows = SnapshotRows::new(&self.snapshot, |snapshot| &snapshot.pods).rows(matched);
+        let rows = self.pods.rows(matched);
         let base_pods: Vec<&Pod> = base.iter().filter_map(|&ix| pods.get(ix)).collect();
         let chips = filter_counts(&base_pods)
             .into_iter()
