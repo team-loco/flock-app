@@ -1054,7 +1054,7 @@ mod tests {
         (shell, handle.into())
     }
 
-    #[gpui::test]
+    #[gpui::test(iterations = 20)]
     fn palette_new_window_keeps_source_selection_and_shares_snapshots(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::init(Some(theme::Appearance::Dark), cx)
@@ -1131,6 +1131,7 @@ mod tests {
             snapshot
         );
         cx.simulate_keystrokes(second_window, "cmd-shift-w");
+        cx.run_until_parked();
         assert_eq!(cx.read(|cx| cx.windows().len()), 1);
         drop(second);
         cx.run_until_parked();
@@ -1166,6 +1167,7 @@ mod tests {
                 .is_ok()
         );
         cx.simulate_keystrokes(window, "alt-enter");
+        cx.run_until_parked();
         assert!(received.is_empty());
         assert!(shell.read_with(cx, |shell, cx| shell.palette.read(cx).is_open()));
         assert!(shell.read_with(cx, |shell, _| shell.state.sidebar_open));
@@ -1182,6 +1184,7 @@ mod tests {
         let (first, _) = cx.update(|cx| open_window(&store, Vec::new(), cx));
         assert!(first.read_with(cx, |shell, _| shell.state.sidebar_open));
         first.update(cx, |shell, cx| shell.dispatch(Command::ToggleSidebar, cx));
+        cx.run_until_parked();
         let closed = cx.update(|cx| crate::settings::current(cx).sidebar_closed);
         assert!(closed);
         let (second, _) = cx.update(|cx| open_window(&store, Vec::new(), cx));
@@ -1286,6 +1289,7 @@ mod tests {
         assert!(backend.try_send(Update::Snapshot(Box::default())).is_ok());
         cx.run_until_parked();
         cx.simulate_keystrokes(first_window, "cmd-t cmd-t cmd-1");
+        cx.run_until_parked();
         let written = saved.borrow().clone();
         let expected = first.read_with(cx, |shell, _| shell.state.panes().saved());
         assert_eq!(written.windows, std::slice::from_ref(&expected));

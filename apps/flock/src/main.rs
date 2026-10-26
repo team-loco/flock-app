@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(shown, Some(Some(target)));
     }
 
-    #[gpui::test]
+    #[gpui::test(iterations = 20)]
     fn new_window_shortcut_and_close_keep_other_windows_open(cx: &mut gpui::TestAppContext) {
         let (backend, updates) = async_channel::unbounded();
         let (commands, _received) = async_channel::unbounded();
@@ -490,6 +490,7 @@ mod tests {
             .read(|cx| cx.windows().into_iter().next())
             .unwrap_or_else(|| panic!("first window missing"));
         cx.simulate_keystrokes(first, "cmd-n");
+        cx.run_until_parked();
         let windows = cx.read(App::windows);
         assert_eq!(windows.len(), 2);
         let second = windows
@@ -497,8 +498,10 @@ mod tests {
             .find(|window| *window != first)
             .unwrap_or_else(|| panic!("second window missing"));
         cx.simulate_keystrokes(first, "cmd-shift-w");
+        cx.run_until_parked();
         assert_eq!(cx.read(App::windows), vec![second]);
         cx.simulate_keystrokes(second, "cmd-n");
+        cx.run_until_parked();
         assert_eq!(cx.read(|cx| cx.windows().len()), 2);
     }
 }
