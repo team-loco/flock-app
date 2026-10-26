@@ -618,7 +618,7 @@ mod tests {
         assert!(overlays.read_with(cx, |overlays, _| overlays.dialogs.is_empty()));
     }
 
-    #[gpui::test]
+    #[gpui::test(iterations = 20)]
     fn backend_notices_are_shown_once_for_multiple_subscribers(cx: &mut TestAppContext) {
         cx.update(init);
         let (backend, updates) = async_channel::unbounded();
