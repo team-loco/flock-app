@@ -33,7 +33,6 @@ const ACCENT_CLASS: Record<Accent, string> = {
   violet: "text-violet",
   ok: "text-ok",
   err: "text-err",
-  warn: "text-warn",
 };
 
 const subscribeScheme = (onChange: () => void) => {

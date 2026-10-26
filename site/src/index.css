@@ -19,7 +19,6 @@
   --ring: #74adff;
   --shadow: rgba(0, 0, 0, 0.55);
   --ok: #48c78e;
-  --warn: #e8b04b;
   --err: #f26d6d;
   --violet: #a78bfa;
   --band: #1b3d73;
@@ -47,7 +46,6 @@
     --ring: #1f5fd1;
     --shadow: rgba(20, 24, 32, 0.18);
     --ok: #167a4c;
-    --warn: #935800;
     --err: #c53030;
     --violet: #7c3aed;
     --band: #1f5fd1;
@@ -71,7 +69,6 @@
   --color-ring: var(--ring);
   --color-shadow: var(--shadow);
   --color-ok: var(--ok);
-  --color-warn: var(--warn);
   --color-err: var(--err);
   --color-violet: var(--violet);
   --color-band: var(--band);
