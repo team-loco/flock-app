@@ -4581,6 +4581,26 @@ fn escape_clears_the_graph_selection() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn graph_png(ui: &Ui, dir: &std::path::Path, name: &str) -> anyhow::Result<Vec<u8>> {
+    let path = dir.join(format!("{name}.png"));
+    ui.save_png(&path)?;
+    Ok(std::fs::read(path)?)
+}
+
+#[test]
+fn graph_edges_restyle_on_selection_and_return_when_cleared() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut ui = Ui::open(Screen::FluxGraph)?;
+    let plain = graph_png(&ui, dir.path(), "plain")?;
+    ui.right_click("flux-graph-node-0")?;
+    let selected = graph_png(&ui, dir.path(), "selected")?;
+    ui.press("escape")?;
+    let cleared = graph_png(&ui, dir.path(), "cleared")?;
+    assert_ne!(plain, selected);
+    assert_eq!(plain, cleared);
+    Ok(())
+}
+
 #[test]
 fn flux_events_filter_by_cluster_and_open_their_object() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::FluxEvents)?;

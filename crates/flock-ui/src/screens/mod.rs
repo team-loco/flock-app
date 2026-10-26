@@ -33,6 +33,8 @@ mod resources;
 pub mod settings;
 pub mod workload;
 
+use std::sync::Arc;
+
 use flock_core::emptiness::{Emptiness, Noun};
 use flock_core::resources::NamespaceCount;
 use flock_core::{ClusterSummary, Command, Page, ResourceKind, ResourceRef, Snapshot};
@@ -222,7 +224,7 @@ impl ClusterPages {
         &self,
         page: Page,
         cluster: Option<&ClusterSummary>,
-        snapshot: &Snapshot,
+        snapshot: &Arc<Snapshot>,
         confirm_destructive: bool,
         preferences: &flock_core::Preferences,
         cx: &mut App,
