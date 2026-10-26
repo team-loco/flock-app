@@ -9,11 +9,11 @@ use flock_core::time::age;
 use flock_core::{ClusterId, ClusterSummary, Command, Counts, Page, Snapshot, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Render, StatefulInteractiveElement, Styled, Subscription, Window, div,
-    px,
+    ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
 };
 
 use super::{ListShape, ScreenEvent, empty_list, new_tab_item};
+use crate::kit::scroll_viewport;
 use crate::kit::{
     Button, CodeView, Column, EmptyState, FilterBar, FilterEvent, MenuItem, PageHeader,
     SectionHeader, Skeleton, SnapshotRow, SnapshotRows, StatusGlyph, Table, TableEvent, chip_label,
@@ -480,15 +480,11 @@ impl Render for HelmReleaseScreen {
                 .child(CodeView::new("helm-manifest", detail.manifest.clone()).yaml()),
         );
         let values = self.values(&detail, cx);
+        let content = div().child(history).child(values).child(manifest);
         root.child(
-            div()
-                .id("helm-release-body")
+            scroll_viewport("helm-release-body", content)
                 .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .child(history)
-                .child(values)
-                .child(manifest),
+                .min_h_0(),
         )
     }
 }

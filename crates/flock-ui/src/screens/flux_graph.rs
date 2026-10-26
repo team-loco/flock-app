@@ -13,6 +13,7 @@ use gpui::{
 };
 
 use super::ScreenEvent;
+use crate::kit::scroll_viewport;
 use crate::kit::{EmptyState, Matrix, MatrixCell, SectionLabel, StatusGlyph, StatusText};
 use crate::theme::{
     ActiveTheme, CHART_DASH, FIELD_LABEL, FONT_MONO, GRAPH_COLUMN_GAP, GRAPH_COMPARE_COLUMN,
@@ -689,21 +690,19 @@ impl Render for FluxGraphScreen {
             }))
             .child(Self::legend(&palette))
             .child(
-                div()
-                    .id(CANVAS_ID)
-                    .debug_selector(|| CANVAS_ID.to_owned())
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_scroll()
-                    .track_scroll(&self.scroll)
-                    .child(
-                        div()
-                            .relative()
-                            .w(content.width)
-                            .h(content.height)
-                            .child(self.edges(&palette))
-                            .children(nodes),
-                    ),
+                scroll_viewport(
+                    CANVAS_ID,
+                    div()
+                        .relative()
+                        .w(content.width)
+                        .h(content.height)
+                        .child(self.edges(&palette))
+                        .children(nodes),
+                )
+                .both_axes()
+                .track_scroll(&self.scroll)
+                .flex_1()
+                .min_h_0(),
             )
             .children(across)
             .into_any_element()

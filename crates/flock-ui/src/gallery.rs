@@ -1,10 +1,10 @@
 use flock_core::Status;
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    Window, div, px,
+    ParentElement, Pixels, Render, SharedString, Styled, Subscription, Window, div, px,
 };
 
+use crate::kit::scroll_viewport;
 use crate::kit::{
     ActionMenu, Button, Checkbox, CodeView, Column, ConfirmDialog, DiffFile, DiffLine, DiffView,
     Dock, DockState, DockTab, FILTER_PLACEHOLDER, IconButton, InputEvent, Kbd, KeyValue, Level,
@@ -539,18 +539,18 @@ impl Gallery {
         );
         let mut files = parse_unified(PATCH);
         files.push(rendered);
-        let left = div()
-            .id("split-left")
-            .size_full()
-            .overflow_y_scroll()
-            .p(SPACE_8)
-            .child(CodeView::new("spec", SPEC).yaml());
-        let right = div()
-            .id("split-right")
-            .size_full()
-            .overflow_y_scroll()
-            .p(SPACE_8)
-            .child(DiffView::new("diff", files).sides("live", "a41e07c"));
+        let left = scroll_viewport(
+            "split-left",
+            div().p(SPACE_8).child(CodeView::new("spec", SPEC).yaml()),
+        )
+        .size_full();
+        let right = scroll_viewport(
+            "split-right",
+            div()
+                .p(SPACE_8)
+                .child(DiffView::new("diff", files).sides("live", "a41e07c")),
+        )
+        .size_full();
         div()
             .flex()
             .flex_col()
@@ -868,13 +868,9 @@ impl Render for Gallery {
                     .border_color(palette.line),
             )
             .child(
-                div()
-                    .id("gallery-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .children(sections)
-                    .child(
+                scroll_viewport(
+                    "gallery-scroll",
+                    div().children(sections).child(
                         div()
                             .px(SPACE_8)
                             .pb(SPACE_8)
@@ -883,6 +879,9 @@ impl Render for Gallery {
                             .text_color(palette.mute)
                             .child(note),
                     ),
+                )
+                .flex_1()
+                .min_h_0(),
             )
             .child(overlay_layer(cx))
     }

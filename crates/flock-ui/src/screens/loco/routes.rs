@@ -3,12 +3,12 @@ use flock_core::filter::label_values;
 use flock_core::loco::{Listener, Route, RouteFilter, Routes};
 use flock_core::{Page, Status};
 use gpui::{
-    AnyElement, AppContext as _, Context, Entity, EventEmitter, Hsla, InteractiveElement,
-    IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Window, div, px,
+    AnyElement, AppContext as _, Context, Entity, EventEmitter, Hsla, IntoElement, ParentElement,
+    Pixels, Render, SharedString, Styled, Subscription, Window, div, px,
 };
 
 use super::LocoEvent;
+use crate::kit::scroll_viewport;
 use crate::kit::status_symbols;
 use crate::kit::{
     Column, FilterBar, FilterEvent, PageTitle, SectionHeader, StatusGlyph, Table, TableEvent,
@@ -177,28 +177,27 @@ impl Render for RoutesScreen {
             )
             .child(self.filter.clone())
             .child(
-                div()
-                    .id("loco-routes-page")
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(SectionHeader::new("Listeners"))
-                    .child(
-                        div()
-                            .border_t(RULE)
-                            .border_color(palette.line)
-                            .child(Table::pane(&self.listeners, cx)),
-                    )
-                    .child(div().pt(SPACE_2).child(header))
-                    .child(
-                        div()
-                            .pb(SPACE_8)
-                            .border_t(RULE)
-                            .border_color(palette.line)
-                            .child(routes),
-                    ),
+                scroll_viewport(
+                    "loco-routes-page",
+                    div()
+                        .child(SectionHeader::new("Listeners"))
+                        .child(
+                            div()
+                                .border_t(RULE)
+                                .border_color(palette.line)
+                                .child(Table::pane(&self.listeners, cx)),
+                        )
+                        .child(div().pt(SPACE_2).child(header))
+                        .child(
+                            div()
+                                .pb(SPACE_8)
+                                .border_t(RULE)
+                                .border_color(palette.line)
+                                .child(routes),
+                        ),
+                )
+                .flex_1()
+                .min_h_0(),
             )
     }
 }

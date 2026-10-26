@@ -10,6 +10,7 @@ use gpui::{
     Styled, Window, div, prelude::FluentBuilder, px,
 };
 
+use crate::kit::scroll_viewport;
 use crate::kit::{
     Button, ConfirmDialog, DiffFile, DiffLine, DiffView, LineKind, PageHeader, SectionHeader,
     StatusGlyph, Toggle, confirm,
@@ -162,14 +163,7 @@ impl Render for CompareScreen {
             .flex_col()
             .size_full()
             .child(self.header(&palette, cx))
-            .child(
-                div()
-                    .id("compare-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(body),
-            )
+            .child(scroll_viewport("compare-scroll", body).flex_1().min_h_0())
     }
 }
 

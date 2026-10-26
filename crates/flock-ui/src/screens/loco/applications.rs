@@ -6,12 +6,12 @@ use flock_core::loco::{
 };
 use flock_core::{Command, LogTarget, Page, ResourceRef, Status};
 use gpui::{
-    AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla,
-    InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
+    AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement,
+    ParentElement, Pixels, Render, SharedString, Styled, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder, px, relative,
 };
 
+use crate::kit::scroll_viewport;
 use crate::kit::{
     Button, Column, ErrorBlocks, FilterBar, FilterEvent, InspectorPane, KeyValue, Link, MenuItem,
     PageHeader, PageTitle, PanelSection, StatusGlyph, Table, TableEvent, chip_label,
@@ -292,17 +292,14 @@ impl ApplicationsScreen {
         let objects = PanelSection::new(DETAIL_ID, CREATED_BY)
             .count(app.objects.len().to_string())
             .child(Table::pane(&self.objects, cx));
-        div()
-            .id("loco-app-detail")
-            .flex()
-            .flex_col()
-            .size_full()
-            .overflow_y_scroll()
+        let content = div()
             .child(summary)
             .child(ErrorBlocks::new(issues))
             .child(deployment_section(app))
             .child(objects)
-            .child(Self::route_section(app, palette, cx))
+            .child(Self::route_section(app, palette, cx));
+        scroll_viewport("loco-app-detail", content)
+            .size_full()
             .into_any_element()
     }
 

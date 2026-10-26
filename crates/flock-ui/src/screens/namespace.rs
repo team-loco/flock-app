@@ -18,6 +18,7 @@ use gpui::{
 };
 
 use crate::assets::{CHEVRON_DOWN, CHEVRON_RIGHT};
+use crate::kit::scroll_viewport;
 use crate::kit::{
     ActionMenu, Activate, AmountText, EmptyState, ErrorBlocks, EventRow, FILTER_PLACEHOLDER,
     HealthTile, HealthTiles, InputEvent, InspectorPane, Link, PageHeader, PanelSection,
@@ -475,20 +476,19 @@ impl NamespaceScreen {
         let yaml = YamlRow::new(INSPECTOR_ID, move |_, cx| {
             yaml_screen.update(cx, NamespaceScreen::edit).ok();
         });
-        div()
-            .id("namespace-aside")
-            .size_full()
-            .overflow_y_scroll()
-            .border_l(RULE)
-            .border_color(palette.line)
-            .bg(palette.panel)
-            .text_size(TEXT_BODY)
+        let content = div()
             .child(blocks)
             .children(usage)
             .children(labels)
             .children(policies)
             .child(self.events(cx))
-            .child(yaml)
+            .child(yaml);
+        scroll_viewport("namespace-aside", content)
+            .size_full()
+            .border_l(RULE)
+            .border_color(palette.line)
+            .bg(palette.panel)
+            .text_size(TEXT_BODY)
             .into_any_element()
     }
 
@@ -698,26 +698,26 @@ impl Render for NamespaceScreen {
             .flex()
             .bg(palette.editor);
         let missing = self.loaded && self.page.namespace.is_none() && self.page.groups.is_empty();
-        let main = div()
-            .id("namespace-main")
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .child(self.header(&palette, cx));
+        let main = div().child(self.header(&palette, cx));
+        let scrolled = |content| {
+            scroll_viewport("namespace-main", content)
+                .flex_1()
+                .min_w_0()
+                .h_full()
+        };
         if missing {
             let sentence = format!("{KICKER} {} {GONE}", self.target.name);
-            return root.child(main.child(EmptyState::new(sentence).selector("namespace-gone")));
+            let gone = main.child(EmptyState::new(sentence).selector("namespace-gone"));
+            return root.child(scrolled(gone));
         }
         if !self.loaded || self.page.groups.is_empty() {
-            return root.child(main.child(Skeleton::rows()));
+            return root.child(scrolled(main.child(Skeleton::rows())));
         }
         let main = main
             .child(self.tiles(&palette, cx))
             .child(self.contents(&palette, cx))
             .child(div().h(SPACE_8));
+        let main = scrolled(main);
         let aside = InspectorPane::new(INSPECTOR_ID, self.aside(&palette, cx)).width(ASIDE_WIDTH);
         root.child(main).child(aside)
     }

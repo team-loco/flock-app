@@ -5,10 +5,11 @@ use flock_core::issue::Issue;
 use gpui::{
     AnyElement, App, CursorStyle, DispatchPhase, ElementId, Global, InteractiveElement,
     IntoElement, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, RenderOnce,
-    SharedString, StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder,
+    SharedString, Styled, Window, canvas, div, prelude::FluentBuilder,
 };
 
 use super::panel::{ErrorBlocks, PanelHeader, PanelSection, YamlRow};
+use super::viewport::scroll_viewport;
 use crate::theme::{
     ActiveTheme, INSPECTOR, INSPECTOR_MAX, INSPECTOR_MIN, RULE, SPACE_5, SPACE_6, SPLITTER,
     TEXT_BODY,
@@ -120,18 +121,16 @@ impl RenderOnce for Inspector {
                 .child(content)
                 .into_any_element(),
         });
-        let body = div()
-            .id(self.id.clone())
-            .w_full()
-            .h_full()
-            .overflow_y_scroll()
-            .border_l(RULE)
-            .border_color(line)
-            .bg(palette.panel)
-            .text_size(TEXT_BODY)
+        let content = div()
             .child(header)
             .child(ErrorBlocks::new(self.issues))
             .children(sections);
+        let body = scroll_viewport(self.id.clone(), content)
+            .size_full()
+            .border_l(RULE)
+            .border_color(line)
+            .bg(palette.panel)
+            .text_size(TEXT_BODY);
         InspectorPane::new(self.id.to_string(), body).width(self.width)
     }
 }

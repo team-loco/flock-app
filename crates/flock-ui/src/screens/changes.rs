@@ -8,6 +8,7 @@ use gpui::{
     Subscription, Window, div, px,
 };
 
+use crate::kit::scroll_viewport;
 use crate::kit::status_symbols;
 use crate::kit::{
     Column, DiffFile, DiffLine, DiffView, FilterBar, FilterEvent, LineKind, SectionHeader,
@@ -204,15 +205,7 @@ impl ChangesScreen {
 
     fn detail(&self, commit: &Commit, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let view = commit.view(self.view.as_ref());
-        div()
-            .id("changes-detail")
-            .flex()
-            .flex_col()
-            .flex_grow(DETAIL_GROW)
-            .flex_basis(DETAIL_MIN)
-            .min_w_0()
-            .h_full()
-            .overflow_y_scroll()
+        let content = div()
             .child(commit_header(commit, palette))
             .child(SectionHeader::new("Rollout").count(commit.target_sentence()))
             .child(
@@ -222,7 +215,12 @@ impl ChangesScreen {
                     .children(commit.rollout.iter().map(|r| rollout_row(r, palette))),
             )
             .child(diff_header(commit, view, cx))
-            .children(view.map(diff_body))
+            .children(view.map(diff_body));
+        scroll_viewport("changes-detail", content)
+            .flex_grow(DETAIL_GROW)
+            .flex_basis(DETAIL_MIN)
+            .min_w_0()
+            .h_full()
             .into_any_element()
     }
 }
