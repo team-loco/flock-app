@@ -3,57 +3,46 @@ use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::kit::{SelectableText, Tooltip};
-use flock_core::diagnosis::true_label;
 use flock_core::emptiness::Noun;
 use flock_core::filter::label_values;
 use flock_core::multilog::LabelSelector;
 use flock_core::pods::{
-    Container, ContainerState, FailingElsewhere, OWNER_ARROW, Pod, PodFilter, PodPhase, PodQuery,
-    Resources, Termination, Usage, filter_counts, nav_counts, owner_segment, restarts_label,
+    Container, FailingElsewhere, Pod, PodFilter, PodPhase, PodQuery, Usage, filter_counts,
+    nav_counts,
 };
 use flock_core::related::Related;
 use flock_core::resources::{NamespaceCount, POD_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
 use flock_core::units::Amount;
 use flock_core::{
-    ClusterId, Command, Condition, LogInstance, LogTarget, Page, Preferences, ResourceRef, Seen,
-    Snapshot, Status,
+    ClusterId, Command, LogInstance, LogTarget, Page, Preferences, ResourceRef, Seen, Snapshot,
 };
 use gpui::{
-    AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, WeakEntity, Window, div, prelude::FluentBuilder, px,
+    AnyElement, AppContext as _, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
+    Render, SharedString, StyleRefinement, Styled, Subscription, WeakEntity, Window, div, px,
 };
 
+mod inspector;
 mod streams;
 
 pub(crate) use streams::exit_note;
 
+use inspector::PodInspector;
 use streams::{LogSession, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
-    ActionMenu, Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, Entrance,
-    ErrorBlocks, FILTER_PLACEHOLDER, FilterBar, FilterEvent, InputEvent, InspectorPane, KeyValue,
-    Link, LogView, MenuItem, PanelHeader, PanelSection, Select, SelectEvent, ShowAll, StatusText,
-    Table, TableEvent, Terminal, TextFieldState, YamlRow, chip_label, confirm, swap_in,
+    ActionMenu, Column, ConfirmDialog, DockState, FILTER_PLACEHOLDER, FilterBar, FilterEvent,
+    InputEvent, InspectorPane, Link, LogView, MenuItem, Select, SelectEvent, ShowAll, StatusText,
+    Table, TableEvent, Terminal, TextFieldState, chip_label, confirm,
 };
-use crate::screens::edit::edit_command;
-use crate::screens::related::{OnPick, Pick, RELATED, inspector_section, related_count};
 use crate::screens::{
     ALL_NAMESPACES, ListShape, chosen_namespace, edit_item, empty_list, new_tab_item,
     set_namespace_options,
 };
-use crate::theme::{
-    ActiveTheme, FONT_MONO, INSPECTOR_POD, Palette, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6,
-    TEXT_BODY, TEXT_MONO, TEXT_SMALL,
-};
+use crate::theme::{ActiveTheme, INSPECTOR_POD, Palette, SPACE_6, TEXT_SMALL};
 
-const INSPECTOR_ID: &str = "pod-inspector";
-const REQUESTS: &str = "requests";
-const LIMITS: &str = "limits";
+pub(super) const INSPECTOR_ID: &str = "pod-inspector";
 const FAILING_ELSEWHERE: &str = "pod-failing-elsewhere";
-const OWNER_LINK: &str = "pod-owner";
 const NAME_MIN: Pixels = px(138.);
 const NAME_WEIGHT: f32 = 2.;
 const OWNER_MIN: Pixels = px(76.);
@@ -69,27 +58,13 @@ const MEMORY: Pixels = px(68.);
 const AGE: Pixels = px(44.);
 const NAMESPACE_SELECT: Pixels = px(180.);
 pub(super) const CONTAINER_SELECT: Pixels = px(160.);
-const INSPECTOR_LABEL: Pixels = px(96.);
-const CONTAINER_LABEL: Pixels = px(80.);
-const SEPARATOR: &str = " · ";
 
-const MISSING: &str = "—";
-const NO_RESOURCES: &str = "none";
-const DETAILS: &str = "Details";
-const CONTAINERS: &str = "Containers";
-const VOLUMES: &str = "Volumes";
-const LOGS_BEFORE_RESTART: &str = "Logs before restart →";
+pub(super) const MISSING: &str = "—";
 const LOGS_FOR: &str = "Logs for";
 const SELECTED_PODS: &str = "selected pods";
-const SHELL: &str = "Shell";
-const CONTAINER_HEAD: &str = "pod-container-head";
-const CONTAINER_STATE: &str = "pod-container-state";
-const NO_RUNNING_CONTAINER: &str =
-    "No container is running, so there is nothing to open a shell in";
 const MARKED_LOGS_DESCRIPTION: &str = "Merge the output of every ⇧-clicked pod in one tab.";
 const SELECTOR_LOGS_DESCRIPTION: &str =
     "Follows every pod that matches the label filter, including new ones";
-const NO_SELECTION: &str = "Select a pod to see its containers, conditions and events.";
 pub struct PodsScreen {
     snapshot: Arc<Snapshot>,
     cluster: Option<ClusterId>,
@@ -117,7 +92,7 @@ pub struct PodsScreen {
     logs: Entity<LogView>,
     terminal: Entity<Terminal>,
     dock: Entity<DockState>,
-    entrance: Entrance,
+    inspector: Entity<PodInspector>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -148,10 +123,6 @@ impl Deref for PodRow {
     fn deref(&self) -> &Pod {
         &self.snapshot.pods[self.ix]
     }
-}
-
-fn entrance(screen: &mut PodsScreen) -> &mut Entrance {
-    &mut screen.entrance
 }
 
 impl PodsScreen {
@@ -222,6 +193,8 @@ impl PodsScreen {
             }),
             cx.observe(&dock, |this, _, cx| this.sync_streams(cx)),
         ];
+        let screen = cx.weak_entity();
+        let inspector = cx.new(|_| PodInspector::new(screen));
         Self {
             snapshot: Arc::default(),
             cluster: None,
@@ -249,7 +222,7 @@ impl PodsScreen {
             logs,
             terminal,
             dock,
-            entrance: Entrance::default(),
+            inspector,
             _subscriptions: subscriptions,
         }
     }
@@ -605,361 +578,20 @@ impl PodsScreen {
             select.set_selected(index, cx);
         });
         self.sync_streams(cx);
+        self.sync_inspector(cx);
         cx.notify();
     }
 
-    fn inspector(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let palette = *cx.palette();
-        let selection = self
-            .selected_pod()
-            .map(|pod| format!("{}/{}", pod.namespace, pod.name))
-            .unwrap_or_default();
-        let motion = self.entrance.track(Some(&selection), entrance, cx);
+    fn sync_inspector(&mut self, cx: &mut Context<Self>) {
+        let pod = self.selected_pod();
         let related = self.selected.as_ref().and_then(|target| {
             self.related
                 .iter()
                 .find(|related| &related.target == target)
         });
-        let screen = cx.weak_entity();
-        let pick: OnPick = Rc::new(move |pick, _, cx| {
-            if let Pick::Object(target) = pick {
-                let _ = screen.update(cx, |_, cx| cx.emit(Command::OpenResource(target)));
-            }
-        });
-        let section = PanelSection::new(INSPECTOR_ID, RELATED).closed();
-        let related = match related {
-            Some(loaded) => section
-                .count(related_count(loaded).to_string())
-                .child(inspector_section(Some(loaded), &pick, cx)),
-            None => section.pending(),
-        };
-        let yaml_screen = cx.weak_entity();
-        let yaml_target = self.selected_pod().map(Pod::resource);
-        let yaml = YamlRow::new(INSPECTOR_ID, move |_, cx| {
-            if let Some(target) = yaml_target.clone() {
-                let _ = yaml_screen.update(cx, |_, cx| cx.emit(edit_command(target)));
-            }
-        });
-        let (header, body) = match self.selected_pod() {
-            Some(pod) => (
-                Some(Self::pod_header(pod, cx)),
-                Self::pod_details(pod, &palette, cx)
-                    .child(related)
-                    .child(yaml)
-                    .into_any_element(),
-            ),
-            None => (
-                None,
-                div()
-                    .p(SPACE_6)
-                    .text_color(palette.mute)
-                    .child(NO_SELECTION)
-                    .into_any_element(),
-            ),
-        };
-        let panel = div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .bg(palette.panel)
-            .text_size(TEXT_BODY)
-            .children(header)
-            .child(
-                div()
-                    .id(gpui::ElementId::Name(
-                        format!("{INSPECTOR_ID}-{selection}").into(),
-                    ))
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(body),
-            );
-        div()
-            .size_full()
-            .bg(palette.panel)
-            .child(swap_in(panel, INSPECTOR_ID, motion))
-            .into_any_element()
+        self.inspector
+            .update(cx, |inspector, cx| inspector.show(pod, related, cx));
     }
-
-    fn pod_header(pod: &Pod, cx: &mut Context<Self>) -> AnyElement {
-        let running = pod
-            .containers
-            .iter()
-            .any(|container| container.state == ContainerState::Running);
-        let shell = Button::new("pod-shell", SHELL)
-            .primary()
-            .small()
-            .disabled(!running)
-            .when(!running, |shell| shell.tooltip(NO_RUNNING_CONTAINER))
-            .on_click(cx.listener(|this, _, window, cx| this.open_terminal(window, cx)));
-        PanelHeader::new(INSPECTOR_ID, pod.name.clone())
-            .mono()
-            .status(pod.status, pod.reason.clone())
-            .action(shell)
-            .into_any_element()
-    }
-
-    fn pod_details(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> gpui::Div {
-        let labels: Vec<String> = pod
-            .labels
-            .iter()
-            .map(|(key, value)| format!("{key}={value}"))
-            .collect();
-        div()
-            .flex()
-            .flex_col()
-            .child(ErrorBlocks::new(pod.issue().into_iter().collect()))
-            .child(PanelSection::new(INSPECTOR_ID, DETAILS).child(Self::facts(pod, palette, cx)))
-            .child(PanelSection::labels(INSPECTOR_ID, labels))
-            .child(Self::containers_section(pod, palette, cx))
-            .child(conditions(pod, palette))
-            .child(PanelSection::events(INSPECTOR_ID, pod.events.clone()).closed())
-            .child(volumes(pod))
-    }
-
-    fn facts(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
-        let owner = Self::owner_chain(pod, palette, cx);
-        let created = format!("{} ago", flock_core::time::age(pod.age));
-        let ready = div()
-            .text_color(palette.status(pod.status))
-            .child(format!("{} containers", pod.ready_label()));
-        KeyValue::new()
-            .label_width(INSPECTOR_LABEL)
-            .text("Namespace", pod.namespace.clone())
-            .text("Node", or_missing(pod.node.clone()))
-            .text("Pod IP", or_missing(pod.ip.clone()))
-            .row("Ready", ready)
-            .row("Controlled by", owner)
-            .text("QoS", pod.qos.label())
-            .text("Service account", or_missing(pod.service_account.clone()))
-            .text("Created", created)
-    }
-
-    fn owner_chain(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let chain = pod.owner_chain();
-        if chain.is_empty() {
-            return missing(palette);
-        }
-        let mut parts: Vec<AnyElement> = Vec::new();
-        for (ix, target) in chain.into_iter().enumerate() {
-            if ix > 0 {
-                let arrow = div().text_color(palette.mute).child(OWNER_ARROW);
-                parts.push(arrow.into_any_element());
-            }
-            let id = gpui::ElementId::NamedInteger(OWNER_LINK.into(), ix as u64);
-            let link = Link::new(id, owner_segment(&target))
-                .mono()
-                .on_click(cx.listener(move |_, _, _, cx| {
-                    cx.emit(Command::OpenResource(target.clone()));
-                }));
-            parts.push(link.into_any_element());
-        }
-        div()
-            .min_w_0()
-            .flex()
-            .flex_wrap()
-            .font_family(FONT_MONO)
-            .children(parts)
-            .into_any_element()
-    }
-
-    fn containers_section(pod: &Pod, palette: &Palette, cx: &mut Context<Self>) -> PanelSection {
-        let rows: Vec<AnyElement> = pod
-            .containers
-            .iter()
-            .enumerate()
-            .map(|(ix, container)| Self::container_row(pod, ix, container, palette, cx))
-            .collect();
-        let restarted = pod
-            .containers
-            .iter()
-            .any(|container| container.last_termination.is_some());
-        let count = pod.containers.len().to_string();
-        let section = PanelSection::new(INSPECTOR_ID, CONTAINERS);
-        let section = if restarted {
-            section
-                .count(format!(
-                    "{count}{SEPARATOR}{}",
-                    restarts_label(pod.restarts())
-                ))
-                .count_color(palette.warn)
-        } else {
-            section.count(count)
-        };
-        section.child(div().flex().flex_col().gap(SPACE_6).children(rows))
-    }
-
-    fn container_row(
-        pod: &Pod,
-        ix: usize,
-        container: &Container,
-        palette: &Palette,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let ports: Vec<AnyElement> = container
-            .ports
-            .iter()
-            .enumerate()
-            .map(|(port_ix, port)| {
-                let target = pod.resource();
-                let remote = port.port;
-                let id =
-                    gpui::ElementId::NamedInteger(format!("forward-{ix}").into(), port_ix as u64);
-                div()
-                    .flex()
-                    .gap(SPACE_4)
-                    .child(div().text_color(palette.fg).child(port.label()))
-                    .child(
-                        Link::new(id, "Forward").on_click(cx.listener(move |_, _, _, cx| {
-                            cx.emit(Command::PortForward {
-                                service: target.clone(),
-                                local: remote,
-                                remote,
-                            });
-                        })),
-                    )
-                    .into_any_element()
-            })
-            .collect();
-        let state_color = match (container.state, container.status) {
-            (ContainerState::Terminated, Status::Ok) => palette.mute,
-            (_, status) => palette.status(status),
-        };
-        let fields = container_fields(container, ports, palette);
-        let name = container.name.clone();
-        let before_restart = container.last_termination.as_ref().map(|_| {
-            let link = Link::new(
-                gpui::ElementId::NamedInteger("pod-logs-before-restart".into(), ix as u64),
-                LOGS_BEFORE_RESTART,
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.show_previous_logs(name.clone(), cx);
-            }));
-            div().pl(CONTAINER_LABEL + SPACE_5).child(link)
-        });
-        div()
-            .flex()
-            .flex_col()
-            .gap(SPACE_3)
-            .child(
-                div()
-                    .debug_selector(|| CONTAINER_HEAD.into())
-                    .flex()
-                    .flex_wrap()
-                    .items_baseline()
-                    .gap(SPACE_4)
-                    .font_family(FONT_MONO)
-                    .text_size(TEXT_MONO)
-                    .child(
-                        div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(container.name.clone()),
-                    )
-                    .child(
-                        div()
-                            .debug_selector(|| CONTAINER_STATE.into())
-                            .text_color(state_color)
-                            .child(container.state_label()),
-                    ),
-            )
-            .child(fields)
-            .children(before_restart)
-            .into_any_element()
-    }
-}
-
-fn container_fields(container: &Container, ports: Vec<AnyElement>, palette: &Palette) -> KeyValue {
-    let resources =
-        |side: &str, resources: &Resources| match (resources.label(), resources.written()) {
-            (Some(label), Some(written)) => div()
-                .id(SharedString::from(format!(
-                    "container-{side}-{}",
-                    container.name
-                )))
-                .tooltip(Tooltip::text(written))
-                .child(value(label, palette.fg))
-                .into_any_element(),
-            _ => value(NO_RESOURCES, palette.mute),
-        };
-    let restarts_color = if container.restarts > 0 {
-        palette.warn
-    } else {
-        palette.mute
-    };
-    let probes = container
-        .probes_label()
-        .map(|probes| value(probes, palette.fg2));
-    let run = container
-        .terminated
-        .as_ref()
-        .and_then(Termination::run)
-        .map(|run| value(run, palette.fg));
-    let mut fields = KeyValue::new().label_width(CONTAINER_LABEL).row(
-        "restarts",
-        value(container.restarts.to_string(), restarts_color),
-    );
-    if let Some(last) = &container.last_termination {
-        fields = fields.row("last exit", value(last.detail(), palette.warn));
-        if let Some(run) = last.run() {
-            fields = fields.row("last run", value(run, palette.fg2));
-        }
-    }
-    let fields = fields
-        .row("image", value(container.image.clone(), palette.fg))
-        .row(REQUESTS, resources(REQUESTS, &container.requests))
-        .row(LIMITS, resources(LIMITS, &container.limits));
-    let fields = match probes {
-        Some(probes) => fields.row("probes", probes),
-        None => fields,
-    };
-    let fields = match run {
-        Some(run) => fields.row("ran", run),
-        None => fields,
-    };
-    if ports.is_empty() {
-        return fields;
-    }
-    let ports = div().flex().flex_col().gap(SPACE_2).children(ports);
-    fields.row("ports", ports)
-}
-
-fn value(text: impl Into<SharedString>, color: gpui::Hsla) -> AnyElement {
-    div()
-        .min_w_0()
-        .text_color(color)
-        .child(SelectableText::new(text))
-        .into_any_element()
-}
-
-fn conditions(pod: &Pod, palette: &Palette) -> PanelSection {
-    let all_true = pod.conditions.iter().all(Condition::is_true);
-    let color = if all_true { palette.ok } else { palette.mute };
-    PanelSection::new(INSPECTOR_ID, CONDITIONS)
-        .count(true_label(&pod.conditions))
-        .count_color(color)
-        .closed()
-        .child(ConditionTable::new(&pod.conditions))
-}
-
-fn missing(palette: &Palette) -> AnyElement {
-    div()
-        .text_color(palette.mute)
-        .child(MISSING)
-        .into_any_element()
-}
-
-fn or_missing(value: Option<String>) -> SharedString {
-    value.map_or_else(|| MISSING.into(), SharedString::from)
-}
-
-fn volumes(pod: &Pod) -> PanelSection {
-    let rows = pod.volumes.iter().fold(
-        KeyValue::new().label_width(INSPECTOR_LABEL),
-        |grid, volume| grid.text(volume.name.clone(), volume.source.clone()),
-    );
-    PanelSection::new(INSPECTOR_ID, VOLUMES)
-        .count(pod.volumes.len().to_string())
-        .child(rows)
 }
 
 fn logs_target(
@@ -1211,7 +843,11 @@ impl Render for PodsScreen {
             self.search
                 .update(cx, |field, cx| field.set_value("", window, cx));
         }
-        let inspector = self.panel_open.then(|| self.inspector(cx));
+        let inspector = self.panel_open.then(|| {
+            self.inspector
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+        });
         let dock = self.dock_view(cx).into_any_element();
         let namespace = self.query.namespace.as_deref().map(|namespace| {
             let inside = self.snapshot.pods.iter().filter(|pod| {
