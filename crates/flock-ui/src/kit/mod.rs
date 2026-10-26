@@ -34,6 +34,7 @@ mod terminal;
 mod text;
 mod tile;
 mod tooltip;
+mod viewport;
 
 pub use button::{Button, ButtonSize, ButtonVariant, Checkbox, IconButton, Segmented, Toggle};
 pub use chart::{CapacityMeter, LineChart, Meter, MiniMeter, Series, StackedBar};
@@ -86,6 +87,7 @@ pub use terminal::{SendBackTab, SendTab, TERMINAL_CONTEXT, Terminal, TerminalEve
 pub use text::{AmountText, Highlighted, Kbd, KeyValue, Link, Rule, SectionHeader, SectionLabel};
 pub use tile::{Activate, HealthTile, HealthTiles, TileNote, problem_link};
 pub use tooltip::{TOOLTIP_SELECTOR, Tooltip};
+pub use viewport::scroll_viewport;
 
 pub(crate) fn init(cx: &mut gpui::App) {
     overlay::init(cx);

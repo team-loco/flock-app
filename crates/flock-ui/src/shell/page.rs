@@ -5,14 +5,14 @@ use flock_core::watch::WatchState;
 use flock_core::{Command, Page, ResourceRef};
 use gpui::{
     AnyElement, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, StatefulInteractiveElement, Styled, Subscription, Window, div,
+    MouseButton, ParentElement, Styled, Subscription, Window, div,
 };
 
 use flock_core::AddClusterStep;
 
 use super::Shell;
 use crate::assets::GEAR;
-use crate::kit::{Button, EmptyState, IconButton, Skeleton, status_symbols};
+use crate::kit::{Button, EmptyState, IconButton, Skeleton, scroll_viewport, status_symbols};
 use crate::screens::ScreenEvent;
 use crate::screens::add_cluster::empty_flock;
 use crate::screens::detail::DetailScreen;
@@ -30,6 +30,7 @@ const UNAVAILABLE_REASON: &str =
     "It was removed from Flock or its kubeconfig context is gone, so this tab has nothing to show.";
 const SHOW_ALL_CLUSTERS: &str = "Show all clusters";
 const OVERVIEW_SETTINGS: &str = "overview-settings";
+const PAGE_CONTENT: &str = "page-content";
 const PAGE_HEADER_SELECTOR: &str = "page-header";
 const CLUSTER_SETTINGS: &str = "Cluster settings";
 
@@ -104,14 +105,7 @@ impl Shell {
                 .flex()
                 .flex_col()
                 .children(bar)
-                .child(
-                    div()
-                        .id("page-content")
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_y_scroll()
-                        .child(view),
-                )
+                .child(scroll_viewport(PAGE_CONTENT, view).flex_1().min_h_0())
                 .into_any_element()
         } else if location.page == Page::Pods && self.has_detail(&location) {
             div()
@@ -120,12 +114,9 @@ impl Shell {
                 .child(self.screens(ix).pods.clone())
                 .into_any_element()
         } else {
-            div()
-                .id("page-content")
+            scroll_viewport(PAGE_CONTENT, self.content(ix, &location, &palette, cx))
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .child(self.content(ix, &location, &palette, cx))
                 .into_any_element()
         };
         div()
