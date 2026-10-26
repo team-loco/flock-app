@@ -27,7 +27,7 @@ use crate::actions::{
     CompareAcrossClusters, FocusFilter, FollowLogs, OpenSettings, RefreshView, ShowAllClusters,
     ShowFluxOwner, ToggleClusterSwitcher, ToggleCommandPalette, ToggleSidebar,
 };
-use crate::kit::{FilterBar, Split, Toast, toast};
+use crate::kit::{FilterBar, LogView, Split, Toast, toast};
 use crate::screens::ScreenEvent;
 use crate::screens::add_cluster::{AddClusterDialog, AddClusterEvent};
 use crate::screens::cluster_edit::{ClusterEditEvent, RenameDialog, SwitchContextDialog};
@@ -325,6 +325,15 @@ impl Shell {
             .collect();
         let text = view.logs().read(cx).export();
         Some((legend, text))
+    }
+
+    pub fn log_view(&self, cx: &App) -> Option<Entity<LogView>> {
+        let screens = self.focused_screens();
+        if let Some((screen, _)) = &screens.logs {
+            return Some(screen.read(cx).logs().clone());
+        }
+        let (screen, _) = screens.multi_logs.as_ref()?;
+        Some(screen.read(cx).view().read(cx).logs().clone())
     }
 
     pub fn custom_empty_sentence(&self, cx: &App) -> Option<String> {

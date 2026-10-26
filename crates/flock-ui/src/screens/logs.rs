@@ -67,6 +67,10 @@ impl LogsScreen {
         &self.pod == pod && self.container == container
     }
 
+    pub fn logs(&self) -> &Entity<LogView> {
+        &self.logs
+    }
+
     pub fn watch(&mut self, cx: &mut Context<Self>) {
         let (sink, lines) = Sink::channel();
         self.logs.update(cx, |logs, cx| {
