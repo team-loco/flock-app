@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 
 const FRAMES = {
@@ -8,22 +8,29 @@ const FRAMES = {
 };
 
 const SPRITE = { width: 28, height: 22 };
-const FRAME_HALF_WIDTH = 556;
+const EDGE_MARGIN = 4;
+const GUTTER = "(50% - min(50%, var(--container-page) / 2) + var(--spacing) * 6)";
 
-type Sheep = {
+type Side = "left" | "right";
+
+type SheepSpec = {
+  side: Side;
   scale: number;
-  offset: number;
+  reach: number;
   flip: boolean;
   walk: boolean;
   blinkDelay: string;
 };
 
-const FLOCK: Sheep[] = [
-  { scale: 3, offset: -FRAME_HALF_WIDTH - 96, flip: false, walk: false, blinkDelay: "-1.2s" },
-  { scale: 2, offset: -FRAME_HALF_WIDTH - 150, flip: true, walk: false, blinkDelay: "-3.1s" },
-  { scale: 3, offset: 568, flip: true, walk: false, blinkDelay: "-0.4s" },
-  { scale: 2, offset: 660, flip: false, walk: true, blinkDelay: "-2.2s" },
+const FLOCK: SheepSpec[] = [
+  { side: "left", scale: 3, reach: 96, flip: false, walk: false, blinkDelay: "-1.2s" },
+  { side: "left", scale: 2, reach: 150, flip: true, walk: false, blinkDelay: "-3.1s" },
+  { side: "right", scale: 3, reach: 96, flip: true, walk: false, blinkDelay: "-0.4s" },
+  { side: "right", scale: 2, reach: 160, flip: false, walk: true, blinkDelay: "-2.2s" },
 ];
+
+const sideReach = (side: Side) =>
+  Math.max(...FLOCK.filter((sheep) => sheep.side === side).map((sheep) => sheep.reach));
 
 const frame = "pixelated absolute inset-0 block size-full";
 
@@ -52,50 +59,74 @@ function Frame({
   );
 }
 
-export function Pasture({ band, className }: { band: string; className?: string }) {
+function Sheep({ sheep, band }: { sheep: SheepSpec; band: string }) {
+  const [jumps, setJumps] = useState(0);
+  const width = SPRITE.width * sheep.scale;
+  const height = SPRITE.height * sheep.scale;
+  const reach = sideReach(sheep.side);
+  const place: CSSProperties = {
+    width,
+    height,
+    top: `calc(${band} - ${height}px)`,
+    [sheep.side]: `calc(max(${EDGE_MARGIN}px, ${GUTTER} - ${reach}px) + ${reach - sheep.reach}px)`,
+  };
+  const jumping = jumps > 0;
   return (
-    <div
-      aria-hidden="true"
-      className={cn("pointer-events-none absolute inset-0 overflow-hidden", className)}
+    <button
+      type="button"
+      aria-label="Make the sheep jump"
+      data-sheep={sheep.side}
+      onClick={() => setJumps((count) => count + 1)}
+      className="pointer-events-auto absolute cursor-pointer border-0 bg-transparent p-0 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      style={place}
     >
-      {FLOCK.map((sheep) => {
-        const width = SPRITE.width * sheep.scale;
-        const height = SPRITE.height * sheep.scale;
-        const place: CSSProperties = {
-          width,
-          height,
-          top: `calc(${band} - ${height}px)`,
-          left: `calc(50% + ${sheep.offset}px)`,
-        };
-        return (
-          <div key={sheep.offset} className="absolute" style={place}>
-            <div
-              className={cn(
-                "absolute inset-0",
-                sheep.flip && "-scale-x-100",
-                sheep.walk && "motion-safe:animate-walk",
-              )}
-            >
-              <Frame src={FRAMES.base} width={width} height={height} />
-              {sheep.walk && (
-                <Frame
-                  src={FRAMES.stomp}
-                  width={width}
-                  height={height}
-                  className="opacity-0 motion-safe:animate-stomp"
-                />
-              )}
+      <span className={cn("absolute inset-0 block", sheep.walk && "motion-safe:animate-walk")}>
+        <span
+          key={jumps}
+          data-jump=""
+          className={cn(
+            "absolute inset-0 block",
+            jumping && "motion-safe:animate-hop motion-reduce:animate-hop-small",
+          )}
+        >
+          <span className={cn("absolute inset-0 block", sheep.flip && "-scale-x-100")}>
+            <Frame src={FRAMES.base} width={width} height={height} />
+            {sheep.walk && (
               <Frame
-                src={FRAMES.blink}
+                src={FRAMES.stomp}
                 width={width}
                 height={height}
-                className="opacity-0 motion-safe:animate-blink"
-                style={{ animationDelay: sheep.blinkDelay }}
+                className="opacity-0 motion-safe:animate-stomp"
               />
-            </div>
-          </div>
-        );
-      })}
+            )}
+            {jumping && (
+              <Frame
+                src={FRAMES.stomp}
+                width={width}
+                height={height}
+                className="opacity-0 animate-land"
+              />
+            )}
+            <Frame
+              src={FRAMES.blink}
+              width={width}
+              height={height}
+              className="opacity-0 motion-safe:animate-blink"
+              style={{ animationDelay: sheep.blinkDelay }}
+            />
+          </span>
+        </span>
+      </span>
+    </button>
+  );
+}
+
+export function Pasture({ band, className }: { band: string; className?: string }) {
+  return (
+    <div className={cn("pointer-events-none absolute inset-0 overflow-hidden", className)}>
+      {FLOCK.map((sheep) => (
+        <Sheep key={`${sheep.side}-${sheep.reach}`} sheep={sheep} band={band} />
+      ))}
     </div>
   );
 }

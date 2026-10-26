@@ -108,8 +108,6 @@
   --text-kicker: 12px;
   --text-kicker--letter-spacing: 0.08em;
 
-  --breakpoint-pasture: 90rem;
-
   --container-page: 1160px;
   --container-headline: 900px;
   --container-lead: 640px;
@@ -132,6 +130,65 @@
   --animate-blink: blink 6s steps(1) infinite;
   --animate-stomp: stomp 0.5s steps(1) infinite;
   --animate-walk: walk 16s linear infinite;
+  --animate-hop: hop 0.5s steps(1) 1;
+  --animate-hop-small: hop-small 0.5s steps(1) 1;
+  --animate-land: land 0.5s steps(1) 1;
+
+  @keyframes hop {
+    0% {
+      transform: translateY(0);
+    }
+    10% {
+      transform: translateY(-6px);
+    }
+    20% {
+      transform: translateY(-12px);
+    }
+    30% {
+      transform: translateY(-15px);
+    }
+    40%,
+    50% {
+      transform: translateY(-18px);
+    }
+    60% {
+      transform: translateY(-15px);
+    }
+    70% {
+      transform: translateY(-12px);
+    }
+    80% {
+      transform: translateY(-6px);
+    }
+    90%,
+    100% {
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes hop-small {
+    0% {
+      transform: translateY(0);
+    }
+    25%,
+    50% {
+      transform: translateY(-3px);
+    }
+    75%,
+    100% {
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes land {
+    0% {
+      opacity: 0;
+    }
+    90%,
+    100% {
+      opacity: 1;
+    }
+  }
 
   @keyframes blink {
     0%,
