@@ -11,7 +11,7 @@ use gpui::{
 use super::{CONTAINER_SELECT, PodsScreen};
 use crate::kit::{
     Button, Dock, DockState, DockTab, EmptyState, LogView, MenuItem, Terminal, TerminalEvent,
-    TextField, Toast, confirm, drain, toast,
+    TextField, Toast, confirm, drain, pane, toast,
 };
 use crate::screens::no_shell::{DEBUG_IMAGE, confirm_debug, no_shell_state, start_debug_button};
 use crate::screens::workload::kit_line;
@@ -572,7 +572,7 @@ impl PodsScreen {
             .filter(|_| self.log_instance() == LogInstance::Previous)
             .map(previous_banner);
         let Some(banner) = banner else {
-            return LogView::pane(&self.logs).into_any_element();
+            return pane(&self.logs).into_any_element();
         };
         let palette = *cx.palette();
         div()
@@ -593,13 +593,13 @@ impl PodsScreen {
                     .text_size(TEXT_SMALL)
                     .child(banner),
             )
-            .child(div().flex_1().min_h_0().child(LogView::pane(&self.logs)))
+            .child(div().flex_1().min_h_0().child(pane(&self.logs)))
             .into_any_element()
     }
 
     fn terminal_content(&self, cx: &mut Context<Self>) -> AnyElement {
         if !self.shell.as_ref().is_some_and(|s| s.no_shell) {
-            return Terminal::pane(&self.terminal).into_any_element();
+            return pane(&self.terminal).into_any_element();
         }
         let start = start_debug_button(START_DEBUG_ID)
             .on_click(cx.listener(|this, _, window, cx| this.confirm_debug_container(window, cx)));

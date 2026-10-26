@@ -4,7 +4,7 @@ use flock_core::loco::{
 };
 use flock_core::{Command, Page, Status};
 use gpui::{
-    AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla,
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
@@ -185,7 +185,7 @@ impl PlatformScreen {
             .into_any_element()
     }
 
-    fn placements_section(&self, palette: &Palette) -> impl IntoElement {
+    fn placements_section(&self, palette: &Palette, cx: &App) -> impl IntoElement {
         let summary = self.loco.applications.placement_summary();
         div()
             .flex()
@@ -196,11 +196,11 @@ impl PlatformScreen {
                 div()
                     .border_t(RULE)
                     .border_color(palette.line)
-                    .child(self.placements.clone()),
+                    .child(Table::pane(&self.placements, cx)),
             )
     }
 
-    fn components_section(&self, palette: &Palette) -> impl IntoElement {
+    fn components_section(&self, palette: &Palette, cx: &App) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -210,7 +210,7 @@ impl PlatformScreen {
                 div()
                     .border_t(RULE)
                     .border_color(palette.line)
-                    .child(self.components.clone()),
+                    .child(Table::pane(&self.components, cx)),
             )
     }
 
@@ -260,8 +260,8 @@ impl Render for PlatformScreen {
                     .min_h_0()
                     .overflow_y_scroll()
                     .child(agent)
-                    .child(self.placements_section(&palette))
-                    .child(self.components_section(&palette))
+                    .child(self.placements_section(&palette, cx))
+                    .child(self.components_section(&palette, cx))
                     .child(self.log_section(&palette)),
             )
     }

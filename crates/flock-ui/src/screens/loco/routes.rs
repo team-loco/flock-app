@@ -164,7 +164,7 @@ impl Render for RoutesScreen {
         };
         let routes: AnyElement = match empty_list(&shape, &self.filter, None, cx) {
             Some(empty) => empty.into_any_element(),
-            None => self.table.clone().into_any_element(),
+            None => Table::pane(&self.table, cx).into_any_element(),
         };
         div()
             .flex()
@@ -189,7 +189,7 @@ impl Render for RoutesScreen {
                         div()
                             .border_t(RULE)
                             .border_color(palette.line)
-                            .child(self.listeners.clone()),
+                            .child(Table::pane(&self.listeners, cx)),
                     )
                     .child(div().pt(SPACE_2).child(header))
                     .child(

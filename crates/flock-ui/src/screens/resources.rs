@@ -433,7 +433,7 @@ impl ResourcesScreen {
                 table.set_scope(scope, cx);
             }
             table.set_highlight(words, cx);
-            table.set_row_actions(actions, cx);
+            table.set_row_actions(actions);
             table.set_rows(rows, cx);
             if position.is_some() {
                 table.select(position, cx);
@@ -588,7 +588,7 @@ impl Render for ResourcesScreen {
         let table = self.table(cx);
         let body: AnyElement = match self.empty_state(cx) {
             Some(empty) => empty.into_any_element(),
-            None => table.into_any_element(),
+            None => Table::pane(&table, cx).into_any_element(),
         };
         let current = self.selected_row().cloned();
         let selection = current

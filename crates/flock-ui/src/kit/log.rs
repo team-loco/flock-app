@@ -4,8 +4,8 @@ use std::ops::Range;
 use gpui::{
     AnyElement, App, Context, ElementId, Entity, HighlightStyle, Hsla, InteractiveElement,
     IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, ScrollStrategy,
-    SharedString, StyleRefinement, Styled, UniformListScrollHandle, ViewElement, Window, div, list,
-    prelude::FluentBuilder, px, uniform_list,
+    SharedString, Styled, UniformListScrollHandle, Window, div, list, prelude::FluentBuilder, px,
+    uniform_list,
 };
 
 use flock_core::LogLevel;
@@ -508,10 +508,6 @@ impl LogView {
     pub fn inset(mut self, inset: Pixels) -> Self {
         self.inset = inset;
         self
-    }
-
-    pub fn pane(view: &Entity<Self>) -> ViewElement<Entity<Self>> {
-        view.clone().cached(StyleRefinement::default().size_full())
     }
 
     pub fn push(&mut self, line: LogLine, cx: &mut Context<Self>) {

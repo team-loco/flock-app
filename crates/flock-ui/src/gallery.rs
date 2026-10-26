@@ -10,7 +10,7 @@ use crate::kit::{
     Dock, DockState, DockTab, FILTER_PLACEHOLDER, IconButton, InputEvent, Kbd, KeyValue, Level,
     LineChart, LineKind, Link, LogLine, LogView, MenuItem, Meter, MiniMeter, PageHeader, Rule,
     SectionHeader, Segmented, Select, Series, Split, StackedBar, StatusGlyph, StatusText, Table,
-    TextField, TextFieldState, Toast, Toggle, confirm, overlay_layer, parse_unified, toast,
+    TextField, TextFieldState, Toast, Toggle, confirm, overlay_layer, pane, parse_unified, toast,
 };
 use crate::theme::{
     self, ActiveTheme, DOCK_HEIGHT, FONT_MONO, Palette, RULE, SPACE_4, SPACE_6, SPACE_8, TEXT_MONO,
@@ -604,12 +604,12 @@ impl Gallery {
                     DockTab::new("Logs")
                         .detail("x2lqp · api")
                         .tools(tools)
-                        .content(LogView::pane(&self.logs)),
+                        .content(pane(&self.logs)),
                 )
                 .tab(
                     DockTab::new("Events")
                         .detail("7")
-                        .content(self.events.clone()),
+                        .content(Table::pane(&self.events, cx)),
                 )
                 .tab(
                     DockTab::new("Terminal")
@@ -815,9 +815,9 @@ impl Gallery {
                     .flex()
                     .flex_col()
                     .child(Rule::horizontal())
-                    .child(self.pods.clone()),
+                    .child(Table::pane(&self.pods, cx)),
             ),
-            section("Empty table", None, self.empty.clone()),
+            section("Empty table", None, Table::pane(&self.empty, cx)),
             section("Feedback", None, Self::feedback(cx)),
         ]
     }

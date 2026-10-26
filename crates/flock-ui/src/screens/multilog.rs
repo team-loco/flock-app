@@ -12,7 +12,7 @@ use gpui::{
 use crate::highlight::{SOURCE_COLORS, source_colors};
 use crate::kit::{
     ActionMenu, FILTER_PLACEHOLDER, InputEvent, LogLine, LogView, MenuItem, MetaLine, PageHeader,
-    TextField, TextFieldState, drain, find_matches,
+    TextField, TextFieldState, drain, find_matches, pane,
 };
 use crate::screens::workload::kit_line;
 use crate::theme::{
@@ -458,7 +458,7 @@ impl Render for MultiLogs {
             .flex_col()
             .bg(palette.editor)
             .child(legend)
-            .child(div().flex_1().min_h_0().child(LogView::pane(&self.logs)))
+            .child(div().flex_1().min_h_0().child(pane(&self.logs)))
     }
 }
 
@@ -518,7 +518,7 @@ impl Render for MultiLogsScreen {
                 .flex_col()
                 .bg(palette.editor)
                 .child(crate::kit::PageTitle::new(title).leading(self.navigation.clone()))
-                .child(div().flex_1().min_h_0().child(LogView::pane(&logs)));
+                .child(div().flex_1().min_h_0().child(pane(&logs)));
         }
         let summary = self.view.read(cx).summary();
         let header = PageHeader::new(title)

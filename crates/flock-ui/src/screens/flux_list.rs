@@ -178,7 +178,7 @@ impl Render for FluxListScreen {
         };
         let body: AnyElement = match empty_list(&shape, &self.filter, None, cx) {
             Some(empty) => empty.into_any_element(),
-            None => self.table.clone().into_any_element(),
+            None => Table::pane(&self.table, cx).into_any_element(),
         };
         div()
             .size_full()

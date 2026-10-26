@@ -500,7 +500,7 @@ impl Render for SettingsScreen {
                     .text_color(palette.fg2)
                     .child(self.catalog.sentence()),
             )
-            .child(div().flex_1().min_h_0().child(self.table.clone()));
+            .child(div().flex_1().min_h_0().child(Table::pane(&self.table, cx)));
         div()
             .flex()
             .flex_col()

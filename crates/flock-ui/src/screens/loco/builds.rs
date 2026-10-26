@@ -269,7 +269,7 @@ impl Render for BuildsScreen {
                 div()
                     .flex_none()
                     .h(self.list_height())
-                    .child(self.table.clone()),
+                    .child(Table::pane(&self.table, cx)),
             )
             .children(summary)
             .child(div().flex_1().min_h_0().child(self.log.clone()))

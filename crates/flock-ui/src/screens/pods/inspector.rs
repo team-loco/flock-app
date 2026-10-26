@@ -17,7 +17,7 @@ use gpui::{
 use super::{INSPECTOR_ID, MISSING, PodsScreen};
 use crate::kit::{
     Button, CONDITIONS, ConditionTable, Entrance, ErrorBlocks, KeyValue, Link, PanelHeader,
-    PanelSection, SelectableText, Tooltip, YamlRow, swap_in,
+    PanelSection, SelectableText, Shown, Tooltip, YamlRow, swap_in,
 };
 use crate::screens::edit::edit_command;
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section, related_count};
@@ -44,10 +44,15 @@ const NO_RUNNING_CONTAINER: &str =
     "No container is running, so there is nothing to open a shell in";
 const NO_SELECTION: &str = "Select a pod to see its containers, conditions and events.";
 
+#[derive(PartialEq)]
+pub(super) struct PodContent {
+    pub(super) pod: Option<Pod>,
+    pub(super) related: Option<Related>,
+}
+
 pub(super) struct PodInspector {
     screen: WeakEntity<PodsScreen>,
-    pod: Option<Pod>,
-    related: Option<Related>,
+    pub(super) shown: Shown<PodContent>,
     entrance: Entrance,
 }
 
@@ -55,24 +60,9 @@ impl PodInspector {
     pub(super) fn new(screen: WeakEntity<PodsScreen>) -> Self {
         Self {
             screen,
-            pod: None,
-            related: None,
+            shown: Shown::default(),
             entrance: Entrance::default(),
         }
-    }
-
-    pub(super) fn show(
-        &mut self,
-        pod: Option<&Pod>,
-        related: Option<&Related>,
-        cx: &mut Context<Self>,
-    ) {
-        if self.pod.as_ref() == pod && self.related.as_ref() == related {
-            return;
-        }
-        self.pod = pod.cloned();
-        self.related = related.cloned();
-        cx.notify();
     }
 
     fn header(&self, pod: &Pod) -> AnyElement {
@@ -272,9 +262,8 @@ impl PodInspector {
 impl Render for PodInspector {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
-        let selection = self
-            .pod
-            .as_ref()
+        let pod = self.shown.get().and_then(|shown| shown.pod.as_ref());
+        let selection = pod
             .map(|pod| format!("{}/{}", pod.namespace, pod.name))
             .unwrap_or_default();
         let motion = self.entrance.track(
@@ -289,20 +278,20 @@ impl Render for PodInspector {
             }
         });
         let section = PanelSection::new(INSPECTOR_ID, RELATED).closed();
-        let related = match &self.related {
+        let related = match self.shown.get().and_then(|shown| shown.related.as_ref()) {
             Some(loaded) => section
                 .count(related_count(loaded).to_string())
                 .child(inspector_section(Some(loaded), &pick, cx)),
             None => section.pending(),
         };
         let yaml_screen = self.screen.clone();
-        let yaml_target = self.pod.as_ref().map(Pod::resource);
+        let yaml_target = pod.map(Pod::resource);
         let yaml = YamlRow::new(INSPECTOR_ID, move |_, cx| {
             if let Some(target) = yaml_target.clone() {
                 emit(&yaml_screen, edit_command(target), cx);
             }
         });
-        let (header, body) = match &self.pod {
+        let (header, body) = match pod {
             Some(pod) => (
                 Some(self.header(pod)),
                 self.details(pod, &palette)
@@ -469,7 +458,8 @@ mod tests {
     fn shown(window: &WindowHandle<PodsScreen>, cx: &mut TestAppContext) -> Option<String> {
         let name = window.update(cx, |screen, _, cx| {
             let inspector = screen.inspector.read(cx);
-            inspector.pod.as_ref().map(|pod| pod.name.clone())
+            let shown = inspector.shown.get()?;
+            shown.pod.as_ref().map(|pod| pod.name.clone())
         });
         name.ok().flatten()
     }

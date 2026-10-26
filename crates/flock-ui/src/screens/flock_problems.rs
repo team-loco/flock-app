@@ -216,7 +216,7 @@ impl Render for FleetProblemsScreen {
         };
         let body = match empty_list(&shape, &self.filter, None, cx) {
             Some(empty) => empty.into_any_element(),
-            None => self.table.clone().into_any_element(),
+            None => Table::pane(&self.table, cx).into_any_element(),
         };
         let current = self.current().cloned();
         let inspector = current.map(|problem| self.inspector(&problem, cx));

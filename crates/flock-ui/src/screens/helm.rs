@@ -200,7 +200,7 @@ impl HelmReleasesScreen {
                 table.set_scope(scope, cx);
             }
             table.set_highlight(words, cx);
-            table.set_row_actions(actions, cx);
+            table.set_row_actions(actions);
             table.set_rows(rows, cx);
         });
         cx.notify();
@@ -222,7 +222,7 @@ impl Render for HelmReleasesScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body: AnyElement = match self.empty_state(cx) {
             Some(empty) => empty.into_any_element(),
-            None => self.table.clone().into_any_element(),
+            None => Table::pane(&self.table, cx).into_any_element(),
         };
         div()
             .size_full()
@@ -471,7 +471,7 @@ impl Render for HelmReleaseScreen {
                 div()
                     .border_t(RULE)
                     .border_color(palette.line)
-                    .child(self.history.clone()),
+                    .child(Table::pane(&self.history, cx)),
             );
         let manifest = div().child(SectionHeader::new(MANIFEST)).child(
             div()

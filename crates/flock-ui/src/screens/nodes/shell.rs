@@ -10,7 +10,7 @@ use gpui::{
 use super::NodesScreen;
 use crate::kit::{
     Button, ConfirmDialog, Dock, DockTab, EmptyState, RawMessage, Terminal, TerminalEvent, confirm,
-    drain,
+    drain, pane,
 };
 use crate::screens::ScreenEvent;
 use crate::screens::no_shell::DEBUG_IMAGE;
@@ -182,7 +182,7 @@ impl NodesScreen {
             .as_ref()
             .and_then(|session| session.failure.clone());
         let Some(failure) = failure else {
-            return Terminal::pane(&self.terminal).into_any_element();
+            return pane(&self.terminal).into_any_element();
         };
         let palette = *cx.palette();
         div()

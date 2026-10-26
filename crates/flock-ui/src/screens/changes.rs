@@ -256,7 +256,7 @@ impl Render for ChangesScreen {
                             .bg(palette.panel)
                             .border_r(RULE)
                             .border_color(palette.line)
-                            .child(self.commits.clone()),
+                            .child(Table::pane(&self.commits, cx)),
                     )
                     .children(detail),
             )

@@ -126,13 +126,13 @@ impl FluxEventsScreen {
 }
 
 impl Render for FluxEventsScreen {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body: AnyElement = if self.events.items().is_empty() {
             EmptyState::new(NO_EVENTS).into_any_element()
         } else if self.shown == 0 {
             EmptyState::new(NO_MATCH).into_any_element()
         } else {
-            self.table.clone().into_any_element()
+            Table::pane(&self.table, cx).into_any_element()
         };
         div()
             .size_full()

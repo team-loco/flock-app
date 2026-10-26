@@ -433,7 +433,7 @@ impl CustomResourcesScreen {
                 table.set_scope(scope, cx);
             }
             table.set_highlight(words, cx);
-            table.set_row_actions(actions, cx);
+            table.set_row_actions(actions);
             table.set_rows(rows, cx);
             if position.is_some() {
                 table.select(position, cx);
@@ -582,7 +582,7 @@ impl Render for CustomResourcesScreen {
         }
         let body: AnyElement = match (self.empty_state(cx), self.table(cx)) {
             (Some(empty), _) => empty.into_any_element(),
-            (None, Some(table)) => table.into_any_element(),
+            (None, Some(table)) => Table::pane(&table, cx).into_any_element(),
             (None, None) => Skeleton::rows().into_any_element(),
         };
         let current = self.selected_row().cloned();

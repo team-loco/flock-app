@@ -5,7 +5,7 @@ use flock_core::{
     ClusterId, ClusterSummary, Command, Connection, Counts, FlockHome, Page, Snapshot, Status,
 };
 use gpui::{
-    AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement,
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement,
     ParentElement, Pixels, Render, SharedString, Styled, Subscription, Window, div,
     prelude::FluentBuilder, px, relative,
 };
@@ -84,7 +84,7 @@ pub struct FlockScreen {
 impl EventEmitter<Command> for FlockScreen {}
 
 impl FlockScreen {
-    pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+    pub fn list_focus(&self, cx: &App) -> gpui::FocusHandle {
         gpui::Focusable::focus_handle(&self.cluster_table, cx)
     }
 
@@ -176,12 +176,12 @@ impl FlockScreen {
         cx.notify();
     }
 
-    fn clusters_section(&self) -> impl IntoElement {
+    fn clusters_section(&self, cx: &App) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
             .child(SectionHeader::new("Clusters").count(self.clusters.len().to_string()))
-            .child(self.cluster_table.clone())
+            .child(Table::pane(&self.cluster_table, cx))
     }
 
     fn problems_section(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
@@ -210,13 +210,13 @@ impl FlockScreen {
                 div()
                     .border_t(RULE)
                     .border_color(palette.line)
-                    .child(self.problem_table.clone()),
+                    .child(Table::pane(&self.problem_table, cx)),
             )
     }
 
-    fn commits_body(&self) -> AnyElement {
+    fn commits_body(&self, cx: &App) -> AnyElement {
         if !self.changes.commits.is_empty() {
-            return self.commit_table.clone().into_any_element();
+            return Table::pane(&self.commit_table, cx).into_any_element();
         }
         if self.changes.pending {
             return Skeleton::rows().into_any_element();
@@ -243,7 +243,7 @@ impl FlockScreen {
                 div()
                     .border_t(RULE)
                     .border_color(palette.line)
-                    .child(self.commits_body()),
+                    .child(self.commits_body(cx)),
             )
     }
 }
@@ -252,7 +252,7 @@ impl Render for FlockScreen {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
         let problems = self.problems_section(&palette, cx).into_any_element();
-        let clusters = self.clusters_section().into_any_element();
+        let clusters = self.clusters_section(cx).into_any_element();
         let changes = self.changes_section(&palette, cx);
         div()
             .flex()

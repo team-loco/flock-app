@@ -3,7 +3,7 @@ use flock_core::problem_groups::{self, Cause, Marker, Occurrence, Trait, WINDOW}
 use flock_core::time::age;
 use flock_core::{ClusterId, ClusterSummary, Command, Snapshot, Status};
 use gpui::{
-    AnyElement, AppContext, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
+    AnyElement, App, AppContext, Context, Entity, EventEmitter, FontWeight, InteractiveElement,
     IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div,
     prelude::FluentBuilder, relative,
 };
@@ -79,7 +79,7 @@ impl ClusterProblemsScreen {
         &self.filter
     }
 
-    pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+    pub fn list_focus(&self, cx: &App) -> gpui::FocusHandle {
         gpui::Focusable::focus_handle(&self.table, cx)
     }
 
@@ -170,7 +170,7 @@ impl ClusterProblemsScreen {
             .into_any_element()
     }
 
-    fn detail(&self, ix: usize, palette: &Palette) -> Option<AnyElement> {
+    fn detail(&self, ix: usize, palette: &Palette, cx: &App) -> Option<AnyElement> {
         let cause = self.causes.get(ix)?;
         let markers = self.markers.get(ix).map_or(&[][..], Vec::as_slice);
         let element = div()
@@ -182,12 +182,12 @@ impl ClusterProblemsScreen {
             .child(cause_header(cause, palette))
             .child(occurrences(cause, markers, palette))
             .child(traits(&cause.traits(), palette))
-            .child(self.affected(cause, palette))
+            .child(self.affected(cause, palette, cx))
             .into_any_element();
         Some(element)
     }
 
-    fn affected(&self, cause: &Cause, palette: &Palette) -> AnyElement {
+    fn affected(&self, cause: &Cause, palette: &Palette, cx: &App) -> AnyElement {
         let label = if cause.is_pods() { PODS } else { OBJECTS };
         div()
             .flex_1()
@@ -212,7 +212,7 @@ impl ClusterProblemsScreen {
                     ),
             )
             .child(self.filter.clone())
-            .child(div().flex_1().min_h_0().child(self.table.clone()))
+            .child(div().flex_1().min_h_0().child(Table::pane(&self.table, cx)))
             .into_any_element()
     }
 }
@@ -229,7 +229,7 @@ impl Render for ClusterProblemsScreen {
         let list = self.cause_list(&palette, cx);
         let detail = self
             .current_index()
-            .and_then(|ix| self.detail(ix, &palette));
+            .and_then(|ix| self.detail(ix, &palette, cx));
         div()
             .size_full()
             .flex()
