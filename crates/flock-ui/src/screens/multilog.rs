@@ -12,7 +12,7 @@ use gpui::{
 use crate::highlight::{SOURCE_COLORS, source_colors};
 use crate::kit::{
     ActionMenu, FILTER_PLACEHOLDER, InputEvent, LogLine, LogView, MenuItem, MetaLine, PageHeader,
-    TextField, TextFieldState, find_matches,
+    TextField, TextFieldState, drain, find_matches,
 };
 use crate::screens::workload::kit_line;
 use crate::theme::{
@@ -20,7 +20,6 @@ use crate::theme::{
     SPACE_3, SPACE_4, SPACE_8, TEXT_SMALL,
 };
 
-const BATCH: usize = 512;
 const PAUSE: &str = "Pause";
 const META_SEPARATOR: &str = " · ";
 const CONTAINER_SEPARATOR: &str = "/";
@@ -136,18 +135,7 @@ impl MultiLogs {
             sink,
         }));
         self.stream = Some(cx.spawn(async move |this, cx| {
-            while let Ok(first) = events.recv().await {
-                let mut batch = vec![first];
-                while batch.len() < BATCH {
-                    let Ok(next) = events.try_recv() else {
-                        break;
-                    };
-                    batch.push(next);
-                }
-                if this.update(cx, |view, cx| view.apply(batch, cx)).is_err() {
-                    break;
-                }
-            }
+            drain(events, this, cx, Self::apply).await;
         }));
     }
 
@@ -172,9 +160,19 @@ impl MultiLogs {
                     let line = kit_line(line);
                     let visible = self.visible(id, &line);
                     let projected = visible.then(|| self.project(id, &line));
+                    let before = self.merged.len();
                     match self.merged.insert(at, id, line) {
                         Placement::End => appended.extend(projected),
-                        Placement::At(_) => rebuild |= visible,
+                        Placement::At(ix) => {
+                            let mirrored = !rebuild && !self.paused && self.all_shown();
+                            match projected.filter(|_| mirrored) {
+                                Some(line) => {
+                                    let earlier = std::mem::take(&mut appended);
+                                    rebuild = !self.insert_shown(before, ix, earlier, line, cx);
+                                }
+                                None => rebuild |= visible,
+                            }
+                        }
                         Placement::Dropped => {}
                     }
                 }
@@ -197,6 +195,28 @@ impl MultiLogs {
             self.logs.update(cx, |logs, cx| logs.extend(appended, cx));
         }
         cx.notify();
+    }
+
+    fn all_shown(&self) -> bool {
+        self.query.is_empty() && self.legend.values().all(|entry| !entry.hidden)
+    }
+
+    fn insert_shown(
+        &mut self,
+        before: usize,
+        ix: usize,
+        earlier: Vec<LogLine>,
+        line: LogLine,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.logs.update(cx, |logs, cx| {
+            logs.extend(earlier, cx);
+            if logs.len() != before {
+                return false;
+            }
+            logs.insert(ix, line, cx);
+            true
+        })
     }
 
     fn mark(&mut self, id: SourceId, state: SourceState) {
@@ -438,7 +458,7 @@ impl Render for MultiLogs {
             .flex_col()
             .bg(palette.editor)
             .child(legend)
-            .child(div().flex_1().min_h_0().child(self.logs.clone()))
+            .child(div().flex_1().min_h_0().child(LogView::pane(&self.logs)))
     }
 }
 
@@ -498,7 +518,7 @@ impl Render for MultiLogsScreen {
                 .flex_col()
                 .bg(palette.editor)
                 .child(crate::kit::PageTitle::new(title).leading(self.navigation.clone()))
-                .child(div().flex_1().min_h_0().child(logs));
+                .child(div().flex_1().min_h_0().child(LogView::pane(&logs)));
         }
         let summary = self.view.read(cx).summary();
         let header = PageHeader::new(title)
@@ -531,7 +551,92 @@ impl Render for MultiLogsScreen {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
+    use flock_core::multilog::{MERGED_LINES, Stamp};
+    use flock_core::{ClusterId, LogLevel};
+    use gpui::{App, TestAppContext};
+
     use super::*;
+
+    const TIME: &str = "2026-10-25T00:00:00Z";
+    const QUERY: &str = "1";
+
+    fn source(pod: &str) -> LogSource {
+        LogSource {
+            namespace: "web".into(),
+            pod: pod.into(),
+            container: "api".into(),
+        }
+    }
+
+    fn line(id: u32, at: i128) -> LogEvent {
+        let line = flock_core::LogLine::new(TIME, LogLevel::Info, at.to_string());
+        LogEvent::Line(SourceId(id), Some(Stamp(at)), line)
+    }
+
+    fn shown(view: &MultiLogs, cx: &App) -> Vec<String> {
+        let logs = view.logs.read(cx);
+        (0..logs.len())
+            .filter_map(|ix| logs.line(ix).map(|line| line.message.to_string()))
+            .collect()
+    }
+
+    fn merged(view: &MultiLogs) -> Vec<String> {
+        view.merged
+            .iter()
+            .filter(|entry| view.visible(entry.source, &entry.item))
+            .map(|entry| entry.item.message.to_string())
+            .collect()
+    }
+
+    fn open(cx: &mut TestAppContext) -> gpui::WindowHandle<MultiLogs> {
+        cx.update(|cx| {
+            crate::init(Some(crate::theme::Appearance::Dark), cx)
+                .unwrap_or_else(|error| panic!("UI init: {error}"));
+        });
+        let target = LogTarget::Pods {
+            cluster: ClusterId::new("a"),
+            pods: BTreeSet::new(),
+        };
+        let window = cx.add_window(|window, cx| MultiLogs::new("test-logs", target, window, cx));
+        let joined = vec![
+            LogEvent::Joined(SourceId(0), source("web-a")),
+            LogEvent::Joined(SourceId(1), source("web-b")),
+        ];
+        let _ = window.update(cx, |view, _, cx| view.apply(joined, cx));
+        window
+    }
+
+    #[gpui::test]
+    fn late_lines_land_in_time_order(cx: &mut TestAppContext) {
+        let window = open(cx);
+        let updated = window.update(cx, |view, _, cx| {
+            view.apply(vec![line(0, 1), line(0, 3), line(0, 5)], cx);
+            view.apply(vec![line(1, 2), line(0, 6), line(1, 4)], cx);
+            assert_eq!(shown(view, cx), ["1", "2", "3", "4", "5", "6"]);
+            assert_eq!(shown(view, cx), merged(view));
+        });
+        assert!(updated.is_ok());
+    }
+
+    #[gpui::test]
+    fn late_lines_match_the_merged_order_when_filtered_or_full(cx: &mut TestAppContext) {
+        let window = open(cx);
+        let updated = window.update(cx, |view, _, cx| {
+            let early: Vec<LogEvent> = (0..MERGED_LINES as i128)
+                .map(|at| line(0, at * 2))
+                .collect();
+            view.apply(early, cx);
+            view.apply(vec![line(1, 101), line(1, 7)], cx);
+            assert_eq!(view.logs.read(cx).len(), MERGED_LINES);
+            assert_eq!(shown(view, cx), merged(view));
+            view.set_query(QUERY.to_owned(), cx);
+            view.apply(vec![line(1, 1001), line(1, 15)], cx);
+            assert_eq!(shown(view, cx), merged(view));
+        });
+        assert!(updated.is_ok());
+    }
 
     #[test]
     fn pods_share_a_key_across_their_containers() {

@@ -4,8 +4,8 @@ use std::ops::Range;
 use gpui::{
     AnyElement, App, Context, ElementId, Entity, HighlightStyle, Hsla, InteractiveElement,
     IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, ScrollStrategy,
-    SharedString, Styled, UniformListScrollHandle, Window, div, list, prelude::FluentBuilder, px,
-    uniform_list,
+    SharedString, StyleRefinement, Styled, UniformListScrollHandle, ViewElement, Window, div, list,
+    prelude::FluentBuilder, px, uniform_list,
 };
 
 use flock_core::LogLevel;
@@ -268,14 +268,22 @@ impl LogBuffer {
         }
     }
 
-    pub fn push(&mut self, line: LogLine) {
+    pub fn push(&mut self, line: LogLine) -> usize {
+        let len = self.lines.len();
+        self.insert(len, line)
+    }
+
+    pub fn insert(&mut self, ix: usize, line: LogLine) -> usize {
         if self.capacity == 0 {
-            return;
+            return 0;
         }
-        if self.lines.len() == self.capacity {
+        let evicted = usize::from(self.lines.len() == self.capacity);
+        if evicted > 0 {
             self.lines.pop_front();
         }
-        self.lines.push_back(line);
+        let ix = ix.min(self.lines.len());
+        self.lines.insert(ix, line);
+        evicted
     }
 
     pub fn len(&self) -> usize {
@@ -502,14 +510,38 @@ impl LogView {
         self
     }
 
+    pub fn pane(view: &Entity<Self>) -> ViewElement<Entity<Self>> {
+        view.clone().cached(StyleRefinement::default().size_full())
+    }
+
     pub fn push(&mut self, line: LogLine, cx: &mut Context<Self>) {
-        self.buffer.push(line);
-        self.after_append(cx);
+        self.extend([line], cx);
     }
 
     pub fn extend(&mut self, lines: impl IntoIterator<Item = LogLine>, cx: &mut Context<Self>) {
+        let before = self.buffer.len();
+        let mut evicted = 0;
+        let mut added = 0;
         for line in lines {
-            self.buffer.push(line);
+            evicted += self.buffer.push(line);
+            added += 1;
+        }
+        if self.wrap {
+            self.wrapped.splice(before..before, added);
+            self.wrapped.splice(0..evicted, 0);
+        }
+        self.after_append(cx);
+    }
+
+    pub fn insert(&mut self, ix: usize, line: LogLine, cx: &mut Context<Self>) {
+        let evicted = self.buffer.insert(ix, line);
+        let Some(last) = self.buffer.len().checked_sub(1) else {
+            return;
+        };
+        if self.wrap {
+            self.wrapped.splice(0..evicted, 0);
+            let ix = ix.min(last);
+            self.wrapped.splice(ix..ix, 1);
         }
         self.after_append(cx);
     }
@@ -608,8 +640,10 @@ impl LogView {
     fn after_append(&mut self, cx: &mut Context<Self>) {
         if self.follow {
             self.scroll.scroll_to_bottom();
+            if self.wrap {
+                self.wrapped.scroll_to_end();
+            }
         }
-        self.sync_wrapped();
         cx.notify();
     }
 
@@ -799,6 +833,8 @@ impl Render for LogView {
 
 #[cfg(test)]
 mod tests {
+    use gpui::AppContext as _;
+
     use super::*;
 
     #[test]
@@ -830,6 +866,34 @@ mod tests {
         assert_eq!(buffer.len(), 3);
         let first = buffer.get(0).map(|line| line.message.to_string());
         assert_eq!(first.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn buffer_inserts_in_place_and_evicts_the_oldest_when_full() {
+        let mut buffer = LogBuffer::with_capacity(3);
+        for n in [0, 2, 3] {
+            buffer.push(LogLine::new(None, None, n.to_string()));
+        }
+        assert_eq!(buffer.insert(1, LogLine::new(None, None, "1")), 1);
+        let shown: Vec<String> = (0..buffer.len())
+            .filter_map(|ix| buffer.get(ix).map(|line| line.message.to_string()))
+            .collect();
+        assert_eq!(shown, ["2", "1", "3"]);
+    }
+
+    #[gpui::test]
+    fn wrapped_rows_track_appends_inserts_and_evictions(cx: &mut gpui::TestAppContext) {
+        let view = cx.new(|_| LogView::new("wrapped"));
+        view.update(cx, |view, cx| {
+            view.set_wrap(true, cx);
+            let lines = (0..=LOG_CAPACITY).map(|n| LogLine::new(None, None, n.to_string()));
+            view.extend(lines, cx);
+            view.insert(1, LogLine::new(None, None, "late"), cx);
+            assert_eq!(view.len(), LOG_CAPACITY);
+            assert_eq!(view.wrapped.item_count(), LOG_CAPACITY);
+            let second = view.line(1).map(|line| line.message.to_string());
+            assert_eq!(second.as_deref(), Some("late"));
+        });
     }
 
     #[test]

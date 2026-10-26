@@ -10,6 +10,7 @@ use gpui::{
 use super::NodesScreen;
 use crate::kit::{
     Button, ConfirmDialog, Dock, DockTab, EmptyState, RawMessage, Terminal, TerminalEvent, confirm,
+    drain,
 };
 use crate::screens::ScreenEvent;
 use crate::screens::no_shell::DEBUG_IMAGE;
@@ -94,12 +95,12 @@ impl NodesScreen {
         };
         cx.emit(ScreenEvent::Command(Command::NodeShell(request)));
         let task = cx.spawn(async move |this, cx| {
-            while let Ok(event) = events.recv().await {
-                let applied = this.update(cx, |screen, cx| screen.exec_event(event, cx));
-                if applied.is_err() {
-                    break;
+            drain(events, this, cx, |screen: &mut Self, batch, cx| {
+                for event in batch {
+                    screen.exec_event(event, cx);
                 }
-            }
+            })
+            .await;
         });
         self.shell = Some(NodeShell {
             node,
@@ -181,7 +182,7 @@ impl NodesScreen {
             .as_ref()
             .and_then(|session| session.failure.clone());
         let Some(failure) = failure else {
-            return self.terminal.clone().into_any_element();
+            return Terminal::pane(&self.terminal).into_any_element();
         };
         let palette = *cx.palette();
         div()
