@@ -1,7 +1,7 @@
 ---
 name: gpui-test
 description: >-
-  Use when writing, debugging, or reproducing GPUI tests in Zed, including
+  Use when writing, debugging, or reproducing GPUI tests in Flock, including
   gpui::test arguments, TestAppContext parameters, scheduler seeds,
   ITERATIONS/SEED reproduction, parking failures, and pending task traces.
 ---
