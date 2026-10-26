@@ -266,42 +266,40 @@ fn order_layers(layer_of: &[usize], links: &[(usize, usize)]) -> Vec<Vec<usize>>
             members.push(node);
         }
     }
-    let mut row = vec![0usize; layer_of.len()];
-    let place = |layers: &[Vec<usize>], row: &mut [usize]| {
-        for members in layers {
-            for (at, node) in members.iter().enumerate() {
-                if let Some(slot) = row.get_mut(*node) {
-                    *slot = at;
-                }
-            }
+    let mut parents: Vec<Vec<usize>> = vec![Vec::new(); layer_of.len()];
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); layer_of.len()];
+    for (from, to) in links {
+        if let Some(list) = parents.get_mut(*to) {
+            list.push(*from);
         }
-    };
-    place(&layers, &mut row);
+        if let Some(list) = children.get_mut(*from) {
+            list.push(*to);
+        }
+    }
+    let mut row = vec![0usize; layer_of.len()];
+    for members in &layers {
+        place_rows(members, &mut row);
+    }
     for sweep in 0..SWEEPS {
-        let before = layers.clone();
         let downward = sweep % 2 == 0;
+        let neighbours = if downward { &parents } else { &children };
         let order: Vec<usize> = if downward {
             (1..depth).collect()
         } else {
             (0..depth.saturating_sub(1)).rev().collect()
         };
+        let mut changed = false;
         for layer in order {
-            let Some(members) = layers.get(layer) else {
+            let Some(members) = layers.get_mut(layer) else {
                 continue;
             };
             let mut keyed: Vec<(f32, usize, usize)> = members
                 .iter()
                 .enumerate()
                 .map(|(at, node)| {
-                    let neighbours = links.iter().filter_map(|(from, to)| {
-                        let other = if downward {
-                            (to == node).then_some(*from)
-                        } else {
-                            (from == node).then_some(*to)
-                        }?;
-                        row.get(other).copied()
-                    });
-                    let (sum, n) = neighbours.fold((0usize, 0usize), |(s, n), r| (s + r, n + 1));
+                    let linked = neighbours.get(*node).map_or(&[][..], Vec::as_slice);
+                    let rows = linked.iter().filter_map(|other| row.get(*other).copied());
+                    let (sum, n) = rows.fold((0usize, 0usize), |(s, n), r| (s + r, n + 1));
                     let centre = if n == 0 {
                         position(at)
                     } else {
@@ -311,16 +309,26 @@ fn order_layers(layer_of: &[usize], links: &[(usize, usize)]) -> Vec<Vec<usize>>
                 })
                 .collect();
             keyed.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-            if let Some(members) = layers.get_mut(layer) {
+            let moved = keyed.iter().enumerate().any(|(to, (_, at, _))| to != *at);
+            if moved {
+                changed = true;
                 *members = keyed.into_iter().map(|(_, _, node)| node).collect();
+                place_rows(members, &mut row);
             }
-            place(&layers, &mut row);
         }
-        if layers == before && sweep > 0 {
+        if !changed && sweep > 0 {
             break;
         }
     }
     layers
+}
+
+fn place_rows(members: &[usize], row: &mut [usize]) {
+    for (at, node) in members.iter().enumerate() {
+        if let Some(slot) = row.get_mut(*node) {
+            *slot = at;
+        }
+    }
 }
 
 #[allow(clippy::cast_precision_loss)]

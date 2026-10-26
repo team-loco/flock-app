@@ -1,11 +1,15 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
+
 use flock_core::flux_graph::{CrossCluster, EdgeKind, FluxGraph, GraphEdge, GraphNode, Step};
 use flock_core::overview::plural;
 use flock_core::{ClusterId, ClusterSummary, Command, FluxKey, Snapshot};
 use gpui::{
-    AnyElement, App, Bounds, Context, EventEmitter, FocusHandle, Focusable, FontWeight, Hsla,
-    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, PathBuilder, Pixels,
-    Point, Render, SharedString, StatefulInteractiveElement, Styled, Window, canvas, div, point,
-    prelude::FluentBuilder,
+    AnyElement, App, Bounds, Context, EventEmitter, FocusHandle, Focusable, FontWeight,
+    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, Path, PathBuilder,
+    PathVertex, Pixels, Point, Render, SharedString, StatefulInteractiveElement, Styled, Window,
+    canvas, div, point, prelude::FluentBuilder,
 };
 
 use super::ScreenEvent;
@@ -29,12 +33,14 @@ const HINT: &str =
 const ONLY_HERE: &str = "Only on this cluster.";
 const NOTHING: &str = "No Flux objects on";
 const HALF: f32 = 0.5;
+const CHUNK_VERTICES: usize = 192;
 
 pub struct FluxGraphScreen {
     cluster: Option<ClusterId>,
     cluster_name: String,
-    scope: Snapshot,
+    snapshot: Arc<Snapshot>,
     graph: FluxGraph,
+    edge_paths: Rc<RefCell<Option<EdgePaths>>>,
     selected: Option<FluxKey>,
     focus: FocusHandle,
 }
@@ -52,16 +58,26 @@ impl FluxGraphScreen {
         Self {
             cluster: None,
             cluster_name: String::new(),
-            scope: Snapshot::default(),
+            snapshot: Arc::default(),
             graph: FluxGraph::default(),
+            edge_paths: Rc::default(),
             selected: None,
             focus: cx.focus_handle(),
         }
     }
 
-    pub fn set(&mut self, cluster: &ClusterSummary, snapshot: &Snapshot, cx: &mut Context<Self>) {
+    pub fn set(
+        &mut self,
+        cluster: &ClusterSummary,
+        snapshot: &Arc<Snapshot>,
+        cx: &mut Context<Self>,
+    ) {
         let moved = self.cluster.as_ref() != Some(&cluster.id);
-        if !moved && self.scope.flux == snapshot.flux && self.scope.clusters == snapshot.clusters {
+        let unchanged = !moved
+            && self.snapshot.flux == snapshot.flux
+            && self.snapshot.clusters == snapshot.clusters;
+        self.snapshot = Arc::clone(snapshot);
+        if unchanged {
             return;
         }
         if moved {
@@ -69,12 +85,8 @@ impl FluxGraphScreen {
         }
         self.cluster = Some(cluster.id.clone());
         self.cluster_name.clone_from(&cluster.name);
-        self.scope = Snapshot {
-            clusters: snapshot.clusters.clone(),
-            flux: snapshot.flux.clone(),
-            ..Snapshot::default()
-        };
         self.graph = FluxGraph::build(&cluster.id, &snapshot.flux);
+        self.restroke();
         cx.notify();
     }
 
@@ -95,7 +107,7 @@ impl FluxGraphScreen {
     }
 
     fn open(&self, key: &FluxKey, cx: &mut Context<Self>) {
-        let present = self.scope.flux.iter().any(|object| &object.key == key);
+        let present = self.snapshot.flux.iter().any(|object| &object.key == key);
         if present {
             cx.emit(ScreenEvent::Command(Command::OpenFluxObject(key.clone())));
         }
@@ -221,43 +233,45 @@ impl FluxGraphScreen {
             .into_any_element()
     }
 
+    fn restroke(&self) {
+        let previous = self.edge_paths.take();
+        let next = EdgePaths::new(&self.graph, self.selected_ix(), previous);
+        self.edge_paths.replace(Some(next));
+    }
+
     fn edges(&self, palette: &Palette) -> AnyElement {
         let selected = self.selected_ix();
-        let lines: Vec<(Route, EdgeKind, Hsla, Pixels)> = self
-            .graph
-            .edges
-            .iter()
-            .filter_map(|edge| {
-                let route = route(&self.graph, edge)?;
-                let active = selected.is_some_and(|ix| self.graph.touches(edge, ix));
-                let (color, width) = if active {
-                    (palette.acc, GRAPH_EDGE_ACTIVE)
-                } else {
-                    (palette.edge, GRAPH_EDGE)
-                };
-                Some((route, edge.kind, color, width))
-            })
-            .collect();
+        let stale = self
+            .edge_paths
+            .borrow()
+            .as_ref()
+            .is_none_or(|cached| cached.selected != selected);
+        if stale {
+            self.restroke();
+        }
+        let cache = Rc::clone(&self.edge_paths);
+        let (active, idle) = (palette.acc, palette.edge);
         canvas(
             |_, _, _| {},
             move |bounds: Bounds<Pixels>, (), window, _| {
-                for (route, kind, color, width) in &lines {
-                    let mut path = PathBuilder::stroke(*width);
-                    if *kind == EdgeKind::Source {
-                        path = path.dash_array(&[CHART_DASH, CHART_DASH]);
+                let mut cache = cache.borrow_mut();
+                let Some(cache) = cache.as_mut() else {
+                    return;
+                };
+                let visible = window.content_mask().bounds;
+                for edge in &mut cache.edges {
+                    let placed = Bounds {
+                        origin: bounds.origin + edge.extent.origin,
+                        size: edge.extent.size,
+                    };
+                    if !visible.intersects(&placed) {
+                        continue;
                     }
-                    let mut at = bounds.origin + route.start;
-                    path.move_to(at);
-                    for (enter, leave) in &route.passes {
-                        let enter = bounds.origin + *enter;
-                        curve(&mut path, at, enter);
-                        at = bounds.origin + *leave;
-                        path.line_to(at);
-                    }
-                    curve(&mut path, at, bounds.origin + route.end);
-                    if let Ok(built) = path.build() {
-                        window.paint_path(built, *color);
-                    }
+                    let color = if edge.active { active } else { idle };
+                    let Some(tessellation) = edge.tessellated(bounds.origin) else {
+                        continue;
+                    };
+                    window.paint_path(tessellation.visible(bounds.origin, visible), color);
                 }
             },
         )
@@ -389,6 +403,131 @@ fn node_origin(node: &GraphNode) -> Point<Pixels> {
     slot_origin(node.layer, node.row)
 }
 
+struct EdgePaths {
+    selected: Option<usize>,
+    edges: Vec<CachedEdge>,
+}
+
+impl EdgePaths {
+    fn new(graph: &FluxGraph, selected: Option<usize>, previous: Option<Self>) -> Self {
+        let mut previous = previous.map(|cache| cache.edges).unwrap_or_default();
+        let edges = graph
+            .edges
+            .iter()
+            .enumerate()
+            .filter_map(|(at, edge)| {
+                let route = route(graph, edge)?;
+                let active = selected.is_some_and(|ix| graph.touches(edge, ix));
+                let width = if active {
+                    GRAPH_EDGE_ACTIVE
+                } else {
+                    GRAPH_EDGE
+                };
+                let mut cached = CachedEdge {
+                    extent: extent(&route, width),
+                    route,
+                    kind: edge.kind,
+                    width,
+                    active,
+                    stroke: Stroke::Pending,
+                };
+                if let Some(old) = previous.get_mut(at).filter(|old| old.draws_like(&cached)) {
+                    cached.stroke = std::mem::replace(&mut old.stroke, Stroke::Pending);
+                }
+                Some(cached)
+            })
+            .collect();
+        Self { selected, edges }
+    }
+}
+
+struct CachedEdge {
+    route: Route,
+    kind: EdgeKind,
+    width: Pixels,
+    active: bool,
+    extent: Bounds<Pixels>,
+    stroke: Stroke,
+}
+
+impl CachedEdge {
+    fn draws_like(&self, other: &Self) -> bool {
+        self.route == other.route && self.kind == other.kind && self.width == other.width
+    }
+
+    fn tessellated(&mut self, origin: Point<Pixels>) -> Option<&Tessellation> {
+        if matches!(self.stroke, Stroke::Pending) {
+            self.stroke = match stroke(&self.route, self.kind, self.width, origin) {
+                Some(path) => Stroke::Built(Box::new(Tessellation::new(path, origin))),
+                None => Stroke::Failed,
+            };
+        }
+        match &self.stroke {
+            Stroke::Built(tessellation) => Some(tessellation),
+            Stroke::Pending => None,
+            Stroke::Failed => None,
+        }
+    }
+}
+
+enum Stroke {
+    Pending,
+    Failed,
+    Built(Box<Tessellation>),
+}
+
+struct Tessellation {
+    anchor: Point<Pixels>,
+    outline: Path<Pixels>,
+    vertices: Vec<PathVertex<Pixels>>,
+    chunks: Vec<Bounds<Pixels>>,
+}
+
+impl Tessellation {
+    fn new(mut outline: Path<Pixels>, anchor: Point<Pixels>) -> Self {
+        let vertices = std::mem::take(&mut outline.vertices);
+        let chunks = vertices
+            .chunks(CHUNK_VERTICES)
+            .filter_map(|run| {
+                let first = run.first()?.xy_position;
+                let (low, high) = run.iter().fold((first, first), |(low, high), vertex| {
+                    (low.min(&vertex.xy_position), high.max(&vertex.xy_position))
+                });
+                Some(Bounds::from_corners(low, high))
+            })
+            .collect();
+        Self {
+            anchor,
+            outline,
+            vertices,
+            chunks,
+        }
+    }
+
+    fn visible(&self, origin: Point<Pixels>, visible: Bounds<Pixels>) -> Path<Pixels> {
+        let delta = origin - self.anchor;
+        let mut piece = self.outline.clone();
+        piece.bounds.origin += delta;
+        let runs = self.vertices.chunks(CHUNK_VERTICES).zip(&self.chunks);
+        for (run, extent) in runs {
+            let placed = Bounds {
+                origin: extent.origin + delta,
+                size: extent.size,
+            };
+            if !visible.intersects(&placed) {
+                continue;
+            }
+            piece.vertices.extend(run.iter().map(|vertex| {
+                let mut moved = vertex.clone();
+                moved.xy_position += delta;
+                moved
+            }));
+        }
+        piece
+    }
+}
+
+#[derive(PartialEq)]
 struct Route {
     start: Point<Pixels>,
     passes: Vec<(Point<Pixels>, Point<Pixels>)>,
@@ -425,6 +564,41 @@ fn route(graph: &FluxGraph, edge: &GraphEdge) -> Option<Route> {
         passes,
         end: point(end.x, end.y + middle),
     })
+}
+
+fn extent(route: &Route, width: Pixels) -> Bounds<Pixels> {
+    let points = route
+        .passes
+        .iter()
+        .flat_map(|(enter, leave)| [*enter, *leave])
+        .chain([route.start, route.end]);
+    let (low, high) = points.fold((route.start, route.start), |(low, high), at| {
+        (low.min(&at), high.max(&at))
+    });
+    let pad = point(width, width);
+    Bounds::from_corners(low - pad, high + pad)
+}
+
+fn stroke(
+    route: &Route,
+    kind: EdgeKind,
+    width: Pixels,
+    origin: Point<Pixels>,
+) -> Option<Path<Pixels>> {
+    let mut path = PathBuilder::stroke(width);
+    if kind == EdgeKind::Source {
+        path = path.dash_array(&[CHART_DASH, CHART_DASH]);
+    }
+    let mut at = origin + route.start;
+    path.move_to(at);
+    for (enter, leave) in &route.passes {
+        let enter = origin + *enter;
+        curve(&mut path, at, enter);
+        at = origin + *leave;
+        path.line_to(at);
+    }
+    curve(&mut path, at, origin + route.end);
+    path.build().ok()
 }
 
 fn curve(path: &mut PathBuilder, from: Point<Pixels>, to: Point<Pixels>) {
@@ -466,7 +640,7 @@ impl Render for FluxGraphScreen {
         let across = self
             .selected
             .as_ref()
-            .and_then(|key| self.scope.flux_across(key))
+            .and_then(|key| self.snapshot.flux_across(key))
             .map(|across| Self::compare(&across, &palette, cx));
         div()
             .size_full()
@@ -480,6 +654,7 @@ impl Render for FluxGraphScreen {
             .child(
                 div()
                     .id(CANVAS_ID)
+                    .debug_selector(|| CANVAS_ID.to_owned())
                     .flex_1()
                     .min_h_0()
                     .overflow_scroll()
@@ -494,5 +669,101 @@ impl Render for FluxGraphScreen {
             )
             .children(across)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{px, size};
+
+    use super::*;
+
+    const DELTA: f32 = 40.;
+    const FAR: f32 = 100_000.;
+    const PASSES: usize = 6;
+
+    fn long_route() -> Route {
+        let column = GRAPH_NODE_WIDTH + GRAPH_COLUMN_GAP;
+        let passes = (1..=PASSES)
+            .map(|step| {
+                let x = column * position(step);
+                let y = GRAPH_NODE_HEIGHT * position(step * step);
+                (point(x, y), point(x + GRAPH_NODE_WIDTH, y))
+            })
+            .collect();
+        Route {
+            start: point(GRAPH_NODE_WIDTH, SPACE_8),
+            passes,
+            end: point(
+                column * position(PASSES + 1),
+                GRAPH_NODE_HEIGHT * position(PASSES * PASSES),
+            ),
+        }
+    }
+
+    fn tessellated(kind: EdgeKind) -> (Path<Pixels>, Tessellation) {
+        let Some(path) = stroke(&long_route(), kind, GRAPH_EDGE, Point::default()) else {
+            panic!("the sample edge does not tessellate");
+        };
+        let tessellation = Tessellation::new(path.clone(), Point::default());
+        (path, tessellation)
+    }
+
+    fn everywhere() -> Bounds<Pixels> {
+        Bounds::new(point(px(-FAR), px(-FAR)), size(px(FAR * 2.), px(FAR * 2.)))
+    }
+
+    fn positions(path: &Path<Pixels>) -> Vec<Point<Pixels>> {
+        path.vertices
+            .iter()
+            .map(|vertex| vertex.xy_position)
+            .collect()
+    }
+
+    #[test]
+    fn a_fully_visible_edge_paints_exactly_the_tessellated_path() {
+        let (path, tessellation) = tessellated(EdgeKind::Source);
+        assert!(tessellation.chunks.len() > 1);
+        let painted = tessellation.visible(Point::default(), everywhere());
+        assert_eq!(painted.bounds, path.bounds);
+        assert_eq!(positions(&painted), positions(&path));
+    }
+
+    #[test]
+    fn panning_translates_the_cached_vertices_and_bounds() {
+        let (path, tessellation) = tessellated(EdgeKind::DependsOn);
+        let by = point(px(DELTA), px(-DELTA));
+        let painted = tessellation.visible(by, everywhere());
+        let expected: Vec<Point<Pixels>> = positions(&path).iter().map(|at| *at + by).collect();
+        assert_eq!(painted.bounds.origin, path.bounds.origin + by);
+        assert_eq!(painted.bounds.size, path.bounds.size);
+        assert_eq!(positions(&painted), expected);
+    }
+
+    #[test]
+    fn only_chunks_in_view_are_painted() {
+        let (path, tessellation) = tessellated(EdgeKind::Source);
+        let start = long_route().start;
+        let corner = Bounds::new(start, size(GRAPH_NODE_WIDTH, GRAPH_NODE_HEIGHT));
+        let painted = tessellation.visible(Point::default(), corner);
+        assert!(!painted.vertices.is_empty());
+        assert!(painted.vertices.len() < path.vertices.len());
+        assert_eq!(painted.bounds, path.bounds);
+        let away = Bounds::new(point(px(-FAR), px(-FAR)), size(px(DELTA), px(DELTA)));
+        assert!(
+            tessellation
+                .visible(Point::default(), away)
+                .vertices
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn an_edge_extent_covers_its_stroke() {
+        let route = long_route();
+        let (path, _) = tessellated(EdgeKind::DependsOn);
+        let bounds = extent(&route, GRAPH_EDGE);
+        assert!(bounds.contains(&path.bounds.origin));
+        assert!(bounds.contains(&path.bounds.bottom_right()));
     }
 }
