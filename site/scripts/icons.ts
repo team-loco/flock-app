@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import sharp from "sharp";
-import { FOOTER_ICON_ASSET_SIZE, ICON_ASSET_SIZE, iconPath } from "../src/content";
+import { ICON_ASSET_SIZE, iconPath } from "../src/content";
 
 const FAVICON_SIZE = 32;
 const WEBP_QUALITY = 90;
@@ -12,7 +12,6 @@ const published = join(site, "public");
 const icons = [
   { size: ICON_ASSET_SIZE, format: "webp" },
   { size: ICON_ASSET_SIZE, format: "png" },
-  { size: FOOTER_ICON_ASSET_SIZE, format: "png" },
 ] as const;
 
 for (const { size, format } of icons) {

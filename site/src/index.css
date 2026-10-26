@@ -97,9 +97,9 @@
   --text-feature: 30px;
   --text-feature--line-height: 1.2;
   --text-feature--letter-spacing: -0.01em;
-  --text-cta: 36px;
-  --text-cta--line-height: 1.15;
-  --text-cta--letter-spacing: -0.01em;
+  --text-download: 36px;
+  --text-download--line-height: 1.15;
+  --text-download--letter-spacing: -0.01em;
   --text-body: 16px;
   --text-point: 13px;
   --text-note: 13px;
@@ -107,6 +107,8 @@
   --text-caption: 12.5px;
   --text-kicker: 12px;
   --text-kicker--letter-spacing: 0.08em;
+
+  --breakpoint-pasture: 90rem;
 
   --container-page: 1160px;
   --container-headline: 900px;
@@ -116,30 +118,75 @@
   --radius-button: 3px;
   --radius-frame: 10px;
   --radius-shot: 8px;
-  --radius-icon: 22.5%;
+  --radius-icon: 24%;
 
   --shadow-icon: 0 10px 30px var(--shadow);
   --shadow-frame: 0 30px 80px var(--frame-shadow);
   --shadow-shot: 0 16px 40px var(--shadow);
   --shadow-handle: 0 0 0 1px var(--handle-ring);
 
-  --spacing-dot: 5px;
   --spacing-handle: 34px;
   --spacing-divider: 2px;
   --spacing-strike: 6px;
 
-  --animate-twinkle: twinkle var(--twinkle-duration) ease-in-out var(--twinkle-delay) infinite;
+  --animate-blink: blink 6s steps(1) infinite;
+  --animate-stomp: stomp 0.5s steps(1) infinite;
+  --animate-walk: walk 16s linear infinite;
 
-  @keyframes twinkle {
+  @keyframes blink {
     0%,
+    93% {
+      opacity: 0;
+    }
+    94%,
+    97% {
+      opacity: 1;
+    }
+    98%,
     100% {
       opacity: 0;
     }
-    35%,
-    65% {
-      opacity: var(--twinkle-opacity);
+  }
+
+  @keyframes stomp {
+    0% {
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
     }
   }
+
+  @keyframes walk {
+    0% {
+      transform: translateX(0);
+    }
+    44% {
+      transform: translateX(-44px);
+    }
+    50% {
+      transform: translateX(-44px) scaleX(-1);
+    }
+    94% {
+      transform: translateX(0) scaleX(-1);
+    }
+    100% {
+      transform: translateX(0);
+    }
+  }
+}
+
+@utility pixelated {
+  image-rendering: pixelated;
+}
+
+@utility icon-crop {
+  position: absolute;
+  width: 125.3%;
+  height: 125.3%;
+  max-width: none;
+  left: -12.6%;
+  top: -13.1%;
 }
 
 @utility bg-hero-split {
@@ -161,11 +208,5 @@
     font-size: var(--text-base);
     line-height: var(--text-base--line-height);
     overflow-x: hidden;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-twinkle {
-    animation: none;
   }
 }

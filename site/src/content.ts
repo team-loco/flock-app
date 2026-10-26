@@ -12,9 +12,7 @@ export const FEATURE_DISPLAY_WIDTH = 618;
 
 export const HERO_SCREEN = "overview";
 
-export const ICON_ASSET_SIZE = 176;
-
-export const FOOTER_ICON_ASSET_SIZE = 36;
+export const ICON_ASSET_SIZE = 224;
 
 export const iconPath = (size: number, format: "png" | "webp") => `/icon-${size}.${format}`;
 

@@ -1,9 +1,8 @@
-import { useMemo, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useState, useSyncExternalStore, type CSSProperties } from "react";
 import { Button } from "@/components/ui/button";
 import {
   FEATURE_DISPLAY_WIDTH,
   FEATURES,
-  FOOTER_ICON_ASSET_SIZE,
   ICON_ASSET_SIZE,
   iconPath,
   HERO_DISPLAY_WIDTH,
@@ -14,7 +13,8 @@ import {
   type Accent,
   type Feature,
 } from "@/content";
-import { dots, PERCENT, smoothBetween, type Dot } from "@/dots";
+import { Field } from "@/Field";
+import { Pasture } from "@/Sheep";
 import { cn } from "@/lib/utils";
 
 const LIGHT_QUERY = "(prefers-color-scheme: light)";
@@ -22,45 +22,10 @@ const SPLIT_MIN = 5;
 const SPLIT_MAX = 95;
 const SPLIT_START = 50;
 
-const BAND = 0.62;
-const HERO_SEED = 7;
-const HERO_COLS = 160;
-const HERO_ROWS = 146;
-const HERO_FLOOR = 0.015;
-const HERO_RISE = 0.55;
-const HERO_RISE_START = 0.05;
-const HERO_RISE_EXPONENT = 1.6;
-const HERO_CLEAR_HALF_WIDTH = 0.34;
-const HERO_CLEAR_BOTTOM = 0.4;
-const HERO_CLEAR_FACTOR = 0.05;
-const HERO_FRAME_LEFT = 0.11;
-const HERO_FRAME_RIGHT = 0.89;
-const HERO_FRAME_BOTTOM = 0.985;
-const HERO_BAND_DENSITY = 0.45;
-const HERO_BAND_FALLOFF = 0.16;
-const HERO_ACCENT_OPACITY_LIGHT = 0.26;
-const HERO_ACCENT_OPACITY_DARK = 0.24;
-const HERO_BAND_OPACITY = 0.14;
-const CTA_SEED = 23;
-const CTA_COLS = 160;
-const CTA_ROWS = 40;
-const CTA_CLEAR_HALF_WIDTH = 0.2;
-const CTA_CLEAR_DENSITY = 0.02;
-const CTA_FLOOR = 0.05;
-const CTA_RISE = 0.55;
-const CTA_RISE_START = 0.18;
-const CTA_RISE_END = 0.5;
-const CTA_ROW_BASE = 0.4;
-const CTA_ROW_GAIN = 0.6;
-const CTA_OPACITY = 0.16;
-const CENTER = 0.5;
-const BAND_STOP = `${BAND * PERCENT}%`;
+const BAND_STOP = "62%";
 const COMPARE_BAND_STOP = "50%";
-const ACCENT_DOT = "var(--primary)";
-const BAND_DOT = "var(--band-foreground)";
 const ICON_SIZE = 84;
 const CTA_ICON_SIZE = 88;
-const FOOTER_ICON_SIZE = 18;
 
 const ACCENT_CLASS: Record<Accent, string> = {
   primary: "text-primary",
@@ -77,71 +42,6 @@ const subscribeScheme = (onChange: () => void) => {
 };
 
 const isLight = () => window.matchMedia(LIGHT_QUERY).matches;
-
-function heroDots(light: boolean) {
-  const accentOpacity = light ? HERO_ACCENT_OPACITY_LIGHT : HERO_ACCENT_OPACITY_DARK;
-  return dots(
-    HERO_SEED,
-    HERO_COLS,
-    HERO_ROWS,
-    (u, v) => {
-      if (v < BAND) {
-        const rise = Math.pow(smoothBetween(HERO_RISE_START, BAND, v), HERO_RISE_EXPONENT);
-        const density = HERO_FLOOR + HERO_RISE * rise;
-        const clear = Math.abs(u - CENTER) < HERO_CLEAR_HALF_WIDTH && v < HERO_CLEAR_BOTTOM;
-        return clear ? density * HERO_CLEAR_FACTOR : density;
-      }
-      if (u > HERO_FRAME_LEFT && u < HERO_FRAME_RIGHT && v < HERO_FRAME_BOTTOM) return 0;
-      return HERO_BAND_DENSITY * Math.exp(-(v - BAND) / HERO_BAND_FALLOFF);
-    },
-    (v) =>
-      v < BAND
-        ? { color: ACCENT_DOT, opacity: accentOpacity }
-        : { color: BAND_DOT, opacity: HERO_BAND_OPACITY },
-  );
-}
-
-function ctaDots() {
-  return dots(
-    CTA_SEED,
-    CTA_COLS,
-    CTA_ROWS,
-    (u, v) => {
-      const edge = Math.abs(u - CENTER);
-      if (edge < CTA_CLEAR_HALF_WIDTH) return CTA_CLEAR_DENSITY;
-      const rise = smoothBetween(CTA_RISE_START, CTA_RISE_END, edge);
-      return CTA_FLOOR + CTA_RISE * rise * (CTA_ROW_BASE + CTA_ROW_GAIN * v);
-    },
-    () => ({ color: BAND_DOT, opacity: CTA_OPACITY }),
-  );
-}
-
-function Dots({ dots, className }: { dots: Dot[]; className?: string }) {
-  return (
-    <div
-      aria-hidden="true"
-      className={cn("pointer-events-none absolute inset-0 overflow-hidden", className)}
-    >
-      {dots.map((dot) => (
-        <i
-          key={`${dot.x}-${dot.y}`}
-          className={cn("absolute block size-dot", dot.twinkle && "animate-twinkle")}
-          style={
-            {
-              left: `${dot.x}%`,
-              top: `${dot.y}%`,
-              background: dot.color,
-              opacity: dot.opacity,
-              "--twinkle-opacity": dot.twinkle?.opacity,
-              "--twinkle-duration": dot.twinkle?.duration,
-              "--twinkle-delay": dot.twinkle?.delay,
-            } as CSSProperties
-          }
-        />
-      ))}
-    </div>
-  );
-}
 
 function DownloadIcon() {
   return (
@@ -161,18 +61,25 @@ function DownloadIcon() {
   );
 }
 
-function Icon({ size, alt, className }: { size: number; alt: string; className?: string }) {
+function Icon({ size, label, className }: { size: number; label: string; className?: string }) {
   return (
-    <picture>
-      <source srcSet={iconPath(ICON_ASSET_SIZE, "webp")} type="image/webp" />
-      <img
-        src={iconPath(ICON_ASSET_SIZE, "png")}
-        alt={alt}
-        width={size}
-        height={size}
-        className={cn("block rounded-icon", className)}
-      />
-    </picture>
+    <span
+      role="img"
+      aria-label={label}
+      className={cn("relative block flex-none overflow-hidden rounded-icon", className)}
+      style={{ width: size, height: size }}
+    >
+      <picture>
+        <source srcSet={iconPath(ICON_ASSET_SIZE, "webp")} type="image/webp" />
+        <img
+          src={iconPath(ICON_ASSET_SIZE, "png")}
+          alt=""
+          width={ICON_ASSET_SIZE}
+          height={ICON_ASSET_SIZE}
+          className="icon-crop block"
+        />
+      </picture>
+    </span>
   );
 }
 
@@ -319,18 +226,22 @@ function FeatureRow({ feature, flip }: { feature: Feature; flip: boolean }) {
 
 export default function App() {
   const light = useSyncExternalStore(subscribeScheme, isLight);
-  const hero = useMemo(() => heroDots(light), [light]);
-  const cta = useMemo(() => ctaDots(), []);
   const year = new Date().getFullYear();
   return (
-    <div className="min-h-full w-full">
+    <div className="flex min-h-screen w-full flex-col">
       <header
         className="relative lg:bg-hero-split"
         style={{ "--band-stop": BAND_STOP } as CSSProperties}
       >
-        <Dots dots={hero} className="max-lg:hidden" />
+        <Field
+          kind="hero"
+          light={light}
+          className="top-0 max-lg:hidden"
+          style={{ height: BAND_STOP }}
+        />
+        <Pasture band={BAND_STOP} className="max-pasture:hidden" />
         <section className="relative mx-auto flex max-w-page flex-col items-center gap-5.5 px-6 pt-22 pb-11 text-center">
-          <Icon size={ICON_SIZE} alt="Flock" className="shadow-icon" />
+          <Icon size={ICON_SIZE} label="Flock" className="shadow-icon" />
           <h1 className="m-0 max-w-headline text-hero-compact font-semibold sm:text-hero">
             Kubernetes, without the{" "}
             <span className="text-muted-foreground line-through decoration-primary decoration-(length:--spacing-strike)">
@@ -361,11 +272,11 @@ export default function App() {
         ))}
       </main>
 
-      <section className="relative bg-band text-band-foreground">
-        <Dots dots={cta} />
-        <div className="relative mx-auto flex max-w-page flex-col items-center gap-5 px-6 py-22 text-center">
-          <Icon size={CTA_ICON_SIZE} alt="Flock app icon" />
-          <h2 className="m-0 text-cta font-semibold">Download Flock</h2>
+      <section className="relative flex flex-[1_0_auto] flex-col bg-band text-band-foreground">
+        <Field kind="cta" light={light} className="inset-y-0" />
+        <div className="relative mx-auto flex max-w-page flex-col items-center gap-5 px-6 pt-22 pb-14 text-center">
+          <Icon size={CTA_ICON_SIZE} label="Flock app icon" />
+          <h2 className="m-0 text-download font-semibold">Download Flock</h2>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button asChild variant="inverse">
               <a href={__DOWNLOAD_URL__}>
@@ -376,36 +287,20 @@ export default function App() {
           </div>
           <span className="text-note text-band-foreground-soft">For Macs with Apple silicon</span>
         </div>
+        <footer className="relative mt-auto">
+          <div className="mx-auto flex max-w-page flex-wrap items-center gap-6 px-6 pb-6 text-footer text-band-foreground-soft">
+            <span className="font-medium text-band-foreground">Flock</span>
+            <span className="flex-1" />
+            <a href={__RELEASES_URL__} className="no-underline hover:text-band-foreground">
+              Changelog
+            </a>
+            <a href={__REPO_URL__} className="no-underline hover:text-band-foreground">
+              GitHub
+            </a>
+            <span>© {year}</span>
+          </div>
+        </footer>
       </section>
-
-      <footer className="border-t border-border">
-        <div className="mx-auto flex max-w-page flex-wrap items-center gap-6 px-6 py-7 text-footer text-muted-foreground">
-          <span className="flex items-center gap-2 text-foreground-soft">
-            <img
-              src={iconPath(FOOTER_ICON_ASSET_SIZE, "png")}
-              alt=""
-              width={FOOTER_ICON_SIZE}
-              height={FOOTER_ICON_SIZE}
-              className="block rounded-icon"
-            />
-            Flock
-          </span>
-          <span className="flex-1" />
-          <a
-            href={__RELEASES_URL__}
-            className="text-muted-foreground no-underline hover:text-foreground"
-          >
-            Changelog
-          </a>
-          <a
-            href={__REPO_URL__}
-            className="text-muted-foreground no-underline hover:text-foreground"
-          >
-            GitHub
-          </a>
-          <span>© {year}</span>
-        </div>
-      </footer>
     </div>
   );
 }
