@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
   "apps/flock",
+  "apps/flock-bench",
   "apps/flock-shots",
   "crates/flock-core",
   "crates/flock-demo",
@@ -33,6 +34,7 @@ flock-update = { path = "crates/flock-update" }
 anyhow = "1.0.104"
 async-channel = "2.5.0"
 clap = { version = "4.6.7", features = ["derive"] }
+criterion = { version = "0.8.2", default-features = false }
 dhat = "0.3.3"
 ed25519-dalek = "3.0.0"
 futures = "0.3.34"

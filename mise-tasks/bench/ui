@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Run the GPUI UI responsiveness benchmarks: mise run bench:ui [-- <criterion filter or --test>]"
+set -euo pipefail
+features="$(mise exec -- cargo tree -p flock-bench -e normal,build,dev,features)"
+if grep -F 'feature "test-support"' <<<"${features}"; then
+  echo 'the flock-bench graph enables test-support' >&2
+  exit 1
+fi
+mise exec -- cargo bench -p flock-bench --bench ui -- "$@"
