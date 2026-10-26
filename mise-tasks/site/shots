@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Render the website screenshots into site/public/shots"
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)/site"
+bun install --frozen-lockfile
+bun run shots

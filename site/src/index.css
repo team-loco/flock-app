@@ -1,0 +1,171 @@
+@import "tailwindcss";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+:root {
+  color-scheme: dark;
+  --background: #111317;
+  --card: #15181d;
+  --border: #262a30;
+  --border-strong: #323740;
+  --foreground: #dcdfe4;
+  --foreground-soft: #b3b9c3;
+  --muted-foreground: #8e96a3;
+  --primary: #74adff;
+  --primary-foreground: #0c1220;
+  --ring: #74adff;
+  --shadow: rgba(0, 0, 0, 0.55);
+  --ok: #48c78e;
+  --warn: #e8b04b;
+  --err: #f26d6d;
+  --violet: #a78bfa;
+  --band: #1b3d73;
+  --band-foreground: #ffffff;
+  --band-foreground-soft: rgba(255, 255, 255, 0.72);
+  --cta: #ffffff;
+  --cta-foreground: #0b1f3f;
+  --handle: #ffffff;
+  --handle-ring: rgba(0, 0, 0, 0.25);
+  --frame-shadow: rgba(0, 0, 0, 0.45);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --background: #ffffff;
+    --card: #f6f7f8;
+    --border: #e1e3e7;
+    --border-strong: #cfd3d9;
+    --foreground: #1d2027;
+    --foreground-soft: #3b414b;
+    --muted-foreground: #5f6774;
+    --primary: #1f5fd1;
+    --primary-foreground: #ffffff;
+    --ring: #1f5fd1;
+    --shadow: rgba(20, 24, 32, 0.18);
+    --ok: #167a4c;
+    --warn: #935800;
+    --err: #c53030;
+    --violet: #7c3aed;
+    --band: #1f5fd1;
+    --band-foreground-soft: rgba(255, 255, 255, 0.78);
+  }
+}
+
+@theme inline {
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-card: var(--card);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-foreground: var(--foreground);
+  --color-foreground-soft: var(--foreground-soft);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-ring: var(--ring);
+  --color-shadow: var(--shadow);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-err: var(--err);
+  --color-violet: var(--violet);
+  --color-band: var(--band);
+  --color-band-foreground: var(--band-foreground);
+  --color-band-foreground-soft: var(--band-foreground-soft);
+  --color-cta: var(--cta);
+  --color-cta-foreground: var(--cta-foreground);
+  --color-handle: var(--handle);
+  --color-handle-ring: var(--handle-ring);
+  --color-frame-shadow: var(--frame-shadow);
+}
+
+@theme {
+  --text-base: 15px;
+  --text-base--line-height: 1.55;
+  --text-hero: 64px;
+  --text-hero--line-height: 1.04;
+  --text-hero--letter-spacing: -0.025em;
+  --text-hero-compact: 40px;
+  --text-hero-compact--line-height: 1.08;
+  --text-hero-compact--letter-spacing: -0.02em;
+  --text-lead: 19px;
+  --text-feature: 30px;
+  --text-feature--line-height: 1.2;
+  --text-feature--letter-spacing: -0.01em;
+  --text-cta: 36px;
+  --text-cta--line-height: 1.15;
+  --text-cta--letter-spacing: -0.01em;
+  --text-body: 16px;
+  --text-point: 13px;
+  --text-note: 13px;
+  --text-footer: 13.5px;
+  --text-caption: 12.5px;
+  --text-kicker: 12px;
+  --text-kicker--letter-spacing: 0.08em;
+
+  --container-page: 1160px;
+  --container-headline: 900px;
+  --container-lead: 640px;
+  --container-shot: 620px;
+
+  --radius-button: 3px;
+  --radius-frame: 10px;
+  --radius-shot: 8px;
+  --radius-icon: 22.5%;
+
+  --shadow-icon: 0 10px 30px var(--shadow);
+  --shadow-frame: 0 30px 80px var(--frame-shadow);
+  --shadow-shot: 0 16px 40px var(--shadow);
+  --shadow-handle: 0 0 0 1px var(--handle-ring);
+
+  --spacing-dot: 5px;
+  --spacing-handle: 34px;
+  --spacing-divider: 2px;
+  --spacing-strike: 6px;
+
+  --animate-twinkle: twinkle var(--twinkle-duration) ease-in-out var(--twinkle-delay) infinite;
+
+  @keyframes twinkle {
+    0%,
+    100% {
+      opacity: 0;
+    }
+    35%,
+    65% {
+      opacity: var(--twinkle-opacity);
+    }
+  }
+}
+
+@utility bg-hero-split {
+  background: linear-gradient(
+    var(--background) 0 var(--band-stop),
+    var(--band) var(--band-stop) 100%
+  );
+}
+
+@layer base {
+  html {
+    overflow-x: hidden;
+  }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    overflow-x: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-twinkle {
+    animation: none;
+  }
+}
