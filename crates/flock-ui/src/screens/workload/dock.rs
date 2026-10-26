@@ -5,12 +5,13 @@ use flock_core::{
     Sink, Source, TermSize, Workload,
 };
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, Focusable, InteractiveElement, IntoElement,
-    ParentElement, StatefulInteractiveElement, Styled, Subscription, Window, div,
+    AnyElement, App, AppContext as _, Context, Entity, Focusable, IntoElement, ParentElement,
+    Styled, Subscription, Window, div,
 };
 
 use super::{WorkloadScreen, logs_tab_label};
 use crate::kit::confirm;
+use crate::kit::scroll_viewport;
 use crate::kit::{
     Button, Dock, DockState, DockTab, EventList, InputEvent, Level, LogLine, LogView, MenuItem,
     Segmented, Terminal, TerminalEvent, TextField, TextFieldState, drain, pane,
@@ -506,15 +507,10 @@ impl WorkloadScreen {
 
     fn events_pane(events: Vec<PodEvent>, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let palette = *cx.palette();
-        div()
-            .id(EVENTS_PANE)
-            .debug_selector(|| EVENTS_PANE.into())
+        let content = div().px(SPACE_6).py(SPACE_4).child(EventList::new(events));
+        scroll_viewport(EVENTS_PANE, content)
             .size_full()
-            .overflow_y_scroll()
-            .px(SPACE_6)
-            .py(SPACE_4)
             .bg(palette.editor)
-            .child(EventList::new(events))
     }
 }
 

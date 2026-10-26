@@ -9,6 +9,7 @@ use gpui::{
 };
 
 use super::ScreenEvent;
+use crate::kit::scroll_viewport;
 use crate::kit::{
     Column, EmptyState, FilterBar, FilterEvent, InspectorPane, RawMessage, SectionLabel,
     StatusGlyph, Table, TableEvent,
@@ -156,14 +157,11 @@ impl ClusterProblemsScreen {
                 this.pick(ix, cx);
             }))
         });
-        let list = div()
-            .id(CAUSES_ID)
+        let list = scroll_viewport(CAUSES_ID, div().children(rows))
             .size_full()
-            .overflow_y_scroll()
             .bg(palette.panel)
             .border_r(RULE)
-            .border_color(palette.line)
-            .children(rows);
+            .border_color(palette.line);
         InspectorPane::new(CAUSES_ID, list)
             .width(PROBLEM_CAUSES_WIDTH)
             .trailing_handle()

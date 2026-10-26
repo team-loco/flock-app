@@ -4,13 +4,13 @@ use flock_core::related::Related;
 use flock_core::workload::{ContainerSpec, Pod};
 use flock_core::{Command, Workload};
 use gpui::{
-    AnyElement, App, Context, InteractiveElement, IntoElement, ParentElement, Render,
-    StatefulInteractiveElement, Styled, WeakEntity, Window, div,
+    AnyElement, App, Context, IntoElement, ParentElement, Render, Styled, WeakEntity, Window, div,
 };
 
 use super::{
     CONTAINER, INSPECTOR_ID, SPEC, WorkloadScreen, conditions_section, env_section, with_written,
 };
+use crate::kit::scroll_viewport;
 use crate::kit::{
     EVENTS, ErrorBlocks, EventList, KeyValue, PanelSection, SectionLabel, Segmented,
     SelectableText, Shown, YamlRow,
@@ -73,17 +73,6 @@ impl WorkloadInspector {
             .count(workload.events.len().to_string())
             .child(EventList::new(workload.events.clone()));
         let content = div()
-            .id("inspector")
-            .flex()
-            .flex_col()
-            .flex_none()
-            .w_full()
-            .h_full()
-            .overflow_y_scroll()
-            .border_l(RULE)
-            .border_color(palette.line)
-            .bg(palette.panel)
-            .text_size(TEXT_BODY)
             .child(ErrorBlocks::new(workload.issues()))
             .child(conditions_section(&workload.conditions, &palette))
             .child(header)
@@ -94,7 +83,15 @@ impl WorkloadInspector {
             .child(YamlRow::new(INSPECTOR_ID, move |_, cx| {
                 screen.update(cx, WorkloadScreen::toggle_yaml).ok();
             }));
-        content.into_any_element()
+        scroll_viewport("inspector", content)
+            .flex_none()
+            .w_full()
+            .h_full()
+            .border_l(RULE)
+            .border_color(palette.line)
+            .bg(palette.panel)
+            .text_size(TEXT_BODY)
+            .into_any_element()
     }
 
     fn spec(&self, spec: &ContainerSpec, palette: &Palette) -> PanelSection {

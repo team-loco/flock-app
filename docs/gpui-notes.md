@@ -107,7 +107,12 @@ launch the GUI or synthesize system input for automated verification.
 
 - Tailwind-like API: `.flex().flex_col().flex_1().min_h_0().w(px).h(px).px().gap().rounded()
   .border_b(px(1.)).border_color(c).bg(c).text_size(px).font_weight(FontWeight::SEMIBOLD).truncate()`.
-  Scrolling containers need an id: `.id("x").overflow_y_scroll()`.
+  A scroller that fills a sized slot is `kit::scroll_viewport(id, content)` (`.both_axes()`,
+  `.track_scroll(&handle)`): it sits at `absolute().inset_0()`, so taffy lays the content out once
+  instead of measuring it first. A list that sizes to its content (popover, menu) keeps
+  `.id("x").max_h(..).overflow_y_scroll()`.
+- Stack children in a plain block `div()` unless the column needs `gap`, `flex_1` or alignment: a
+  flex column lays each auto-height child out twice (measure, then again at its final height).
 - No letter-spacing and no text rotation.
 - No CSS grid; tables should be `uniform_list` rows of fixed-width flex cells.
 

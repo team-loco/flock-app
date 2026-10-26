@@ -6,10 +6,11 @@ use flock_core::settings::NamespaceSelection;
 use flock_core::{Command, LogTarget, Page, Preferences, ResourceRef, Snapshot, Status};
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div,
+    IntoElement, ParentElement, Render, Styled, Window, div,
 };
 
 use super::related::{OnPick, Pick, page_sections};
+use crate::kit::scroll_viewport;
 use crate::kit::{Button, CodeView, EmptyState, PageHeader, SectionHeader, Skeleton};
 use crate::screens::EDIT_YAML;
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
@@ -215,17 +216,8 @@ impl Render for DetailScreen {
             Some(related) => page_sections(related, &pick, cx),
             None => vec![Skeleton::rows().into_any_element()],
         };
-        let body = div()
-            .id(BODY_ID)
-            .debug_selector(|| BODY_ID.to_owned())
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .children(related)
-            .children(self.yaml());
-        root.child(body)
+        let content = div().children(related).children(self.yaml());
+        root.child(scroll_viewport(BODY_ID, content).flex_1().min_h_0())
     }
 }
 

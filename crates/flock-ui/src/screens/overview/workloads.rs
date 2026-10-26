@@ -72,8 +72,6 @@ pub(super) fn render(
         })
         .collect();
     div()
-        .flex()
-        .flex_col()
         .border_b(RULE)
         .border_color(palette.line)
         .child(

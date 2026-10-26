@@ -10,6 +10,7 @@ use gpui::{
 
 use crate::highlight;
 use crate::keymap;
+use crate::kit::scroll_viewport;
 use crate::kit::{
     Button, InputEvent, Kbd, Link, SectionLabel, Segmented, TextField, TextFieldState, Toast,
     Toggle, Tooltip, toast,
@@ -614,13 +615,6 @@ impl Render for AppSettingsScreen {
             .flex_col()
             .size_full()
             .child(self.header(&palette))
-            .child(
-                div()
-                    .id("app-settings")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(column),
-            )
+            .child(scroll_viewport("app-settings", column).flex_1().min_h_0())
     }
 }

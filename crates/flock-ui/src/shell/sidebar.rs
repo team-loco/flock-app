@@ -11,6 +11,7 @@ use gpui::{
 
 use super::Shell;
 use super::keys::SIDEBAR_CONTEXT;
+use crate::kit::scroll_viewport;
 use crate::kit::{Toast, status_symbols, toast};
 use crate::theme::{
     ActiveTheme, COLLAPSE, FONT_MONO, PAGE_HEADER, Palette, RADIUS, ROW_NAV, RULE, SIDEBAR,
@@ -343,18 +344,12 @@ impl Shell {
             .child(top_strip(palette))
             .child(header)
             .child(
-                div()
-                    .id("sidebar-scroll")
-                    .debug_selector(|| "sidebar-nav".to_owned())
+                scroll_viewport("sidebar-nav", div().px(SPACE_4).pb(SPACE_3).children(items))
                     .key_context(SIDEBAR_CONTEXT)
                     .track_focus(&self.keys.sidebar_focus)
                     .on_key_down(cx.listener(Self::sidebar_key))
                     .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .px(SPACE_4)
-                    .pb(SPACE_3)
-                    .children(items),
+                    .min_h_0(),
             )
     }
 }

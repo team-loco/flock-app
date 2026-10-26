@@ -6,10 +6,10 @@ use flock_core::overview::plural;
 use flock_core::{Command, ResourceRef, Sink, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Task, Window, div,
+    IntoElement, ParentElement, Render, SharedString, Styled, Subscription, Task, Window, div,
 };
 
+use crate::kit::scroll_viewport;
 use crate::kit::{
     Button, CodeEditor, CodeEditorState, ConfirmDialog, DiffFile, DiffView, EmptyState, InputEvent,
     MetaLine, PageHeader, SectionHeader, Skeleton, TextFieldEnter, TextFieldEscape, Toast, confirm,
@@ -475,15 +475,13 @@ fn diff(id: &'static str, title: String, lines: &[PatchLine]) -> DiffView {
 }
 
 fn scrolled(id: &'static str, header: SectionHeader, content: impl IntoElement) -> AnyElement {
-    div()
-        .id(id)
-        .debug_selector(move || id.to_owned())
-        .flex_1()
-        .min_h_0()
-        .overflow_y_scroll()
+    let content = div()
         .py(SPACE_5)
         .child(header)
-        .child(div().px(SPACE_8).child(content))
+        .child(div().px(SPACE_8).child(content));
+    scroll_viewport(id, content)
+        .flex_1()
+        .min_h_0()
         .into_any_element()
 }
 

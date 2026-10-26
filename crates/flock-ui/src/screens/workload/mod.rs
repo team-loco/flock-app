@@ -1,4 +1,5 @@
 use crate::kit::Tooltip;
+use crate::kit::scroll_viewport;
 mod dock;
 mod inspector;
 
@@ -258,18 +259,15 @@ impl WorkloadScreen {
             .into_iter()
             .map(|field| field_row(field, &palette))
             .collect();
-        div()
-            .id("workload-compact")
-            .flex()
-            .flex_col()
-            .size_full()
-            .overflow_y_scroll()
+        let content = div()
             .child(header)
             .child(div().flex().flex_col().children(fields))
             .child(Rule::horizontal())
             .child(SectionHeader::new(PODS))
             .child(Rule::horizontal())
-            .child(Table::pane(&self.compact_pods, cx))
+            .child(Table::pane(&self.compact_pods, cx));
+        scroll_viewport("workload-compact", content)
+            .size_full()
             .into_any_element()
     }
 
@@ -625,20 +623,16 @@ impl WorkloadScreen {
                     .tooltip(EDIT_KEYS)
                     .on_click(cx.listener(|this, _, _, cx| this.edit_yaml(cx))),
             );
-        let content = div()
-            .id("workload-yaml")
-            .flex()
-            .flex_col()
+        let body = div()
+            .child(header)
+            .child(div().px(SPACE_6).py(SPACE_5).child(yaml));
+        let content = scroll_viewport("workload-yaml", body)
             .flex_none()
             .w_full()
             .h_full()
-            .overflow_y_scroll()
             .border_l(RULE)
             .border_color(palette.line)
-            .bg(palette.panel)
-            .child(header)
-            .child(div().px(SPACE_6).py(SPACE_5).child(yaml))
-            .into_any_element();
+            .bg(palette.panel);
         InspectorPane::new(INSPECTOR_ID, content)
             .width(YAML_INSPECTOR_WIDTH)
             .into_any_element()
@@ -1013,18 +1007,14 @@ impl Render for WorkloadScreen {
         if let Some(open) = &self.compact {
             return root.child(self.compact_view(&workload, open, cx));
         }
-        let main = div()
-            .id(MAIN_ID)
-            .debug_selector(|| MAIN_ID.to_owned())
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .overflow_y_scroll()
+        let sections = div()
             .child(self.header(&workload, cx))
             .child(self.pods_section(&workload, cx))
             .child(Self::history(&workload, cx));
+        let main = scroll_viewport(MAIN_ID, sections)
+            .flex_1()
+            .min_w_0()
+            .h_full();
         let shown = if self.showing_yaml {
             YAML_LABEL
         } else {

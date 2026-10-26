@@ -1,3 +1,4 @@
+use crate::kit::scroll_viewport;
 use crate::kit::{SelectableText, YamlRow};
 use flock_core::flux::{
     FluxDetail, HelmDetail, HelmRevision, HistoryEntry, InventoryFilter, ManagedObject, Phase,
@@ -567,19 +568,18 @@ impl FluxObjectPage {
                 self.history_section(palette, cx),
             ],
         };
-        div()
-            .id("flux-main")
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .overflow_y_scroll()
+        let content = div()
             .child(self.header(object, cx))
             .child(Self::diagnosis_section(object))
             .children(body)
             .when(self.yaml_open, |main| {
                 main.child(Self::yaml_section(object, cx))
             })
-            .child(div().h(SPACE_8))
+            .child(div().h(SPACE_8));
+        scroll_viewport("flux-main", content)
+            .flex_1()
+            .min_w_0()
+            .h_full()
             .into_any_element()
     }
 
@@ -644,16 +644,7 @@ impl FluxObjectPage {
                 )
         });
         let values = values.map(|values| PanelSection::new(ASIDE_ID, VALUES).child(values));
-        div()
-            .id("flux-aside")
-            .w_full()
-            .flex_none()
-            .h_full()
-            .overflow_y_scroll()
-            .border_l(RULE)
-            .border_color(palette.line)
-            .bg(palette.panel)
-            .text_size(TEXT_BODY)
+        let content = div()
             .child(ErrorBlocks::new(self.issues.clone()))
             .children(peers)
             .children(dependencies)
@@ -661,7 +652,15 @@ impl FluxObjectPage {
             .child(PanelSection::new(ASIDE_ID, SPEC).child(spec_list(&object.spec, SPEC_LABEL)))
             .child(YamlRow::new(ASIDE_ID, move |_, cx| {
                 this.update(cx, FluxObjectPage::toggle_yaml).ok();
-            }))
+            }));
+        scroll_viewport("flux-aside", content)
+            .w_full()
+            .flex_none()
+            .h_full()
+            .border_l(RULE)
+            .border_color(palette.line)
+            .bg(palette.panel)
+            .text_size(TEXT_BODY)
             .into_any_element()
     }
 }

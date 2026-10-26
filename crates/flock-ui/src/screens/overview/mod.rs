@@ -263,8 +263,6 @@ impl Render for OverviewScreen {
             Some(workloads::render(&data, &palette, cx)),
         ];
         let content = div()
-            .flex()
-            .flex_col()
             .tab_group()
             .pb(SPACE_8)
             .children(sections.into_iter().flatten());
@@ -317,8 +315,6 @@ fn weighted_band(
                 .flex_none()
                 .w(relative(share))
                 .min_w_0()
-                .flex()
-                .flex_col()
                 .child(section);
             if ix < last {
                 cell.border_r(RULE).border_color(palette.line)
@@ -336,8 +332,6 @@ fn weighted_band(
 
 fn section(palette: &Palette) -> Div {
     div()
-        .flex()
-        .flex_col()
         .px(SPACE_8)
         .pt(SPACE_7)
         .pb(SPACE_5)

@@ -9,12 +9,13 @@ use flock_core::{
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, FontWeight,
     InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, WeakEntity, Window, div, px, relative,
+    Styled, Subscription, WeakEntity, Window, div, px, relative,
 };
 
 use crate::kit::{
     ActionMenu, Button, Column, InputEvent, InspectorPane, KeyValue, MenuItem, SectionLabel,
     Select, SelectEvent, StatusText, Table, TableEvent, TextField, TextFieldState, Toggle,
+    scroll_viewport,
 };
 use crate::theme::{
     ActiveTheme, FONT_MONO, LINE_PROSE, PAGE_HEADER, Palette, ROW_CATALOG, RULE, SETTINGS_FIELD,
@@ -425,21 +426,18 @@ impl SettingsScreen {
                     .text_color(palette.mute)
                     .child(LABELS_HINT),
             );
-        let inspector = div()
-            .id(INSPECTOR_ID)
-            .flex()
-            .flex_col()
-            .size_full()
-            .overflow_y_scroll()
-            .bg(palette.panel)
-            .border_l(RULE)
-            .border_color(palette.line)
-            .text_size(TEXT_BODY)
+        let content = div()
             .child(top)
             .children(auth)
             .child(section(CONNECTION, palette).child(details))
             .child(preferences)
             .child(labels);
+        let inspector = scroll_viewport(INSPECTOR_ID, content)
+            .size_full()
+            .bg(palette.panel)
+            .border_l(RULE)
+            .border_color(palette.line)
+            .text_size(TEXT_BODY);
         let pane = InspectorPane::new(INSPECTOR_ID, inspector).width(INSPECTOR);
         Some(pane.into_any_element())
     }

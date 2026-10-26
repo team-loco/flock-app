@@ -1292,6 +1292,46 @@ fn the_overview_scroller_fills_the_page_viewport() -> anyhow::Result<()> {
     Ok(())
 }
 
+const VIEWPORT_SCROLL: f32 = 200.;
+
+fn scrolled_by(ui: &mut Ui, scroller: &'static str, inner: &'static str) -> anyhow::Result<f32> {
+    let before = bounds_of(ui, inner)?;
+    let delta = gpui::point(gpui::px(0.), gpui::px(-VIEWPORT_SCROLL));
+    ui.scroll(scroller, delta)?;
+    let after = bounds_of(ui, inner)?;
+    Ok(f32::from(before.top() - after.top()))
+}
+
+#[test]
+fn the_workload_inspector_scroller_fills_its_pane_and_scrolls() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Workload)?;
+    let pane = bounds_of(&mut ui, "workload-inspector-pane")?;
+    let scroller = bounds_of(&mut ui, "inspector")?;
+    assert_eq!(scroller.top(), pane.top());
+    assert_eq!(scroller.bottom(), pane.bottom());
+    assert_eq!(scroller.right(), pane.right());
+    assert_eq!(
+        scrolled_by(&mut ui, "inspector", "error-blocks")?,
+        VIEWPORT_SCROLL
+    );
+    Ok(())
+}
+
+#[test]
+fn the_namespace_page_scroller_fills_its_slot_and_scrolls() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Namespace)?;
+    let aside = bounds_of(&mut ui, "namespace-inspector-pane")?;
+    let scroller = bounds_of(&mut ui, "namespace-main")?;
+    assert_eq!(scroller.top(), aside.top());
+    assert_eq!(scroller.bottom(), aside.bottom());
+    assert_eq!(scroller.right(), aside.left());
+    assert_eq!(
+        scrolled_by(&mut ui, "namespace-main", "namespace-tile-pods-1-failing")?,
+        VIEWPORT_SCROLL
+    );
+    Ok(())
+}
+
 fn show_overview_namespaces(ui: &mut Ui) -> anyhow::Result<()> {
     let head = ui
         .bounds("overview-ns-sort-0")

@@ -4,12 +4,12 @@ use flock_core::loco::{
 };
 use flock_core::{Command, Page, Status};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla,
-    InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement,
+    ParentElement, Pixels, Render, SharedString, Styled, Subscription, Window, div, px,
 };
 
 use super::LocoEvent;
+use crate::kit::scroll_viewport;
 use crate::kit::status_symbols;
 use crate::kit::{
     Column, KeyValue, Level, Link, LogLine, LogView, PageTitle, SectionHeader, StatusGlyph, Table,
@@ -252,17 +252,16 @@ impl Render for PlatformScreen {
                     .detail(self.loco.platform.subtitle()),
             )
             .child(
-                div()
-                    .id("loco-platform")
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(agent)
-                    .child(self.placements_section(&palette, cx))
-                    .child(self.components_section(&palette, cx))
-                    .child(self.log_section(&palette)),
+                scroll_viewport(
+                    "loco-platform",
+                    div()
+                        .child(agent)
+                        .child(self.placements_section(&palette, cx))
+                        .child(self.components_section(&palette, cx))
+                        .child(self.log_section(&palette)),
+                )
+                .flex_1()
+                .min_h_0(),
             )
     }
 }

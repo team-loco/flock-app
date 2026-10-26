@@ -15,6 +15,7 @@ use gpui::{
 };
 
 use super::{INSPECTOR_ID, MISSING, PodsScreen};
+use crate::kit::scroll_viewport;
 use crate::kit::{
     Button, CONDITIONS, ConditionTable, Entrance, ErrorBlocks, KeyValue, Link, PanelHeader,
     PanelSection, SelectableText, Shown, Tooltip, YamlRow, swap_in,
@@ -316,14 +317,12 @@ impl Render for PodInspector {
             .text_size(TEXT_BODY)
             .children(header)
             .child(
-                div()
-                    .id(gpui::ElementId::Name(
-                        format!("{INSPECTOR_ID}-{selection}").into(),
-                    ))
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .child(body),
+                scroll_viewport(
+                    gpui::ElementId::Name(format!("{INSPECTOR_ID}-{selection}").into()),
+                    body,
+                )
+                .flex_1()
+                .min_h_0(),
             );
         div()
             .size_full()

@@ -48,6 +48,8 @@ fn chart(plot: Plot<'_>, range: TimeRange, palette: &Palette) -> AnyElement {
         .child(div().flex_1())
         .child(mono(plot.capacity.amount().labelled(), palette.mute).text_size(TEXT_SMALL));
     section(palette)
+        .flex()
+        .flex_col()
         .gap(SPACE_4)
         .child(head)
         .child(line)
@@ -133,8 +135,6 @@ pub(super) fn render(
     });
     div()
         .debug_selector(|| "utilization-chart".to_owned())
-        .flex()
-        .flex_col()
         .children(band(charts, palette))
         .children(note)
         .into_any_element()
