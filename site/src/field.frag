@@ -29,14 +29,15 @@ void main(){
   float n=smoothstep(.3,.8,fbm(p+2.*r));
   float m=mk(px,sz,t);
   float v=n*m*(mode<.5?1.12:1.25);
-  vec2 dp=c+vec2(-t*2.,t*.15), sl=vec2(30.,17.), sid=floor(dp/sl), lp=floor(dp-sid*sl);
+  vec2 sl=vec2(30.,17.), dp=vec2(mod(c.x+t*2.,sl.x*48.),c.y), sid=floor(dp/sl), lp=floor(dp-sid*sl);
   float sc=.7+.55*h(sid+4.4);
   vec2 jo=floor(vec2(h(sid+1.3)*(28.-15.*sc),h(sid+7.7)*(15.-8.5*sc)));
   vec2 lq=(lp-jo)/sc; if(h(sid+2.9)<.5)lq.x=14.-lq.x;
-  vec2 ctr=(sid*sl+jo+vec2(7.,4.)*sc-vec2(-t*2.,t*.15))*cell;
-  float mc=mk(ctr,sz,t);
-  float ok=mode<.5?smoothstep(180.,240.,ctr.y)*(1.-smoothstep(420.,500.,ctr.y))*smoothstep(.3,.4,abs(ctr.x/sz.x-.5)):smoothstep(.12,.5,mc)*smoothstep(70.,110.,ctr.y);
-  if(h(sid+9.1)<(mode<.5?.16:.08)*ok&&puff(lq)>.5){gl_FragColor=vec4(hi,1.);return;}
+  vec2 ctr=(c-lp+jo+vec2(7.,4.)*sc)*cell;
+  float row=(sid.y*sl.y+jo.y+4.*sc)*cell;
+  float band=mode<.5?smoothstep(180.,240.,row)*(1.-smoothstep(420.,500.,row)):smoothstep(70.,110.,row)*(1.-smoothstep(260.,320.,row));
+  float seen=mode<.5?smoothstep(.3,.4,abs(ctr.x/sz.x-.5)):smoothstep(.12,.48,abs(ctr.x/sz.x-.5));
+  if(h(sid+9.1)<(mode<.5?.16:.08)*band&&seen>b8(c)&&puff(lq)>.5){gl_FragColor=vec4(hi,1.);return;}
   float l=floor(v*4.+b8(c));
   if(l<1.){gl_FragColor=vec4(0.);return;}
   gl_FragColor=vec4(l<2.?c1:l<3.?c2:l<4.?c3:c4,1.);

@@ -10,6 +10,7 @@ import {
   PIXEL_RATIO,
   shotHeight,
   shotPath,
+  TAGLINE,
   type Accent,
   type Feature,
 } from "@/content";
@@ -239,7 +240,6 @@ export default function App() {
           className="top-0 max-lg:hidden"
           style={{ height: BAND_STOP }}
         />
-        <Pasture band={BAND_STOP} className="max-pasture:hidden" />
         <section className="relative mx-auto flex max-w-page flex-col items-center gap-5.5 px-6 pt-22 pb-11 text-center">
           <Icon size={ICON_SIZE} label="Flock" className="shadow-icon" />
           <h1 className="m-0 max-w-headline text-hero-compact font-semibold sm:text-hero">
@@ -249,10 +249,7 @@ export default function App() {
             </span>
             .
           </h1>
-          <p className="m-0 max-w-lead text-lead text-foreground-soft">
-            Flock is a native Mac app for running and debugging Kubernetes. All your clusters, side
-            by side, in one window.
-          </p>
+          <p className="m-0 max-w-lead text-lead text-foreground-soft">{TAGLINE}</p>
           <div id="download" className="mt-1.5 flex flex-wrap items-center justify-center gap-3">
             <Button asChild>
               <a href={__DOWNLOAD_URL__}>
@@ -264,6 +261,7 @@ export default function App() {
           <span className="text-note text-muted-foreground">For Macs with Apple silicon</span>
         </section>
         <Compare />
+        <Pasture band={BAND_STOP} className="max-lg:hidden" />
       </header>
 
       <main id="features">

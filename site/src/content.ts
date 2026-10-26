@@ -12,6 +12,11 @@ export const FEATURE_DISPLAY_WIDTH = 618;
 
 export const HERO_SCREEN = "overview";
 
+export const TITLE = "Flock: Kubernetes, without the context switching";
+
+export const TAGLINE =
+  "Flock is a native Mac app for running and debugging multi-cluster Kubernetes setups. All your clusters, side by side, in one window.";
+
 export const ICON_ASSET_SIZE = 224;
 
 export const iconPath = (size: number, format: "png" | "webp") => `/icon-${size}.${format}`;
