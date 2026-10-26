@@ -286,7 +286,7 @@ export default function App() {
           <span className="text-note text-band-foreground-soft">For Macs with Apple silicon</span>
         </div>
         <footer className="relative mt-auto">
-          <div className="mx-auto flex max-w-page flex-wrap items-center gap-6 px-6 pb-10 text-footer text-band-foreground-soft">
+          <div className="mx-auto flex max-w-page flex-wrap items-center gap-6 px-6 pb-2 text-footer text-band-foreground-soft">
             <span className="font-medium text-band-foreground">Flock</span>
             <span className="flex-1" />
             <a href={__RELEASES_URL__} className="no-underline hover:text-band-foreground">
