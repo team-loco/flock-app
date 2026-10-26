@@ -8,8 +8,8 @@ use flock_core::{ClusterId, ClusterSummary, Command, FluxKey, Snapshot};
 use gpui::{
     AnyElement, App, Bounds, Context, EventEmitter, FocusHandle, Focusable, FontWeight,
     InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, Path, PathBuilder,
-    PathVertex, Pixels, Point, Render, SharedString, StatefulInteractiveElement, Styled, Window,
-    canvas, div, point, prelude::FluentBuilder,
+    PathVertex, Pixels, Point, Render, ScrollHandle, SharedString, Size,
+    StatefulInteractiveElement, Styled, Window, canvas, div, point, prelude::FluentBuilder, size,
 };
 
 use super::ScreenEvent;
@@ -40,6 +40,8 @@ pub struct FluxGraphScreen {
     cluster_name: String,
     snapshot: Arc<Snapshot>,
     graph: FluxGraph,
+    cards: Vec<Rc<Card>>,
+    scroll: ScrollHandle,
     edge_paths: Rc<RefCell<Option<EdgePaths>>>,
     selected: Option<FluxKey>,
     focus: FocusHandle,
@@ -60,6 +62,8 @@ impl FluxGraphScreen {
             cluster_name: String::new(),
             snapshot: Arc::default(),
             graph: FluxGraph::default(),
+            cards: Vec::new(),
+            scroll: ScrollHandle::new(),
             edge_paths: Rc::default(),
             selected: None,
             focus: cx.focus_handle(),
@@ -86,6 +90,7 @@ impl FluxGraphScreen {
         self.cluster = Some(cluster.id.clone());
         self.cluster_name.clone_from(&cluster.name);
         self.graph = FluxGraph::build(&cluster.id, &snapshot.flux);
+        self.cards = self.graph.nodes.iter().map(Card::new).collect();
         self.restroke();
         cx.notify();
     }
@@ -149,19 +154,14 @@ impl FluxGraphScreen {
         &self,
         ix: usize,
         node: &GraphNode,
+        card: &Rc<Card>,
         palette: &Palette,
         cx: &Context<Self>,
     ) -> AnyElement {
         let selected = self.selected.as_ref() == Some(&node.key);
         let origin = node_origin(node);
-        let key = node.key.clone();
-        let select_key = node.key.clone();
-        let kind = if node.present {
-            node.key.kind.label().to_owned()
-        } else {
-            format!("{} · {MISSING}", node.key.kind.label())
-        };
-        let detail = format!("{kind} · {}", node.key.namespace);
+        let open = Rc::clone(card);
+        let select = Rc::clone(card);
         let name_color = if node.present {
             palette.fg
         } else {
@@ -194,14 +194,14 @@ impl FluxGraphScreen {
             .on_click(cx.listener(move |this, _, window, cx| {
                 let focus = this.focus.clone();
                 window.focus(&focus, cx);
-                this.open(&key, cx);
+                this.open(&open.key, cx);
             }))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, _, window, cx| {
                     let focus = this.focus.clone();
                     window.focus(&focus, cx);
-                    let ix = this.graph.find(&select_key);
+                    let ix = this.graph.find(&select.key);
                     this.select(ix, cx);
                 }),
             )
@@ -219,7 +219,7 @@ impl FluxGraphScreen {
                             .font_family(FONT_MONO)
                             .text_size(TEXT_MONO)
                             .text_color(if selected { palette.selfg } else { name_color })
-                            .child(node.key.name.clone()),
+                            .child(card.name.clone()),
                     ),
             )
             .child(
@@ -228,7 +228,7 @@ impl FluxGraphScreen {
                     .truncate()
                     .text_size(TEXT_SMALL)
                     .text_color(palette.mute)
-                    .child(detail),
+                    .child(card.detail.clone()),
             )
             .into_any_element()
     }
@@ -260,11 +260,7 @@ impl FluxGraphScreen {
                 };
                 let visible = window.content_mask().bounds;
                 for edge in &mut cache.edges {
-                    let placed = Bounds {
-                        origin: bounds.origin + edge.extent.origin,
-                        size: edge.extent.size,
-                    };
-                    if !visible.intersects(&placed) {
+                    if !in_view(edge.extent, bounds.origin, visible) {
                         continue;
                     }
                     let color = if edge.active { active } else { idle };
@@ -403,6 +399,48 @@ fn node_origin(node: &GraphNode) -> Point<Pixels> {
     slot_origin(node.layer, node.row)
 }
 
+fn node_extent(node: &GraphNode) -> Bounds<Pixels> {
+    Bounds::new(node_origin(node), size(GRAPH_NODE_WIDTH, GRAPH_NODE_HEIGHT))
+}
+
+fn in_view(extent: Bounds<Pixels>, by: Point<Pixels>, visible: Bounds<Pixels>) -> bool {
+    let placed = Bounds {
+        origin: extent.origin + by,
+        size: extent.size,
+    };
+    visible.intersects(&placed)
+}
+
+fn viewport(offset: Point<Pixels>, content: Size<Pixels>, window: Size<Pixels>) -> Bounds<Pixels> {
+    let scrolled = point(-offset.x, -offset.y);
+    let room = content - window;
+    let furthest = point(room.width, room.height).max(&Point::default());
+    let origin = scrolled.max(&Point::default()).min(&furthest);
+    Bounds::new(origin, window)
+}
+
+struct Card {
+    key: FluxKey,
+    name: SharedString,
+    detail: SharedString,
+}
+
+impl Card {
+    fn new(node: &GraphNode) -> Rc<Self> {
+        let kind = if node.present {
+            node.key.kind.label().to_owned()
+        } else {
+            format!("{} · {MISSING}", node.key.kind.label())
+        };
+        let detail = format!("{kind} · {}", node.key.namespace);
+        Rc::new(Self {
+            key: node.key.clone(),
+            name: node.key.name.clone().into(),
+            detail: detail.into(),
+        })
+    }
+}
+
 struct EdgePaths {
     selected: Option<usize>,
     edges: Vec<CachedEdge>,
@@ -510,11 +548,7 @@ impl Tessellation {
         piece.bounds.origin += delta;
         let runs = self.vertices.chunks(CHUNK_VERTICES).zip(&self.chunks);
         for (run, extent) in runs {
-            let placed = Bounds {
-                origin: extent.origin + delta,
-                size: extent.size,
-            };
-            if !visible.intersects(&placed) {
+            if !in_view(*extent, delta, visible) {
                 continue;
             }
             piece.vertices.extend(run.iter().map(|vertex| {
@@ -611,16 +645,16 @@ const fn position(value: usize) -> f32 {
     value as f32
 }
 
-fn canvas_size(graph: &FluxGraph) -> (Pixels, Pixels) {
+fn canvas_size(graph: &FluxGraph) -> Size<Pixels> {
     let layers = position(graph.layers.len());
     let rows = position(graph.rows);
     let width = SPACE_8 * 2. + GRAPH_NODE_WIDTH * layers + GRAPH_COLUMN_GAP * (layers - 1.).max(0.);
     let height = SPACE_8 * 2. + GRAPH_NODE_HEIGHT * rows + GRAPH_ROW_GAP * (rows - 1.).max(0.);
-    (width, height)
+    size(width, height)
 }
 
 impl Render for FluxGraphScreen {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
         if self.graph.nodes.is_empty() {
             let sentence = format!("{NOTHING} {}.", self.cluster_name);
@@ -629,13 +663,16 @@ impl Render for FluxGraphScreen {
                 .child(EmptyState::new(sentence))
                 .into_any_element();
         }
-        let (width, height) = canvas_size(&self.graph);
+        let content = canvas_size(&self.graph);
+        let visible = viewport(self.scroll.offset(), content, window.viewport_size());
         let nodes: Vec<AnyElement> = self
             .graph
             .nodes
             .iter()
+            .zip(&self.cards)
             .enumerate()
-            .map(|(ix, node)| self.node(ix, node, &palette, cx))
+            .filter(|(_, (node, _))| in_view(node_extent(node), Point::default(), visible))
+            .map(|(ix, (node, card))| self.node(ix, node, card, &palette, cx))
             .collect();
         let across = self
             .selected
@@ -658,11 +695,12 @@ impl Render for FluxGraphScreen {
                     .flex_1()
                     .min_h_0()
                     .overflow_scroll()
+                    .track_scroll(&self.scroll)
                     .child(
                         div()
                             .relative()
-                            .w(width)
-                            .h(height)
+                            .w(content.width)
+                            .h(content.height)
                             .child(self.edges(&palette))
                             .children(nodes),
                     ),
@@ -681,6 +719,7 @@ mod tests {
     const DELTA: f32 = 40.;
     const FAR: f32 = 100_000.;
     const PASSES: usize = 6;
+    const WINDOW_SHARE: f32 = 0.25;
 
     fn long_route() -> Route {
         let column = GRAPH_NODE_WIDTH + GRAPH_COLUMN_GAP;
@@ -756,6 +795,49 @@ mod tests {
                 .vertices
                 .is_empty()
         );
+    }
+
+    fn window() -> Size<Pixels> {
+        size(px(FAR * WINDOW_SHARE), px(FAR * WINDOW_SHARE))
+    }
+
+    fn content() -> Size<Pixels> {
+        size(px(FAR), px(FAR))
+    }
+
+    #[test]
+    fn the_viewport_follows_the_scroll_offset() {
+        let offset = point(px(-DELTA), px(-DELTA * 2.));
+        let visible = viewport(offset, content(), window());
+        assert_eq!(visible.origin, point(px(DELTA), px(DELTA * 2.)));
+        assert_eq!(visible.size, window());
+    }
+
+    #[test]
+    fn overscroll_keeps_the_viewport_inside_the_content() {
+        let past = point(px(-FAR * 2.), px(DELTA));
+        let visible = viewport(past, content(), window());
+        let room = content() - window();
+        assert_eq!(visible.origin, point(room.width, px(0.)));
+    }
+
+    #[test]
+    fn content_smaller_than_the_window_shows_from_the_top_left() {
+        let small = size(px(DELTA), px(DELTA));
+        let visible = viewport(point(px(-DELTA), px(-DELTA)), small, window());
+        assert_eq!(visible.origin, Point::default());
+    }
+
+    #[test]
+    fn only_nodes_in_the_viewport_are_built() {
+        let column = GRAPH_NODE_WIDTH + GRAPH_COLUMN_GAP;
+        let scrolled = point(-column * position(PASSES), px(0.));
+        let narrow = size(column, GRAPH_NODE_HEIGHT);
+        let visible = viewport(scrolled, content(), narrow);
+        let at = |layer: usize| Bounds::new(slot_origin(layer, 0), narrow);
+        assert!(!in_view(at(0), Point::default(), visible));
+        assert!(in_view(at(PASSES), Point::default(), visible));
+        assert!(!in_view(at(PASSES + 2), Point::default(), visible));
     }
 
     #[test]
