@@ -176,14 +176,14 @@ Never present instructions alone for a latency claim; pair them with wall time a
 
 #### Benchmarks outside GPUI
 
-`bench_metrics` has no GPUI dependency, so any Criterion benchmark in the workspace (`rope`, `sum_tree`, `text`, ...) gets the same metrics and the same `BENCH_MEASUREMENT` switch. Add `bench_metrics.workspace = true` to `[dev-dependencies]`, take `&mut Criterion<bench_metrics::BenchMeasurement>` in the benchmark functions, and register them with:
+`bench_metrics` has no GPUI dependency, so any Criterion benchmark in the workspace (e.g. `flock-core`) gets the same metrics and the same `BENCH_MEASUREMENT` switch. Add `bench_metrics = { package = "gpui-pre-bench-metrics" }` to `[workspace.dependencies]` at the gpui version, then `bench_metrics.workspace = true` to the crate's `[dev-dependencies]`, take `&mut Criterion<bench_metrics::BenchMeasurement>` in the benchmark functions, and register them with:
 
 ```rust
 criterion_group! {
     name = benches;
     config = Criterion::default()
         .with_measurement(bench_metrics::BenchMeasurement::from_env_or_exit());
-    targets = rope_benchmarks
+    targets = core_benchmarks
 }
 ```
 
@@ -191,7 +191,7 @@ That alone switches Criterion's analyzed metric with `BENCH_MEASUREMENT=instruct
 
 ```rust
 let report = bench_metrics::MetricReport::new();
-group.bench_function("append", |b| report.iter(b, || rope.append(small.clone())));
+group.bench_function("apply_events", |b| report.iter(b, || state.apply(events.clone())));
 report.print("  ");
 ```
 
@@ -352,12 +352,12 @@ Do not treat a benchmark that only passes on the fixed branch as valid before un
 
 ## Profile with Instruments and xctrace
 
-Use the normal optimized `release-fast` build for benchmark timing. For attribution-focused profiling on macOS, build the exact target with linker deduplication disabled:
+Use the default optimized `bench` profile for benchmark timing. For attribution-focused profiling on macOS, build the exact target with linker deduplication disabled:
 
 ```sh
 RUSTFLAGS="-C link-arg=-Wl,-no_deduplicate -C codegen-units=1" \
   cargo bench -p <package> --bench <target> \
-  --features bench-support --profile release-fast --no-run
+  --no-run
 ```
 
 These flags improve Rust symbol attribution but change code generation. Do not use that build for baseline timing numbers.
@@ -365,17 +365,17 @@ These flags improve Rust symbol attribution but change code generation. Do not u
 Run `dsymutil` on the exact executable printed by Cargo:
 
 ```sh
-dsymutil target/release-fast/deps/<target>-<hash>
+dsymutil target/release/deps/<target>-<hash>
 ```
 
-Prefer the `zed-bench` Instruments template, which combines Time Profiler data, CPU counters, and hang or microhang tables. Fall back to `Time Profiler` if it is unavailable:
+Use the `Time Profiler` Instruments template:
 
 ```sh
-rm -rf /tmp/zed-profiles/<name>.trace
+rm -rf target/profiles/<name>.trace
 xctrace record \
-  --template "zed-bench" \
-  --output /tmp/zed-profiles/<name>.trace \
-  --launch -- target/release-fast/deps/<target>-<hash> \
+  --template "Time Profiler" \
+  --output target/profiles/<name>.trace \
+  --launch -- target/release/deps/<target>-<hash> \
   --bench <workload-filter> --profile-time 10
 ```
 
@@ -383,7 +383,7 @@ Running a Criterion executable directly requires `--bench`. `--profile-time` rep
 
 Inspect the trace table of contents and export only focused tables such as `time-sample`; never load a complete `.trace` or large XML export into agent context. Filter by target PID, main thread when investigating foreground stalls, running state, and timer-fired samples. Symbolicate with the exact binary, dSYM, architecture, and load address using `atos`, then use `rustfilt` for Rust names.
 
-If the profile contains a large `<deduplicated_symbol>` bucket or implausible functions, stop treating its symbol-level attribution as actionable and recapture with `-Wl,-no_deduplicate`. Report both flat leaf and inclusive bottom-up profiles. Load the `xctrace-rust-profile` skill for the complete export and symbolication workflow.
+If the profile contains a large `<deduplicated_symbol>` bucket or implausible functions, stop treating its symbol-level attribution as actionable and recapture with `-Wl,-no_deduplicate`. Report both flat leaf and inclusive bottom-up profiles.
 
 Trace bundles can contain process environments, paths, source, and credentials. Keep them local, inspect focused exports, and never paste raw trace metadata into a shared thread.
 
