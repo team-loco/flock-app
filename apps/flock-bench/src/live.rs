@@ -300,8 +300,13 @@ pub fn bench_snapshots<C>(
 }
 
 struct Wheel {
-    first_draw: u64,
+    dispatched: u64,
     stop: Arc<AtomicBool>,
+}
+
+struct Finished {
+    dispatched: u64,
+    draws_at_last_step: u64,
 }
 
 pub fn bench_pan(session: &Session, cx: &mut BenchAppContext) -> u64 {
@@ -316,16 +321,14 @@ pub fn bench_scroll(
     cx: &mut BenchAppContext,
 ) -> u64 {
     let sessions = Rc::new(Cell::new(0_u64));
+    let finished = Rc::new(Cell::new(None));
     cx.bench_renderer_session(
         SESSION_TIMEOUT,
-        |cx| {
+        |_| {
             session.drain_commands();
-            let first_draw = cx
-                .update_window(session.window, |_, window, _| draws(window))
-                .unwrap_or_default();
             let stop = Arc::new(AtomicBool::new(false));
             let wheel = Wheel {
-                first_draw,
+                dispatched: 0,
                 stop: stop.clone(),
             };
             (wheel, session.window, stop)
@@ -337,14 +340,27 @@ pub fn bench_scroll(
                 ..ScrollWheelEvent::default()
             };
             window.dispatch_event(PlatformInput::ScrollWheel(event), cx);
+            wheel.dispatched += 1;
             if turn + 1 == turns {
-                let drawn = draws(window) - wheel.first_draw;
-                assert!(drawn >= turn, "{drawn} frames for {turn} wheel steps");
+                finished.set(Some(Finished {
+                    dispatched: wheel.dispatched,
+                    draws_at_last_step: draws(window),
+                }));
                 sessions.set(sessions.get() + 1);
                 wheel.stop.store(true, Ordering::Release);
             }
         },
     );
+    if let Some(finished) = finished.take() {
+        let drawn = cx
+            .update_window(session.window, |_, window, _| draws(window))
+            .unwrap_or_default();
+        assert_eq!(finished.dispatched, turns, "wheel steps were dropped");
+        assert!(
+            drawn > finished.draws_at_last_step,
+            "no frame drew after the last wheel step"
+        );
+    }
     sessions.get()
 }
 
