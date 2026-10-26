@@ -45,7 +45,7 @@ impl Flock {
         }
         let (updates, update_rx) = async_channel::unbounded();
         let (command_tx, commands) = async_channel::unbounded();
-        let first = Update::Snapshot(Box::new(snapshot));
+        let first = Update::Snapshot(Arc::new(snapshot));
         assert!(updates.try_send(first).is_ok(), "the first snapshot");
         let mut bench_window = cx.add_empty_window();
         let window = bench_window.window_handle();
@@ -153,7 +153,7 @@ fn snapshot_apply(workload: &Workload, cx: &mut BenchAppContext) {
         },
         |burst, _, _, cx| {
             if let Some(next) = burst.next.take() {
-                let sent = burst.updates.try_send(Update::Snapshot(Box::new(next)));
+                let sent = burst.updates.try_send(Update::Snapshot(Arc::new(next)));
                 assert!(sent.is_ok(), "the store stopped listening");
                 return;
             }

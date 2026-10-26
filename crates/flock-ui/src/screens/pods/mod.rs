@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::ops::Deref;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::kit::{SelectableText, Tooltip};
 use flock_core::diagnosis::true_label;
@@ -89,7 +91,7 @@ const SELECTOR_LOGS_DESCRIPTION: &str =
     "Follows every pod that matches the label filter, including new ones";
 const NO_SELECTION: &str = "Select a pod to see its containers, conditions and events.";
 pub struct PodsScreen {
-    pods: Vec<Pod>,
+    snapshot: Arc<Snapshot>,
     cluster: Option<ClusterId>,
     names: Vec<(ClusterId, String)>,
     cluster_namespaces: BTreeMap<ClusterId, Vec<String>>,
@@ -104,7 +106,7 @@ pub struct PodsScreen {
     elsewhere: Entity<ElsewhereLink>,
     log: Option<LogSession>,
     shell: Option<ShellSession>,
-    table: Entity<Table<Pod>>,
+    table: Entity<Table<PodRow>>,
     filter: Entity<FilterBar>,
     namespace: Entity<Select>,
     preferences: Preferences,
@@ -120,6 +122,33 @@ pub struct PodsScreen {
 }
 
 impl EventEmitter<Command> for PodsScreen {}
+
+#[derive(Clone)]
+struct PodRow {
+    snapshot: Arc<Snapshot>,
+    ix: usize,
+}
+
+impl PodRow {
+    fn all(snapshot: &Arc<Snapshot>, matched: &[&Pod]) -> Vec<Self> {
+        matched
+            .iter()
+            .filter_map(|pod| snapshot.pods.element_offset(pod))
+            .map(|ix| Self {
+                snapshot: Arc::clone(snapshot),
+                ix,
+            })
+            .collect()
+    }
+}
+
+impl Deref for PodRow {
+    type Target = Pod;
+
+    fn deref(&self) -> &Pod {
+        &self.snapshot.pods[self.ix]
+    }
+}
 
 fn entrance(screen: &mut PodsScreen) -> &mut Entrance {
     &mut screen.entrance
@@ -137,7 +166,7 @@ impl PodsScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
             Table::new("pods", columns(), cx)
-                .row_key(|pod: &Pod| format!("{}/{}", pod.namespace, pod.name).into())
+                .row_key(|pod: &PodRow| format!("{}/{}", pod.namespace, pod.name).into())
                 .multi_select()
                 .click_opens()
                 .column_gap(SPACE_6)
@@ -194,7 +223,7 @@ impl PodsScreen {
             cx.observe(&dock, |this, _, cx| this.sync_streams(cx)),
         ];
         Self {
-            pods: Vec::new(),
+            snapshot: Arc::default(),
             cluster: None,
             names: Vec::new(),
             cluster_namespaces: BTreeMap::new(),
@@ -225,8 +254,8 @@ impl PodsScreen {
         }
     }
 
-    pub fn set_snapshot(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
-        self.pods.clone_from(&snapshot.pods);
+    pub fn set_snapshot(&mut self, snapshot: &Arc<Snapshot>) {
+        self.snapshot = Arc::clone(snapshot);
         self.related = snapshot
             .details
             .values()
@@ -245,7 +274,6 @@ impl PodsScreen {
                 (id.clone(), names.collect())
             })
             .collect();
-        self.refresh(cx);
     }
 
     pub fn set_context(
@@ -265,7 +293,7 @@ impl PodsScreen {
             .namespace_selection(POD_LIST)
             .namespace()
             .map(str::to_owned);
-        let wanted = resource.filter(|r| self.pods.iter().any(|pod| pod.is(r)));
+        let wanted = resource.filter(|r| self.snapshot.pods.iter().any(|pod| pod.is(r)));
         if let Some(pod) = wanted {
             let elsewhere = pod
                 .namespace
@@ -327,7 +355,7 @@ impl PodsScreen {
         let total = self
             .cluster
             .as_ref()
-            .and_then(|cluster| nav_counts(&self.pods, cluster).total)
+            .and_then(|cluster| nav_counts(&self.snapshot.pods, cluster).total)
             .unwrap_or_default();
         total.to_string()
     }
@@ -346,7 +374,7 @@ impl PodsScreen {
 
     fn cluster_pods(&self) -> Vec<&Pod> {
         match &self.cluster {
-            Some(cluster) => self.query.base(&self.pods, cluster),
+            Some(cluster) => self.query.base(&self.snapshot.pods, cluster),
             None => Vec::new(),
         }
     }
@@ -360,6 +388,7 @@ impl PodsScreen {
             .flatten()
             .map(String::as_str);
         let rows = self
+            .snapshot
             .pods
             .iter()
             .filter(|pod| self.cluster.as_ref() == Some(&pod.cluster))
@@ -369,7 +398,7 @@ impl PodsScreen {
 
     fn selected_pod(&self) -> Option<&Pod> {
         let selected = self.selected.as_ref()?;
-        self.pods.iter().find(|pod| pod.is(selected))
+        self.snapshot.pods.iter().find(|pod| pod.is(selected))
     }
 
     fn selected_container(&self) -> Option<&Container> {
@@ -383,20 +412,19 @@ impl PodsScreen {
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let namespace = self.query.namespace.as_ref();
         let labels = label_values(
-            self.pods
+            self.snapshot
+                .pods
                 .iter()
                 .filter(|pod| self.cluster.as_ref() == Some(&pod.cluster))
                 .filter(|pod| namespace.is_none_or(|namespace| &pod.namespace == namespace))
                 .map(|pod| &pod.labels),
         );
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
-        let rows: Vec<Pod> = match &self.cluster {
-            Some(cluster) => self
-                .query
-                .apply(&self.pods, cluster)
-                .into_iter()
-                .cloned()
-                .collect(),
+        let rows: Vec<PodRow> = match &self.cluster {
+            Some(cluster) => {
+                let matched = self.query.apply(&self.snapshot.pods, cluster);
+                PodRow::all(&self.snapshot, &matched)
+            }
             None => Vec::new(),
         };
         let counts = self.namespace_counts();
@@ -410,7 +438,7 @@ impl PodsScreen {
         let elsewhere = self
             .cluster
             .as_ref()
-            .and_then(|cluster| self.query.failing_elsewhere(&self.pods, cluster));
+            .and_then(|cluster| self.query.failing_elsewhere(&self.snapshot.pods, cluster));
         self.elsewhere.update(cx, |link, cx| {
             if link.elsewhere != elsewhere {
                 link.elsewhere = elsewhere;
@@ -429,7 +457,7 @@ impl PodsScreen {
             .as_ref()
             .is_some_and(|selected| rows.iter().any(|pod| pod.is(selected)));
         if !still_there {
-            self.selected = rows.first().map(Pod::resource);
+            self.selected = rows.first().map(|row| row.resource());
             self.pick_container(None);
         }
         let position = self
@@ -446,7 +474,7 @@ impl PodsScreen {
             }
             table.set_highlight(words, cx);
             table.set_row_actions(
-                move |pod: &Pod, marked: &[&Pod]| {
+                move |pod: &PodRow, marked: &[&PodRow]| {
                     menu_items(pod, &screen, logs_target(marked, selector.as_ref()))
                 },
                 cx,
@@ -480,7 +508,8 @@ impl PodsScreen {
 
     fn cluster_total(&self) -> usize {
         self.cluster.as_ref().map_or(0, |cluster| {
-            self.pods
+            self.snapshot
+                .pods
                 .iter()
                 .filter(|pod| &pod.cluster == cluster)
                 .count()
@@ -504,7 +533,7 @@ impl PodsScreen {
 
     fn table_event(
         &mut self,
-        table: &Entity<Table<Pod>>,
+        table: &Entity<Table<PodRow>>,
         event: &TableEvent,
         cx: &mut Context<Self>,
     ) {
@@ -516,7 +545,7 @@ impl PodsScreen {
                 return;
             }
         };
-        let pod = table.read(cx).row(ix).map(Pod::resource);
+        let pod = table.read(cx).row(ix).map(|row| row.resource());
         if let Some(pod) = pod {
             self.select(Some(pod), cx);
         }
@@ -934,7 +963,7 @@ fn volumes(pod: &Pod) -> PanelSection {
 }
 
 fn logs_target(
-    marked: &[&Pod],
+    marked: &[&PodRow],
     selector: Option<&(LogTarget, String)>,
 ) -> Option<(LogTarget, String)> {
     if marked.len() > 1 {
@@ -1066,29 +1095,29 @@ fn usage(pod: &Pod, label: fn(Usage) -> Amount) -> Amount {
     pod.usage.map_or_else(Amount::missing, label)
 }
 
-fn columns() -> Vec<Column<Pod>> {
+fn columns() -> Vec<Column<PodRow>> {
     vec![
-        Column::text("Name", |p: &Pod| p.name.clone().into())
+        Column::text("Name", |p: &PodRow| p.name.clone().into())
             .highlight()
             .mono()
             .flex(NAME_WEIGHT, NAME_MIN)
-            .sort_by_key(|p: &Pod| p.name.clone()),
+            .sort_by_key(|p: &PodRow| p.name.clone()),
         Column::colored_text(
             "Owner",
-            |p: &Pod| p.owner_label().unwrap_or_else(|| MISSING.into()).into(),
+            |p: &PodRow| p.owner_label().unwrap_or_else(|| MISSING.into()).into(),
             |_, palette| palette.fg2,
         )
         .mono()
         .flex(OWNER_WEIGHT, OWNER_MIN)
-        .sort_by_key(Pod::owner_label),
-        Column::new("Ready", |p: &Pod, palette| {
+        .sort_by_key(|p: &PodRow| p.owner_label()),
+        Column::new("Ready", |p: &PodRow, palette| {
             text(p.ready_label(), ready_color(p, palette))
         })
         .mono()
         .end()
         .fixed(READY)
-        .sort_by_key(|p: &Pod| p.all_ready()),
-        Column::new("Restarts", |p: &Pod, palette| {
+        .sort_by_key(|p: &PodRow| p.all_ready()),
+        Column::new("Restarts", |p: &PodRow, palette| {
             let color = p
                 .restart_status()
                 .map_or(palette.mute, |status| palette.status(status));
@@ -1097,39 +1126,39 @@ fn columns() -> Vec<Column<Pod>> {
         .mono()
         .end()
         .fixed(RESTARTS)
-        .sort_by_key(|p: &Pod| std::cmp::Reverse(p.restarts())),
-        Column::new("Status", |p: &Pod, _| {
+        .sort_by_key(|p: &PodRow| std::cmp::Reverse(p.restarts())),
+        Column::new("Status", |p: &PodRow, _| {
             StatusText::new(p.status, p.reason.clone()).into_any_element()
         })
-        .fit_status_by(|p: &Pod| p.reason.clone().into())
+        .fit_status_by(|p: &PodRow| p.reason.clone().into())
         .auto(STATUS_MIN, STATUS_MAX)
-        .sort_by_key(|p: &Pod| std::cmp::Reverse(p.status)),
+        .sort_by_key(|p: &PodRow| std::cmp::Reverse(p.status)),
         Column::colored_text(
             "Node",
-            |p: &Pod| p.node_short().unwrap_or(MISSING).to_owned().into(),
+            |p: &PodRow| p.node_short().unwrap_or(MISSING).to_owned().into(),
             |_, palette| palette.fg2,
         )
         .highlight()
         .mono()
         .flex(NODE_WEIGHT, NODE_MIN)
-        .sort_by_key(|p: &Pod| p.node.clone()),
-        Column::amount("CPU", |p: &Pod| usage(p, Usage::cpu_label))
+        .sort_by_key(|p: &PodRow| p.node.clone()),
+        Column::amount("CPU", |p: &PodRow| usage(p, Usage::cpu_label))
             .mono()
             .end()
             .fixed(CPU)
-            .sort_by_key(|p: &Pod| std::cmp::Reverse(p.usage.map(|u| u.cpu_millis))),
-        Column::amount("Memory", |p: &Pod| usage(p, Usage::memory_label))
+            .sort_by_key(|p: &PodRow| std::cmp::Reverse(p.usage.map(|u| u.cpu_millis))),
+        Column::amount("Memory", |p: &PodRow| usage(p, Usage::memory_label))
             .mono()
             .end()
             .fixed(MEMORY)
-            .sort_by_key(|p: &Pod| std::cmp::Reverse(p.usage.map(|u| u.memory_mib))),
-        Column::new("Age", |p: &Pod, palette| {
+            .sort_by_key(|p: &PodRow| std::cmp::Reverse(p.usage.map(|u| u.memory_mib))),
+        Column::new("Age", |p: &PodRow, palette| {
             text(flock_core::time::age(p.age), palette.mute)
         })
         .mono()
         .end()
         .fixed(AGE)
-        .sort_by_key(|p: &Pod| p.age),
+        .sort_by_key(|p: &PodRow| p.age),
     ]
 }
 
@@ -1185,7 +1214,7 @@ impl Render for PodsScreen {
         let inspector = self.panel_open.then(|| self.inspector(cx));
         let dock = self.dock_view(cx).into_any_element();
         let namespace = self.query.namespace.as_deref().map(|namespace| {
-            let inside = self.pods.iter().filter(|pod| {
+            let inside = self.snapshot.pods.iter().filter(|pod| {
                 Some(&pod.cluster) == self.cluster.as_ref() && pod.namespace == namespace
             });
             (namespace, inside.count())
@@ -1217,5 +1246,53 @@ impl Render for PodsScreen {
                 }),
             ))
             .child(dock)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PODS: usize = 3;
+
+    fn snapshot(cluster: &ClusterId) -> Arc<Snapshot> {
+        let pods = (0..PODS).map(|ix| Pod {
+            cluster: cluster.clone(),
+            namespace: "default".into(),
+            name: format!("web-{ix}"),
+            ..Pod::default()
+        });
+        Arc::new(Snapshot {
+            pods: pods.collect(),
+            ..Snapshot::default()
+        })
+    }
+
+    #[gpui::test]
+    fn a_snapshot_refreshes_the_table_once_with_its_context_and_shares_its_pods(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(|cx| {
+            crate::init(Some(crate::theme::Appearance::Dark), cx)
+                .unwrap_or_else(|error| panic!("UI init: {error}"));
+        });
+        let window = cx.add_window(PodsScreen::new);
+        let cluster = ClusterId::new("a");
+        let snapshot = snapshot(&cluster);
+        let shown = window.update(cx, |screen, _, cx| {
+            screen.set_snapshot(&snapshot);
+            screen.table.read(cx).row(0).is_some()
+        });
+        assert_eq!(shown.ok(), Some(false));
+        let shared = window.update(cx, |screen, _, cx| {
+            screen.set_context(Some(&cluster), None, &Preferences::default(), cx);
+            let table = screen.table.read(cx);
+            let rows: Vec<&PodRow> = (0..=PODS).map_while(|ix| table.row(ix)).collect();
+            let shares = |(ix, row): (usize, &&PodRow)| {
+                row.ix == ix && Arc::ptr_eq(&row.snapshot, &snapshot)
+            };
+            rows.len() == PODS && rows.iter().enumerate().all(shares)
+        });
+        assert_eq!(shared.ok(), Some(true));
     }
 }

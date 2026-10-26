@@ -1,4 +1,5 @@
 use std::hint::black_box;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use flock_core::{Backend, ClusterId, Command, NewCluster, Page, ResourceKind, Snapshot, Update};
@@ -141,7 +142,7 @@ async fn next_snapshot(
     loop {
         let received = tokio::time::timeout_at(until, updates.recv()).await;
         match received {
-            Ok(Ok(Update::Snapshot(snapshot))) => return Some(*snapshot),
+            Ok(Ok(Update::Snapshot(snapshot))) => return Some(Arc::unwrap_or_clone(snapshot)),
             Ok(Ok(_)) => {}
             Ok(Err(_)) => return None,
             Err(_) => return None,

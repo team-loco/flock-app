@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::app_settings::Refresh;
 use crate::crd::CrdKey;
@@ -103,7 +104,7 @@ pub enum Command {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Update {
-    Snapshot(Box<Snapshot>),
+    Snapshot(Arc<Snapshot>),
     Contexts(Vec<KubeconfigFile>),
     KubeconfigRejected(String),
     Check(ContextRef, CheckLine),
@@ -113,7 +114,7 @@ pub enum Update {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AppState {
-    pub snapshot: Snapshot,
+    pub snapshot: Arc<Snapshot>,
     pub sidebar_open: bool,
     panes: Panes,
     unconfirmed: BTreeMap<ClusterId, Preferences>,
@@ -122,7 +123,7 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            snapshot: Snapshot::default(),
+            snapshot: Arc::default(),
             sidebar_open: true,
             panes: Panes::default(),
             unconfirmed: BTreeMap::new(),
@@ -277,7 +278,11 @@ impl AppState {
     }
 
     pub fn set_preferences(&mut self, cluster: &ClusterId, preferences: &Preferences) {
-        if let Some(settings) = self.snapshot.catalog.get_mut(cluster) {
+        if self.snapshot.catalog.get(cluster).is_none() {
+            return;
+        }
+        let snapshot = Arc::make_mut(&mut self.snapshot);
+        if let Some(settings) = snapshot.catalog.get_mut(cluster) {
             settings.preferences.clone_from(preferences);
             self.unconfirmed
                 .insert(cluster.clone(), preferences.clone());
@@ -285,23 +290,27 @@ impl AppState {
     }
 
     fn keep_unconfirmed_preferences(&mut self) {
-        let catalog = &mut self.snapshot.catalog;
+        let catalog = &self.snapshot.catalog;
         self.unconfirmed.retain(|cluster, preferences| {
-            let Some(settings) = catalog.get_mut(cluster) else {
-                return false;
-            };
-            if &settings.preferences == preferences {
-                return false;
-            }
-            settings.preferences.clone_from(preferences);
-            true
+            catalog
+                .get(cluster)
+                .is_some_and(|settings| &settings.preferences != preferences)
         });
+        if self.unconfirmed.is_empty() {
+            return;
+        }
+        let catalog = &mut Arc::make_mut(&mut self.snapshot).catalog;
+        for (cluster, preferences) in &self.unconfirmed {
+            if let Some(settings) = catalog.get_mut(cluster) {
+                settings.preferences.clone_from(preferences);
+            }
+        }
     }
 
     pub fn update(&mut self, update: Update) {
         match update {
             Update::Snapshot(snapshot) => {
-                let previous = std::mem::replace(&mut self.snapshot, *snapshot);
+                let previous = std::mem::replace(&mut self.snapshot, snapshot);
                 self.keep_unconfirmed_preferences();
                 for tab in self.panes.tabs_mut() {
                     let location = tab.location_mut();
@@ -313,7 +322,7 @@ impl AppState {
                         location.flux_object = None;
                     }
                 }
-                self.snapshot.keep_loaded(previous);
+                Snapshot::keep_loaded(&mut self.snapshot, &previous);
             }
             Update::Contexts(_) => {}
             Update::KubeconfigRejected(_) => {}
@@ -543,7 +552,7 @@ mod tests {
 
     fn loaded() -> AppState {
         let mut state = AppState::default();
-        state.update(Update::Snapshot(Box::new(sample())));
+        state.update(Update::Snapshot(Arc::new(sample())));
         state
     }
 
@@ -564,7 +573,7 @@ mod tests {
         destination.apply(&Command::OpenResource(deployment("b")));
         assert_eq!(source, before);
         assert_eq!(destination.location().resource, Some(deployment("b")));
-        destination.update(Update::Snapshot(Box::default()));
+        destination.update(Update::Snapshot(Arc::default()));
         assert_eq!(destination.location().resource, Some(deployment("b")));
         assert!(!destination.cluster_available());
         assert_eq!(source, before);
@@ -583,7 +592,7 @@ mod tests {
         }
         assert_eq!(destination.location().flux_object, Some(key));
         assert_eq!(source, before);
-        destination.update(Update::Snapshot(Box::new(sample())));
+        destination.update(Update::Snapshot(Arc::new(sample())));
         assert_eq!(destination.location().flux_object, None);
         assert_eq!(source, before);
     }
@@ -901,7 +910,7 @@ mod tests {
             snapshot.crds.insert(ClusterId::new(*cluster), vec![crd]);
         }
         let mut state = AppState::default();
-        state.update(Update::Snapshot(Box::new(snapshot)));
+        state.update(Update::Snapshot(Arc::new(snapshot)));
         (state, key)
     }
 
@@ -1007,7 +1016,7 @@ mod tests {
         let key = object.key.clone();
         snapshot.flux = vec![object];
         let mut state = AppState::default();
-        state.update(Update::Snapshot(Box::new(snapshot)));
+        state.update(Update::Snapshot(Arc::new(snapshot)));
         (state, key)
     }
 
@@ -1054,7 +1063,7 @@ mod tests {
     fn flux_object_selection_clears_when_it_disappears() {
         let (mut state, key) = with_flux();
         state.apply(&Command::OpenFluxObject(key));
-        state.update(Update::Snapshot(Box::new(sample())));
+        state.update(Update::Snapshot(Arc::new(sample())));
         assert_eq!(state.location().flux_object, None);
         assert_eq!(state.location().page, Page::Kustomizations);
     }
@@ -1078,11 +1087,11 @@ mod tests {
         state.apply(&Command::SelectCluster(Some(ClusterId::new("a"))));
         state.apply(&Command::SelectPage(Page::Nodes));
         assert!(state.cluster_available());
-        state.update(Update::Snapshot(Box::default()));
+        state.update(Update::Snapshot(Arc::default()));
         assert_eq!(state.location().cluster, Some(ClusterId::new("a")));
         assert_eq!(state.location().page, Page::Nodes);
         assert!(!state.cluster_available());
-        state.update(Update::Snapshot(Box::new(sample())));
+        state.update(Update::Snapshot(Arc::new(sample())));
         assert!(state.cluster_available());
     }
 
@@ -1177,7 +1186,7 @@ mod tests {
         let mut snapshot = sample();
         snapshot.resources = vec![summary(deployment("a")), summary(deployment("b"))];
         let mut state = AppState::default();
-        state.update(Update::Snapshot(Box::new(snapshot)));
+        state.update(Update::Snapshot(Arc::new(snapshot)));
         state.apply(&Command::SelectCluster(Some(ClusterId::new("a"))));
         state.apply(&Command::SelectPage(Page::Events));
         state.retarget(Some(&ClusterId::new("b")));
@@ -1238,10 +1247,10 @@ mod tests {
         };
         let mut state = AppState::default();
         state.restore(&saved);
-        state.update(Update::Snapshot(Box::default()));
+        state.update(Update::Snapshot(Arc::default()));
         assert_eq!(state.location(), &flux);
         assert!(!state.cluster_available());
-        state.update(Update::Snapshot(Box::new(sample())));
+        state.update(Update::Snapshot(Arc::new(sample())));
         assert_eq!(state.location(), &flux);
         assert_eq!(state.panes().saved(), saved);
     }
@@ -1282,18 +1291,18 @@ mod tests {
     fn local_preferences_outlive_snapshots_until_the_backend_confirms_them() {
         let mut state = AppState::default();
         let old = Preferences::default();
-        state.update(Update::Snapshot(Box::new(with_preferences(old.clone()))));
+        state.update(Update::Snapshot(Arc::new(with_preferences(old.clone()))));
         let first = scoped("Pod", "payments");
         let newest = scoped("Pod", "billing");
         state.set_preferences(&ClusterId::new("a"), &first);
         state.set_preferences(&ClusterId::new("a"), &newest);
         assert_eq!(preferences_of(&state), Some(newest.clone()));
-        state.update(Update::Snapshot(Box::new(with_preferences(old.clone()))));
+        state.update(Update::Snapshot(Arc::new(with_preferences(old.clone()))));
         assert_eq!(preferences_of(&state), Some(newest.clone()));
-        state.update(Update::Snapshot(Box::new(with_preferences(first))));
+        state.update(Update::Snapshot(Arc::new(with_preferences(first))));
         assert_eq!(preferences_of(&state), Some(newest.clone()));
-        state.update(Update::Snapshot(Box::new(with_preferences(newest))));
-        state.update(Update::Snapshot(Box::new(with_preferences(old.clone()))));
+        state.update(Update::Snapshot(Arc::new(with_preferences(newest))));
+        state.update(Update::Snapshot(Arc::new(with_preferences(old.clone()))));
         assert_eq!(preferences_of(&state), Some(old));
     }
 }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use flock_core::palette::{COMPARE_KEY, Hit, LOGS_KEY, OWNER_KEY, Results, Section, search};
 use flock_core::{ClusterId, Command, Snapshot};
 use gpui::{
@@ -44,7 +46,7 @@ pub enum PaletteEvent {
 
 pub struct CommandPalette {
     input: Entity<TextFieldState>,
-    snapshot: Snapshot,
+    snapshot: Arc<Snapshot>,
     current: Option<ClusterId>,
     results: Results,
     selected: Option<usize>,
@@ -70,7 +72,7 @@ impl CommandPalette {
         });
         Self {
             input,
-            snapshot: Snapshot::default(),
+            snapshot: Arc::default(),
             current: None,
             results: Results::default(),
             selected: None,
@@ -88,11 +90,11 @@ impl CommandPalette {
 
     pub fn set_context(
         &mut self,
-        snapshot: &Snapshot,
+        snapshot: &Arc<Snapshot>,
         current: Option<&ClusterId>,
         cx: &mut Context<Self>,
     ) {
-        self.snapshot = snapshot.clone();
+        self.snapshot = Arc::clone(snapshot);
         self.current = current.cloned();
         if self.phase != Phase::Closed {
             self.refresh(cx);

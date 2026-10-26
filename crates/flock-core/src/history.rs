@@ -505,7 +505,7 @@ mod tests {
             "Logs · cart · a"
         );
         let mut state = crate::AppState::default();
-        state.update(crate::Update::Snapshot(Box::new(
+        state.update(crate::Update::Snapshot(std::sync::Arc::new(
             crate::flock::tests::sample(),
         )));
         for command in nodes.commands() {

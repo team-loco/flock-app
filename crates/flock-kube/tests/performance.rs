@@ -1,4 +1,5 @@
 use std::hint::black_box;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use flock_core::{Backend, ClusterId, Command, NewCluster, Page, ResourceKind};
@@ -122,7 +123,7 @@ async fn visible(
         if let flock_core::Update::Snapshot(snapshot) = update
             && predicate(&snapshot)
         {
-            return *snapshot;
+            return Arc::unwrap_or_clone(snapshot);
         }
     }
 }

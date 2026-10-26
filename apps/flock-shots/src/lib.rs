@@ -73,7 +73,7 @@ fn scripted() -> anyhow::Result<(Feed, Sender<Update>)> {
     let (update_tx, update_rx) = async_channel::unbounded();
     let (command_tx, command_rx) = async_channel::unbounded::<Command>();
     std::thread::spawn(move || while command_rx.recv_blocking().is_ok() {});
-    let first = Update::Snapshot(Box::new(flock_demo::snapshot()));
+    let first = Update::Snapshot(Arc::new(flock_demo::snapshot()));
     update_tx
         .try_send(first)
         .map_err(|error| anyhow!("scripting the first snapshot: {error}"))?;

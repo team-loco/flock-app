@@ -1823,7 +1823,8 @@ fn live_flux_events_stream_from_every_cluster_and_open_their_object() -> anyhow:
         .status();
     let _ = std::fs::remove_file(&manifest);
     arrived.context("a new Flux event did not stream in above every older event")?;
-    let rows = ui.state().snapshot.flux_events;
+    let state = ui.state();
+    let rows = &state.snapshot.flux_events;
     let newest = rows.first().map(|row| row.event.age);
     let oldest = rows.last().map(|row| row.event.age);
     anyhow::ensure!(newest <= oldest, "events are not newest first");

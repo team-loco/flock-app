@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use flock_core::{Backend, NewCluster, Snapshot, Update};
@@ -105,7 +106,7 @@ async fn live_backend_connects_both_kind_clusters_and_shows_the_scenarios() -> R
             if connected == CLUSTERS.len() && missing_problems(&snapshot).is_empty() {
                 return Ok(());
             }
-            last = *snapshot;
+            last = Arc::unwrap_or_clone(snapshot);
         }
     }
 }
