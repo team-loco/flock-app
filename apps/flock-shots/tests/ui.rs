@@ -488,6 +488,7 @@ const DEPLOYMENTS: &str = "resources-Deployment";
 const SAMPLE: &str = "prod-us-east";
 const DRAG: f32 = 80.;
 const ROWS_UNDER_POPOVER: usize = 8;
+const GRAPH_PAN: f32 = 4000.;
 const AVAILABLE: usize = 4;
 const POD_ROWS: usize = 12;
 const INSPECTOR_SCROLL: f32 = 400.;
@@ -4598,6 +4599,25 @@ fn graph_edges_restyle_on_selection_and_return_when_cleared() -> anyhow::Result<
     let cleared = graph_png(&ui, dir.path(), "cleared")?;
     assert_ne!(plain, selected);
     assert_eq!(plain, cleared);
+    Ok(())
+}
+
+#[test]
+fn graph_nodes_hover_and_open_after_a_pan_out_and_back() -> anyhow::Result<()> {
+    use gpui::{point, px};
+    let dir = tempfile::tempdir()?;
+    let mut ui = Ui::open(Screen::FluxGraph)?;
+    let plain = graph_png(&ui, dir.path(), "plain")?;
+    ui.scroll("flux-graph", point(px(-GRAPH_PAN), px(-GRAPH_PAN)))?;
+    ui.scroll("flux-graph", point(px(GRAPH_PAN), px(GRAPH_PAN)))?;
+    ui.hover("flux-graph-node-0")?;
+    let hovered = graph_png(&ui, dir.path(), "hovered")?;
+    assert_ne!(plain, hovered);
+    ui.click("flux-graph-node-0")?;
+    assert_eq!(
+        opened_flux(&ui),
+        Some((flock_core::FluxKind::Kustomization, "apps-ml".into()))
+    );
     Ok(())
 }
 
