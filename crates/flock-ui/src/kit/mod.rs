@@ -18,6 +18,7 @@ mod message;
 mod modal;
 mod navigation;
 mod overlay;
+mod pane;
 mod panel;
 mod popover;
 mod presence;
@@ -62,6 +63,7 @@ pub use overlay::{
     ConfirmDialog, Overlays, Toast, confirm, layer as overlay_layer, toast, toast_details,
     toast_statuses, toast_titles,
 };
+pub use pane::pane;
 pub use panel::{
     EVENTS_EMPTY, ErrorBlock, ErrorBlocks, EventList, EventRow, LabelChips, PanelHeader,
     PanelSection, YamlRow, events_count, events_empty, issue_stack, section_id,

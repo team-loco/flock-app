@@ -13,8 +13,8 @@ use gpui::{
     Div, ElementId, Entity, EventEmitter, FocusHandle, Focusable, HighlightStyle, Hsla,
     InteractiveElement, IntoElement, KeyDownEvent, ListSizingBehavior, MouseButton, MouseDownEvent,
     MouseMoveEvent, ParentElement, Pixels, Point, Render, ScrollStrategy, SharedString,
-    StatefulInteractiveElement, Styled, Task, TextRun, UniformListScrollHandle, Window, div,
-    ease_in_out, prelude::FluentBuilder, uniform_list,
+    StatefulInteractiveElement, StyleRefinement, Styled, Task, TextRun, UniformListScrollHandle,
+    ViewElement, Window, div, ease_in_out, prelude::FluentBuilder, uniform_list,
 };
 
 use super::button::IconButton;
@@ -556,13 +556,8 @@ impl<R: 'static> Table<R> {
         self
     }
 
-    pub fn set_row_actions(
-        &mut self,
-        actions: impl Fn(&R, &[&R]) -> Vec<MenuItem> + 'static,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn set_row_actions(&mut self, actions: impl Fn(&R, &[&R]) -> Vec<MenuItem> + 'static) {
         self.actions = Some(Rc::new(actions));
-        cx.notify();
     }
 
     pub fn set_scope(&mut self, scope: impl Into<SharedString>, cx: &mut Context<Self>) {
@@ -898,6 +893,25 @@ impl<R: 'static> Table<R> {
         self
     }
 
+    pub fn pane(view: &Entity<Self>, cx: &App) -> ViewElement<Entity<Self>> {
+        let table = view.read(cx);
+        if !table.fit {
+            return super::pane(view);
+        }
+        let style = StyleRefinement::default().w_full().h(table.fit_height());
+        view.clone().cached(style)
+    }
+
+    fn fit_height(&self) -> Pixels {
+        let header = match self.header {
+            Header::Hidden => Pixels::ZERO,
+            Header::Sans => ROW_TABLE_MIN,
+            Header::Mono => ROW_TABLE_MIN,
+        };
+        let rows = u16::try_from(self.rows.len().max(1)).unwrap_or(u16::MAX);
+        header + self.row_height * f32::from(rows)
+    }
+
     pub fn min_width(&self) -> Pixels {
         let widths = self.columns.iter().map(|c| self.width_of(c));
         min_row_width(widths, self.column_gap, self.inset + TRAILING)
@@ -912,7 +926,11 @@ impl<R: 'static> Table<R> {
     }
 
     pub fn select(&mut self, index: Option<usize>, cx: &mut Context<Self>) {
-        self.selected = index.filter(|&ix| ix < self.rows.len());
+        let index = index.filter(|&ix| ix < self.rows.len());
+        if index == self.selected {
+            return;
+        }
+        self.selected = index;
         if let Some(position) = self.position_of(self.selected) {
             self.scroll.scroll_to_item(position, ScrollStrategy::Center);
         }
@@ -1526,6 +1544,42 @@ mod tests {
         cx.executor().advance_clock(FLASH);
         cx.run_until_parked();
         assert!(table.read_with(cx, |table, _| table.flashes.is_empty()));
+    }
+
+    #[gpui::test]
+    fn the_table_notifies_only_when_what_it_shows_changes(cx: &mut gpui::TestAppContext) {
+        let table = cx.new(|cx| Table::new("quiet", Vec::new(), cx).rows(vec!["a", "b"]));
+        let notified = Rc::new(std::cell::Cell::new(0));
+        let count = Rc::clone(&notified);
+        let _observer = cx.update(|cx| cx.observe(&table, move |_, _| count.set(count.get() + 1)));
+        table.update(cx, |table, cx| table.select(None, cx));
+        table.update(cx, |table, cx| table.set_highlight(Vec::new(), cx));
+        table.update(cx, |table, cx| table.hover_row(0, false, cx));
+        table.update(cx, |table, _| table.set_row_actions(|_, _| Vec::new()));
+        assert_eq!(notified.get(), 0);
+        table.update(cx, |table, cx| table.select(Some(1), cx));
+        table.update(cx, |table, cx| table.select(Some(1), cx));
+        assert_eq!(notified.get(), 1);
+        table.update(cx, |table, cx| table.hover_row(0, true, cx));
+        assert_eq!(notified.get(), 2);
+    }
+
+    #[gpui::test]
+    fn a_fitted_table_is_as_tall_as_its_header_and_rows(cx: &mut gpui::TestAppContext) {
+        let fitted = cx.new(|cx| {
+            Table::new("fitted", Vec::new(), cx)
+                .fit_content()
+                .rows(vec!["a", "b", "c"])
+        });
+        let height = fitted.read_with(cx, |table, _| table.fit_height());
+        assert_eq!(height, ROW_TABLE_MIN + ROW_TABLE * 3.);
+        let empty = cx.new(|cx| {
+            Table::<&str>::new("empty", Vec::new(), cx)
+                .fit_content()
+                .headerless()
+        });
+        let height = empty.read_with(cx, |table, _| table.fit_height());
+        assert_eq!(height, ROW_TABLE);
     }
 
     fn marked_names(table: &Table<&'static str>) -> Vec<&'static str> {

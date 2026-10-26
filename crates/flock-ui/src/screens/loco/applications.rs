@@ -291,7 +291,7 @@ impl ApplicationsScreen {
             .collect();
         let objects = PanelSection::new(DETAIL_ID, CREATED_BY)
             .count(app.objects.len().to_string())
-            .child(self.objects.clone());
+            .child(Table::pane(&self.objects, cx));
         div()
             .id("loco-app-detail")
             .flex()
@@ -362,7 +362,7 @@ impl Render for ApplicationsScreen {
         };
         let rows: AnyElement = match empty_list(&shape, &self.filter, None, cx) {
             Some(empty) => empty.into_any_element(),
-            None => self.list.clone().into_any_element(),
+            None => Table::pane(&self.list, cx).into_any_element(),
         };
         let list = div()
             .flex()

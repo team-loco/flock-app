@@ -1,9 +1,8 @@
-use crate::kit::{SelectableText, Tooltip};
+use crate::kit::Tooltip;
 mod dock;
+mod inspector;
 
 pub(crate) use dock::kit_line;
-
-use std::rc::Rc;
 
 use flock_core::palette::COMPARE_KEY;
 use flock_core::related::Related;
@@ -11,7 +10,7 @@ use flock_core::watch::WATCH_SYNC_TIMEOUT;
 use flock_core::workload::{ContainerSpec, EnvVar, Pod, Revision, short_image, short_pod_name};
 use flock_core::{Command, Condition, LogTarget, ResourceRef, Seen, Sink, Status, Workload};
 use gpui::{
-    AnyElement, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, div,
     prelude::FluentBuilder, px,
@@ -20,18 +19,18 @@ use gpui::{
 use crate::kit::status_symbols;
 use crate::kit::{
     ActionMenu, Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, DockState,
-    EVENTS, EmptyState, Entrance, ErrorBlocks, ErrorState, EventList, FILTER_PLACEHOLDER,
-    InspectorPane, KeyValue, Link, LogView, MenuItem, PageHeader, PanelSection, Rule,
-    SectionHeader, SectionLabel, Segmented, SelectableWords, Skeleton, Table, TableEvent, Terminal,
-    TextFieldState, Toast, Width, YamlRow, confirm, issue_stack, min_row_width, slide_in, toast,
+    EmptyState, Entrance, ErrorState, FILTER_PLACEHOLDER, InspectorPane, Link, LogView, MenuItem,
+    PageHeader, PanelSection, Rule, SectionHeader, SectionLabel, SelectableWords, Skeleton, Table,
+    TableEvent, Terminal, TextFieldState, Toast, Width, confirm, issue_stack, min_row_width, pane,
+    slide_in, toast,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
-use crate::screens::related::{OnPick, Pick, RELATED, inspector_section, related_count};
 use crate::screens::{EDIT_YAML, FullView, edit_item, full_view_link};
 use crate::theme::{
     ActiveTheme, FIELD_LABEL, FONT_MONO, Palette, ROW_TABLE, RULE, SECTION_HEADER, SPACE_1,
     SPACE_3, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_GLYPH, TEXT_MONO, TEXT_SMALL,
 };
+use inspector::{Shown, WorkloadInspector};
 
 pub const KEY_CONTEXT: &str = "Workload";
 
@@ -114,6 +113,7 @@ pub struct WorkloadScreen {
     exec: Option<dock::ExecSession>,
     yaml: Option<String>,
     related: Option<Related>,
+    inspector: Entity<WorkloadInspector>,
     showing_yaml: bool,
     entrance: Entrance,
     focus: FocusHandle,
@@ -142,7 +142,7 @@ impl WorkloadScreen {
         true
     }
 
-    pub fn list_focus(&self, cx: &gpui::App) -> FocusHandle {
+    pub fn list_focus(&self, cx: &App) -> FocusHandle {
         Focusable::focus_handle(&self.pods, cx)
     }
 
@@ -182,6 +182,8 @@ impl WorkloadScreen {
         subscriptions.extend(dock::subscribe(&dock, &filter, &terminal, cx));
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
+        let screen = cx.weak_entity();
+        let inspector = cx.new(|_| WorkloadInspector::new(screen));
         Self {
             navigation: None,
             cluster_name: target.cluster.to_string(),
@@ -201,6 +203,7 @@ impl WorkloadScreen {
             exec: None,
             yaml: None,
             related: None,
+            inspector,
             showing_yaml: false,
             entrance: Entrance::default(),
             focus,
@@ -266,7 +269,7 @@ impl WorkloadScreen {
             .child(Rule::horizontal())
             .child(SectionHeader::new(PODS))
             .child(Rule::horizontal())
-            .child(self.compact_pods.clone())
+            .child(Table::pane(&self.compact_pods, cx))
             .into_any_element()
     }
 
@@ -280,23 +283,8 @@ impl WorkloadScreen {
     pub fn set_related(&mut self, related: Option<&Related>, cx: &mut Context<Self>) {
         if related.is_some() && self.related.as_ref() != related {
             self.related = related.cloned();
+            self.sync_inspector(cx);
             cx.notify();
-        }
-    }
-
-    fn related_section(&self, cx: &mut Context<Self>) -> PanelSection {
-        let screen = cx.weak_entity();
-        let pick: OnPick = Rc::new(move |pick, _, cx| {
-            if let Pick::Object(target) = pick {
-                let _ = screen.update(cx, |_, cx| cx.emit(Command::OpenResource(target)));
-            }
-        });
-        let section = PanelSection::new(INSPECTOR_ID, RELATED).closed();
-        match &self.related {
-            Some(related) => section
-                .count(related_count(related).to_string())
-                .child(inspector_section(Some(related), &pick, cx)),
-            None => section.pending(),
         }
     }
 
@@ -365,6 +353,7 @@ impl WorkloadScreen {
             self.reset_dock(cx);
             self.pod = pod;
         }
+        self.sync_inspector(cx);
         cx.notify();
     }
 
@@ -373,6 +362,7 @@ impl WorkloadScreen {
             self.reset_dock(cx);
             self.pod = Some(name);
         }
+        self.sync_inspector(cx);
         cx.notify();
     }
 
@@ -384,7 +374,22 @@ impl WorkloadScreen {
                 self.follow_logs(cx);
             }
         }
+        self.sync_inspector(cx);
         cx.notify();
+    }
+
+    fn sync_inspector(&mut self, cx: &mut Context<Self>) {
+        let Some(workload) = self.workload.clone() else {
+            return;
+        };
+        let shown = Shown {
+            pod: self.selected_pod().cloned(),
+            workload,
+            container: self.container,
+            related: self.related.clone(),
+        };
+        self.inspector
+            .update(cx, |inspector, cx| inspector.show(shown, cx));
     }
 
     fn selected_pod(&self) -> Option<&Pod> {
@@ -492,14 +497,14 @@ impl WorkloadScreen {
         div().flex().whitespace_nowrap().child(lead).children(link)
     }
 
-    fn pods_section(&self, workload: &Workload) -> impl IntoElement {
+    fn pods_section(&self, workload: &Workload, cx: &App) -> impl IntoElement {
         let count = workload.pods.len().to_string();
         div()
             .flex()
             .flex_col()
             .child(SectionHeader::new(PODS).count(count))
             .child(Rule::horizontal())
-            .child(self.pods.clone())
+            .child(Table::pane(&self.pods, cx))
     }
 
     fn history(workload: &Workload, cx: &mut Context<Self>) -> impl IntoElement {
@@ -637,113 +642,6 @@ impl WorkloadScreen {
         InspectorPane::new(INSPECTOR_ID, content)
             .width(YAML_INSPECTOR_WIDTH)
             .into_any_element()
-    }
-
-    fn inspector(&self, workload: &Workload, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        let palette = *cx.palette();
-        let names: Vec<String> = workload.containers.iter().map(|c| c.name.clone()).collect();
-        let segmented = names.into_iter().fold(
-            Segmented::new("containers")
-                .small()
-                .mono()
-                .selected(self.container),
-            Segmented::option,
-        );
-        let segmented = segmented.on_select(cx.listener(|this, ix: &usize, _, cx| {
-            this.select_container(*ix, cx);
-        }));
-        let header = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .h(SECTION_HEADER)
-            .px(SPACE_6)
-            .border_b(RULE)
-            .border_color(palette.line)
-            .child(div().flex_1().child(SectionLabel::new(CONTAINER)))
-            .child(segmented);
-        let spec = self
-            .selected_container()
-            .map(|spec| self.spec(spec, &palette));
-        let env = self
-            .selected_container()
-            .map(|spec| env_section(&spec.env, &palette));
-        let related = self.related_section(cx);
-        let screen = cx.weak_entity();
-        let events = PanelSection::new(INSPECTOR_ID, EVENTS)
-            .count(workload.events.len().to_string())
-            .child(EventList::new(workload.events.clone()));
-        let content = div()
-            .id("inspector")
-            .flex()
-            .flex_col()
-            .flex_none()
-            .w_full()
-            .h_full()
-            .overflow_y_scroll()
-            .border_l(RULE)
-            .border_color(palette.line)
-            .bg(palette.panel)
-            .text_size(TEXT_BODY)
-            .child(ErrorBlocks::new(workload.issues()))
-            .child(conditions_section(&workload.conditions, &palette))
-            .child(header)
-            .children(spec)
-            .children(env)
-            .child(related)
-            .child(events)
-            .child(YamlRow::new(INSPECTOR_ID, move |_, cx| {
-                screen.update(cx, WorkloadScreen::toggle_yaml).ok();
-            }));
-        InspectorPane::new(INSPECTOR_ID, content).width(INSPECTOR_WIDTH)
-    }
-
-    fn spec(&self, spec: &ContainerSpec, palette: &Palette) -> PanelSection {
-        let ports: Vec<String> = spec
-            .ports
-            .iter()
-            .map(flock_core::workload::Port::label)
-            .collect();
-        let last_exit = self
-            .selected_pod()
-            .and_then(|pod| pod.container(&spec.name))
-            .and_then(|status| status.last_exit.as_ref())
-            .map(flock_core::workload::Exit::label);
-        let readiness = spec
-            .readiness
-            .as_ref()
-            .map(flock_core::workload::Probe::label);
-        let mut grid = KeyValue::new()
-            .text("image", spec.image.clone())
-            .text("ports", ports.join(", "))
-            .row(
-                "requests",
-                with_written(
-                    format!("spec-requests-{}", spec.name),
-                    Some(spec.requests.written()),
-                    div().child(SelectableText::new(spec.requests.label())),
-                ),
-            )
-            .row(
-                "limits",
-                with_written(
-                    format!("spec-limits-{}", spec.name),
-                    Some(spec.limits.written()),
-                    div().child(SelectableText::new(spec.limits.label())),
-                ),
-            );
-        if let Some(readiness) = readiness {
-            grid = grid.text("readiness", readiness);
-        }
-        if let Some(exit) = last_exit {
-            grid = grid.row(
-                "last exit",
-                div()
-                    .text_color(palette.err)
-                    .child(SelectableText::new(exit)),
-            );
-        }
-        PanelSection::new(INSPECTOR_ID, SPEC).child(grid)
     }
 }
 
@@ -973,7 +871,7 @@ fn pod_columns() -> Vec<Column<Pod>> {
 fn restart_handler(
     this: WeakEntity<WorkloadScreen>,
     workload: &Workload,
-) -> impl Fn(&mut Window, &mut gpui::App) + 'static {
+) -> impl Fn(&mut Window, &mut App) + 'static {
     let target = Seen::new(workload.target.clone(), workload.uid.clone());
     let detail = detail_line(workload);
     move |window, cx| {
@@ -991,7 +889,7 @@ fn restart_handler(
 fn scale_handler(
     this: WeakEntity<WorkloadScreen>,
     workload: &Workload,
-) -> impl Fn(&mut Window, &mut gpui::App) + 'static {
+) -> impl Fn(&mut Window, &mut App) + 'static {
     let target = Seen::new(workload.target.clone(), workload.uid.clone());
     let detail = detail_line(workload);
     let desired = workload.desired.to_string();
@@ -1027,7 +925,7 @@ fn rollback_handler(
     this: WeakEntity<WorkloadScreen>,
     workload: &Workload,
     revision: &Revision,
-) -> impl Fn(&mut Window, &mut gpui::App) + 'static {
+) -> impl Fn(&mut Window, &mut App) + 'static {
     let target = Seen::new(workload.target.clone(), workload.uid.clone());
     let number = revision.number;
     let title = format!("Roll back to revision {number}");
@@ -1067,7 +965,7 @@ pub fn logs_tab_label(pod: &str, container: &str) -> String {
 }
 
 impl Focusable for WorkloadScreen {
-    fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
 }
@@ -1125,7 +1023,7 @@ impl Render for WorkloadScreen {
             .h_full()
             .overflow_y_scroll()
             .child(self.header(&workload, cx))
-            .child(self.pods_section(&workload))
+            .child(self.pods_section(&workload, cx))
             .child(Self::history(&workload, cx));
         let shown = if self.showing_yaml {
             YAML_LABEL
@@ -1137,7 +1035,8 @@ impl Render for WorkloadScreen {
             let panel = self.yaml_inspector(&palette, cx);
             slide_in(panel, INSPECTOR_ID, motion, YAML_INSPECTOR_WIDTH)
         } else {
-            let panel = self.inspector(&workload, cx);
+            let panel =
+                InspectorPane::new(INSPECTOR_ID, pane(&self.inspector)).width(INSPECTOR_WIDTH);
             slide_in(panel, INSPECTOR_ID, motion, INSPECTOR_WIDTH)
         };
         let dock = self.render_dock(&workload, cx);

@@ -200,7 +200,7 @@ impl Render for GitOpsScreen {
             .pb(SPACE_8)
             .child(self.filter.clone())
             .child(SectionHeader::new("Sources").count(SOURCES_NOTE))
-            .child(ruled(self.sources.clone(), &palette))
+            .child(ruled(Table::pane(&self.sources, cx), &palette))
             .child(
                 div()
                     .pt(SPACE_2)
@@ -208,7 +208,7 @@ impl Render for GitOpsScreen {
             )
             .child(matrix)
             .child(div().pt(SPACE_2).child(SectionHeader::new("Controllers")))
-            .child(ruled(self.installs.clone(), &palette))
+            .child(ruled(Table::pane(&self.installs, cx), &palette))
     }
 }
 

@@ -307,7 +307,7 @@ impl Render for EventsScreen {
         });
         let body: AnyElement = match empty_list(&shape, &self.filter, Some(show_all), cx) {
             Some(empty) => empty.into_any_element(),
-            None => self.table.clone().into_any_element(),
+            None => Table::pane(&self.table, cx).into_any_element(),
         };
         let mut presence = std::mem::take(&mut self.presence);
         let inspector = slot(

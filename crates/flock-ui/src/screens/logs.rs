@@ -6,7 +6,7 @@ use gpui::{
 
 use crate::kit::{
     ActionMenu, FILTER_PLACEHOLDER, InputEvent, LogView, MetaLine, PageHeader, TextField,
-    TextFieldState, drain,
+    TextFieldState, drain, pane,
 };
 use crate::screens::workload::kit_line;
 use crate::theme::{ActiveTheme, RULE, SPACE_3, SPACE_4, SPACE_8};
@@ -118,7 +118,7 @@ impl Render for LogsScreen {
                     crate::kit::PageTitle::new(self.pod.name.clone())
                         .leading(self.navigation.clone()),
                 )
-                .child(div().flex_1().min_h_0().child(LogView::pane(&self.logs)));
+                .child(div().flex_1().min_h_0().child(pane(&self.logs)));
         }
         let facts = [
             self.container.as_str(),
@@ -147,6 +147,6 @@ impl Render for LogsScreen {
                     .border_color(palette.line)
                     .child(self.tools(cx)),
             )
-            .child(div().flex_1().min_h_0().child(LogView::pane(&self.logs)))
+            .child(div().flex_1().min_h_0().child(pane(&self.logs)))
     }
 }

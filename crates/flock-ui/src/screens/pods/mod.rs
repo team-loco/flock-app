@@ -18,7 +18,7 @@ use flock_core::{
 };
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
-    Render, SharedString, StyleRefinement, Styled, Subscription, WeakEntity, Window, div, px,
+    Render, SharedString, Styled, Subscription, WeakEntity, Window, div, px,
 };
 
 mod inspector;
@@ -33,6 +33,7 @@ use crate::kit::{
     ActionMenu, Column, ConfirmDialog, DockState, FILTER_PLACEHOLDER, FilterBar, FilterEvent,
     InputEvent, InspectorPane, Link, LogView, MenuItem, Select, SelectEvent, ShowAll, SnapshotRow,
     SnapshotRows, StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label, confirm,
+    pane,
 };
 use crate::screens::{
     ALL_NAMESPACES, ListShape, chosen_namespace, edit_item, empty_list, new_tab_item,
@@ -426,12 +427,9 @@ impl PodsScreen {
                 table.set_scope(scope, cx);
             }
             table.set_highlight(words, cx);
-            table.set_row_actions(
-                move |pod: &PodRow, marked: &[&PodRow]| {
-                    menu_items(pod, &screen, logs_target(marked, selector.as_ref()))
-                },
-                cx,
-            );
+            table.set_row_actions(move |pod: &PodRow, marked: &[&PodRow]| {
+                menu_items(pod, &screen, logs_target(marked, selector.as_ref()))
+            });
             table.set_rows(rows, cx);
             table.select(position, cx);
         });
@@ -823,11 +821,7 @@ impl Render for PodsScreen {
             self.search
                 .update(cx, |field, cx| field.set_value("", window, cx));
         }
-        let inspector = self.panel_open.then(|| {
-            self.inspector
-                .clone()
-                .cached(StyleRefinement::default().size_full())
-        });
+        let inspector = self.panel_open.then(|| pane(&self.inspector));
         let dock = self.dock_view(cx).into_any_element();
         let namespace = self.query.namespace.as_deref().map(|namespace| {
             let inside = self.snapshot.pods.iter().filter(|pod| {
@@ -848,7 +842,7 @@ impl Render for PodsScreen {
         });
         let list: AnyElement = match empty_list(&shape, &self.filter, Some(show_all), cx) {
             Some(empty) => empty.into_any_element(),
-            None => self.table.clone().into_any_element(),
+            None => Table::pane(&self.table, cx).into_any_element(),
         };
         let table = div().flex_1().min_w_0().h_full().child(list);
         div()

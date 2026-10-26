@@ -3,35 +3,35 @@ use std::sync::Arc;
 
 use flock_core::emptiness::Noun;
 use flock_core::events::Event;
-use flock_core::filter::{label_values, node_query};
+use flock_core::filter::label_values;
 use flock_core::node_pools::{kubelet_skewed, pressure};
 use flock_core::nodes::{Node, NodeFilter, NodePod, NodeSummary, Usage, pool_counts, request_line};
 use flock_core::overview::{Commitment, percent};
 use flock_core::pods::{POD_KIND, PodEvent};
 use flock_core::time::age;
-use flock_core::units::{Amount, CPU_UNIT, MEMORY_UNIT, NOT_MEASURED, amount, figure};
+use flock_core::units::{CPU_UNIT, MEMORY_UNIT, NOT_MEASURED, amount};
 use flock_core::{ClusterId, ClusterSummary, Command, Page, ResourceRef, Seen, Snapshot, Status};
 use gpui::{
     AnyElement, AppContext, Context, Entity, EventEmitter, Hsla, InteractiveElement, IntoElement,
     ParentElement, Pixels, Render, SharedString, Styled, WeakEntity, Window, div, px,
 };
 
+mod inspector;
 mod shell;
 
-use super::{ALL_LINK, NODE_KIND, ScreenEvent};
+use super::{NODE_KIND, ScreenEvent};
 use crate::kit::{
-    ActionMenu, Button, CONDITIONS, Column, ConditionTable, ConfirmDialog, DockState, FilterBar,
-    FilterEvent, Inspector, KeyValue, LabelChips, Link, MenuItem, Meter, MiniMeter, PanelSection,
-    Presence, Select, SelectEvent, SnapshotRow, SnapshotRows, Table, TableEvent, Terminal,
-    chip_label, confirm, slide_in, slide_out,
+    ActionMenu, Column, ConfirmDialog, DockState, FilterBar, FilterEvent, MenuItem, Meter,
+    MiniMeter, Presence, Select, SelectEvent, SnapshotRow, SnapshotRows, Table, TableEvent,
+    Terminal, chip_label, confirm, pane, slide_in, slide_out,
 };
-use crate::screens::edit::edit_command;
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR_NODE, Palette, SEARCH_WIDTH, SPACE_3, SPACE_4, SPACE_5,
-    SPACE_6, TEXT_BODY, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
+    SPACE_6, TEXT_BODY, TEXT_LABEL, TEXT_MONO,
 };
-use shell::{NodeShell, SHELL_LABEL, TERMINAL_ID, ask_shell};
+use inspector::{NodeInspector, Shown};
+use shell::{NodeShell, TERMINAL_ID, ask_shell};
 
 const VERSION_SEPARATOR: char = '-';
 const ALL_POOLS: &str = "All pools";
@@ -75,6 +75,7 @@ pub struct NodesScreen {
     filter: Entity<FilterBar>,
     pools: Entity<Select>,
     actions: Entity<ActionMenu>,
+    inspector: Entity<NodeInspector>,
     presence: Presence<Node>,
     shell: Option<NodeShell>,
     terminal: Entity<Terminal>,
@@ -152,6 +153,8 @@ impl NodesScreen {
         })
         .detach();
         let actions = cx.new(|cx| ActionMenu::new(ACTIONS_ID, cx));
+        let screen = cx.weak_entity();
+        let inspector = cx.new(|_| NodeInspector::new(screen, actions.clone()));
         let terminal = cx.new(|cx| Terminal::new(TERMINAL_ID, cx));
         let dock = cx.new(|_| DockState::collapsed());
         cx.observe(&dock, |this, dock, cx| {
@@ -174,6 +177,7 @@ impl NodesScreen {
             filter,
             pools,
             actions,
+            inspector,
             presence: Presence::default(),
             shell: None,
             terminal,
@@ -304,7 +308,7 @@ impl NodesScreen {
         let words = query.words;
         let actions = self.row_actions(cx);
         self.table.update(cx, |table, cx| {
-            table.set_row_actions(actions, cx);
+            table.set_row_actions(actions);
             if let Some(scope) = scope {
                 table.set_scope(scope, cx);
             }
@@ -313,6 +317,7 @@ impl NodesScreen {
         });
         self.select_in_table(cx);
         self.set_inspector_actions(cx);
+        self.sync_inspector(cx);
         cx.notify();
     }
 
@@ -324,6 +329,7 @@ impl NodesScreen {
         self.selected = Some(name);
         self.select_in_table(cx);
         self.set_inspector_actions(cx);
+        self.sync_inspector(cx);
         cx.notify();
     }
 
@@ -353,6 +359,7 @@ impl NodesScreen {
             Command::InspectResource(node_ref(cluster, name))
         });
         self.set_inspector_actions(cx);
+        self.sync_inspector(cx);
         cx.emit(ScreenEvent::Command(command));
         cx.notify();
     }
@@ -375,10 +382,26 @@ impl NodesScreen {
         detail.map_or(&[][..], |detail| detail.events.as_slice())
     }
 
-    fn skewed(&self, node: &Node) -> bool {
-        self.control_plane
+    fn sync_inspector(&mut self, cx: &mut Context<Self>) {
+        let Some(node) = self.selected_node() else {
+            return;
+        };
+        let skewed = self
+            .control_plane
             .as_deref()
-            .is_some_and(|server| kubelet_skewed(&node.version, server))
+            .is_some_and(|server| kubelet_skewed(&node.version, server));
+        let events = flock_core::diagnosis::about(self.events(), NODE_KIND, None, &node.name)
+            .into_iter()
+            .map(PodEvent::from)
+            .collect();
+        let shown = Shown {
+            node: node.clone(),
+            cluster: self.cluster.clone(),
+            skewed,
+            events,
+        };
+        self.inspector
+            .update(cx, |inspector, cx| inspector.show(shown, cx));
     }
 
     fn set_inspector_actions(&mut self, cx: &mut Context<Self>) {
@@ -416,147 +439,6 @@ impl NodesScreen {
             vec![open, actions.edit, actions.toggle, actions.drain]
         }
     }
-
-    fn inspector(&self, node: &Node, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let skewed = self.skewed(node);
-        let kubelet_color = if skewed { palette.warn } else { palette.fg };
-        let kubelet = div().text_color(kubelet_color).child(node.version.clone());
-        let details = KeyValue::new()
-            .label_width(INSPECTOR_LABEL)
-            .text("pool", node.pool().to_owned())
-            .text("instance", node.instance_type.clone())
-            .text("zone", node.zone.clone())
-            .text("internal IP", node.internal_ip.clone())
-            .row("kubelet", kubelet)
-            .text("OS image", node.os_image.clone())
-            .text("runtime", node.runtime.clone())
-            .text("age", age(node.age));
-        let events: Vec<PodEvent> =
-            flock_core::diagnosis::about(self.events(), NODE_KIND, None, &node.name)
-                .into_iter()
-                .map(PodEvent::from)
-                .collect();
-        let not_ok = node.conditions_not_ok();
-        let condition_color = if not_ok > 0 {
-            palette.warn
-        } else {
-            palette.mute
-        };
-        let conditions = PanelSection::new(INSPECTOR_ID, CONDITIONS)
-            .count(node.conditions.len().to_string())
-            .count_color(condition_color)
-            .closed()
-            .child(ConditionTable::new(&node.conditions));
-        let taints = PanelSection::new(INSPECTOR_ID, "Taints")
-            .count(node.taints.len().to_string())
-            .child(LabelChips::new(node.taints.clone()));
-        let filter = ScreenEvent::Filter {
-            page: Page::Pods,
-            tokens: vec![node_query(&node.name)],
-        };
-        let all_pods = Link::new(ALL_PODS_ID, ALL_LINK)
-            .on_click(cx.listener(move |_, _, _, cx| cx.emit(filter.clone())));
-        let pods = PanelSection::new(INSPECTOR_ID, "Pods")
-            .count(pods_count(node))
-            .trailing(all_pods)
-            .child(self.top_pods(node, palette, cx));
-        let target = self
-            .cluster
-            .as_ref()
-            .map(|cluster| node_ref(cluster, &node.name));
-        let screen = cx.weak_entity();
-        let yaml_screen = screen.clone();
-        let yaml_target = target.clone();
-        let shell = Button::new(SHELL_ID, SHELL_LABEL)
-            .primary()
-            .small()
-            .on_click(move |_, window, cx| {
-                if let Some(target) = target.clone() {
-                    ask_shell(target, screen.clone(), window, cx);
-                }
-            });
-        let inspector = Inspector::new(INSPECTOR_ID, node.name.clone())
-            .mono()
-            .width(INSPECTOR_NODE)
-            .status(node.status, node.state.clone())
-            .issues(node.issue())
-            .actions(shell)
-            .actions(self.actions.clone())
-            .panel(PanelSection::new(INSPECTOR_ID, "Usage").child(node_usage(node, palette)))
-            .panel(PanelSection::new(INSPECTOR_ID, "Details").child(details))
-            .panel(taints)
-            .panel(PanelSection::labels(INSPECTOR_ID, node.labels.clone()).closed())
-            .panel(conditions)
-            .panel(pods)
-            .panel(PanelSection::events(INSPECTOR_ID, events));
-        match yaml_target {
-            Some(target) => inspector
-                .yaml(move |_, cx| {
-                    let command = ScreenEvent::Command(edit_command(target.clone()));
-                    let _ = yaml_screen.update(cx, |_, cx| cx.emit(command));
-                })
-                .into_any_element(),
-            None => inspector.into_any_element(),
-        }
-    }
-
-    fn top_pods(&self, node: &Node, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let heading = pod_line(
-            div().child(BY_REQUEST).into_any_element(),
-            CPU_HEADING,
-            MEMORY_HEADING,
-        )
-        .font_family(crate::theme::FONT_SANS)
-        .text_size(TEXT_LABEL)
-        .text_color(palette.mute);
-        let cluster = self.cluster.clone();
-        let screen = cx.weak_entity();
-        let rows = node.top_pods.iter().enumerate().map(|(ix, pod)| {
-            let target = cluster.as_ref().map(|cluster| pod_ref(cluster, pod));
-            let screen = screen.clone();
-            let name = Link::new(
-                SharedString::from(format!("node-pod-{ix}")),
-                pod.name.clone(),
-            )
-            .mono()
-            .color(palette.fg)
-            .on_click(move |_, _, cx| {
-                if let Some(target) = target.clone() {
-                    let command = ScreenEvent::Command(Command::OpenResource(target));
-                    let _ = screen.update(cx, |_, cx| cx.emit(command));
-                }
-            });
-            let label = div()
-                .flex()
-                .gap(SPACE_3)
-                .min_w_0()
-                .overflow_hidden()
-                .child(name)
-                .child(
-                    div()
-                        .truncate()
-                        .text_color(palette.mute)
-                        .child(pod.namespace.clone()),
-                )
-                .into_any_element();
-            pod_line(
-                label,
-                figure(pod.cpu),
-                Amount::of(figure(pod.memory), MEMORY_UNIT).labelled(),
-            )
-            .text_color(palette.fg2)
-            .into_any_element()
-        });
-        div()
-            .flex()
-            .flex_col()
-            .gap(SPACE_3)
-            .font_family(FONT_MONO)
-            .text_size(TEXT_SMALL)
-            .child(heading)
-            .children(rows)
-            .into_any_element()
-    }
 }
 
 impl Render for NodesScreen {
@@ -571,7 +453,7 @@ impl Render for NodesScreen {
         };
         let body: AnyElement = match empty_list(&shape, &self.filter, None, cx) {
             Some(empty) => empty.into_any_element(),
-            None => self.table.clone().into_any_element(),
+            None => Table::pane(&self.table, cx).into_any_element(),
         };
         let footer = div()
             .debug_selector(|| "node-footer".to_owned())
@@ -585,14 +467,16 @@ impl Render for NodesScreen {
         let shown = current.as_ref().map(|node| (node, node.name.as_str()));
         let motion = self.presence.track(shown, presence, cx);
         let inspector = match current {
-            Some(node) => {
-                let panel = self.inspector(&node, &palette, cx);
-                Some(slide_in(panel, INSPECTOR_ID, motion, INSPECTOR_NODE))
-            }
-            None => self.presence.leaving().cloned().map(|node| {
-                let panel = self.inspector(&node, &palette, cx);
-                slide_out(panel, INSPECTOR_ID, INSPECTOR_NODE)
-            }),
+            Some(_) => Some(slide_in(
+                pane(&self.inspector),
+                INSPECTOR_ID,
+                motion,
+                INSPECTOR_NODE,
+            )),
+            None => self
+                .presence
+                .leaving()
+                .map(|_| slide_out(pane(&self.inspector), INSPECTOR_ID, INSPECTOR_NODE)),
         };
         let dock = self.dock_view(cx);
         let main = div()

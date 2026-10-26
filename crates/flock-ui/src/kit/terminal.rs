@@ -2,11 +2,11 @@ use std::ops::Range;
 
 use flock_core::TermSize;
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, CursorStyle, ElementId, Entity, EventEmitter,
-    FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, Keystroke,
-    MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, Pixels, Render, SharedString,
-    StatefulInteractiveElement, StyleRefinement, Styled, UniformListScrollHandle, ViewElement,
-    Window, canvas, div, font, prelude::FluentBuilder, uniform_list,
+    AnyElement, App, ClipboardItem, Context, CursorStyle, ElementId, EventEmitter, FocusHandle,
+    Focusable, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, Keystroke, MouseButton,
+    MouseDownEvent, MouseMoveEvent, ParentElement, Pixels, Render, SharedString,
+    StatefulInteractiveElement, Styled, UniformListScrollHandle, Window, canvas, div, font,
+    prelude::FluentBuilder, uniform_list,
 };
 
 use crate::theme::{
@@ -471,10 +471,6 @@ pub struct Terminal {
 impl EventEmitter<TerminalEvent> for Terminal {}
 
 impl Terminal {
-    pub fn pane(view: &Entity<Self>) -> ViewElement<Entity<Self>> {
-        view.clone().cached(StyleRefinement::default().size_full())
-    }
-
     pub fn new(id: impl Into<SharedString>, cx: &mut Context<Self>) -> Self {
         Self {
             id: id.into(),

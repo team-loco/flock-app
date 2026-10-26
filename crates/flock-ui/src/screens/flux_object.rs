@@ -479,7 +479,7 @@ impl FluxObjectPage {
                     .count(object.inventory.len().to_string())
                     .end(filters),
             )
-            .child(ruled(self.inventory.clone(), palette))
+            .child(ruled(Table::pane(&self.inventory, cx), palette))
             .into_any_element()
     }
 
@@ -509,28 +509,28 @@ impl FluxObjectPage {
         div().children(conditions).into_any_element()
     }
 
-    fn history_section(&self, palette: &Palette) -> AnyElement {
+    fn history_section(&self, palette: &Palette, cx: &App) -> AnyElement {
         div()
             .child(SectionHeader::new("History"))
-            .child(ruled(self.history.clone(), palette))
+            .child(ruled(Table::pane(&self.history, cx), palette))
             .into_any_element()
     }
 
-    fn dependents_section(&self, page: &FluxPage, palette: &Palette) -> AnyElement {
+    fn dependents_section(&self, page: &FluxPage, palette: &Palette, cx: &App) -> AnyElement {
         div()
             .child(SectionHeader::new("Used by").count(page.dependents.len().to_string()))
-            .child(ruled(self.dependents.clone(), palette))
+            .child(ruled(Table::pane(&self.dependents, cx), palette))
             .into_any_element()
     }
 
-    fn releases_section(&self, detail: &HelmDetail, palette: &Palette) -> AnyElement {
+    fn releases_section(&self, detail: &HelmDetail, palette: &Palette, cx: &App) -> AnyElement {
         let count = format!("{} · select one to see what changed", detail.releases.len());
         let selected = self
             .release
             .and_then(|r| detail.releases.iter().find(|x| x.revision == r));
         div()
             .child(SectionHeader::new("History").count(count))
-            .child(ruled(self.releases.clone(), palette))
+            .child(ruled(Table::pane(&self.releases, cx), palette))
             .children(selected.map(|release| revision_diff(detail, release, palette)))
             .into_any_element()
     }
@@ -556,15 +556,15 @@ impl FluxObjectPage {
             FluxDetail::Kustomization(drift) => vec![
                 self.inventory_section(object, palette, cx),
                 Self::drift_section(object, drift.as_ref(), palette, cx),
-                self.history_section(palette),
+                self.history_section(palette, cx),
             ],
             FluxDetail::HelmRelease(detail) => vec![
                 self.inventory_section(object, palette, cx),
-                self.releases_section(detail, palette),
+                self.releases_section(detail, palette, cx),
             ],
             FluxDetail::Source(_) => vec![
-                self.dependents_section(page, palette),
-                self.history_section(palette),
+                self.dependents_section(page, palette, cx),
+                self.history_section(palette, cx),
             ],
         };
         div()
