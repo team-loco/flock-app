@@ -8,12 +8,12 @@ use flock::Screen;
 use flock_bench::live::{
     CLUSTER_COUNTS, FLUX_NODES, FLUX_PAN_NODES, LOG_LINES, LOG_PODS, LOG_RATES, LOG_TICK, Load,
     STATUS_OK, Session, TERMINAL_BYTES, bench_pan, bench_snapshots, bench_stream, bump_running,
-    cat_output, fleet, flip_phase, flux_clone, flux_graph, loads, log_sources, multi_burst,
-    multi_prefill, pod_burst, prefill_lines, running, sentinel, viewed_cluster,
+    cat_output, fleet, flip_phase, flux_clone, flux_graph, is_sentinel, loads, log_sources,
+    multi_burst, multi_prefill, pod_burst, prefill_lines, running, viewed_cluster,
 };
 use flock_bench::{MEASUREMENT, SAMPLES, WARM_UP};
 use flock_core::multilog::MERGED_LINES;
-use flock_core::{Command, ExecEvent, LogTarget, Page, ResourceRef};
+use flock_core::{Command, ExecEvent, LogTarget, Page, ResourceRef, Sink, Source};
 use flock_ui::kit::LOG_CAPACITY;
 use gpui::{AppContext as _, BenchAppContext};
 
@@ -21,10 +21,9 @@ const POD_KIND: &str = "Pod";
 const SHELL_NOTE: &str = "flock-bench shell";
 
 fn sentinel_shown(session: &Session, cx: &gpui::App, generation: u64) -> bool {
-    let expected = sentinel(generation);
     session
         .last_log(cx)
-        .is_some_and(|last| last.as_ref() == expected)
+        .is_some_and(|last| is_sentinel(&last, generation))
 }
 
 fn assert_capped(session: &Session, cx: &BenchAppContext, capacity: usize) {
@@ -126,6 +125,47 @@ fn multi_log_follow(rate: &Load, cx: &mut BenchAppContext) {
     assert_capped(&session, cx, MERGED_LINES);
 }
 
+fn bench_terminal(
+    session: &Session,
+    input: Source<Vec<u8>>,
+    output: &Sink<ExecEvent>,
+    bytes: usize,
+    cx: &mut BenchAppContext,
+) {
+    let started = ExecEvent::Started {
+        note: SHELL_NOTE.into(),
+    };
+    assert!(
+        output.send_blocking(started),
+        "the terminal stopped listening"
+    );
+    let replies = Arc::new(AtomicU64::new(0));
+    let counted = replies.clone();
+    thread::spawn(move || {
+        while let Some(bytes) = input.recv_blocking() {
+            let answered = bytes.windows(STATUS_OK.len()).any(|w| w == STATUS_OK);
+            if answered {
+                counted.fetch_add(1, Ordering::AcqRel);
+            }
+        }
+    });
+    let chunks = cat_output(bytes);
+    let bursts = bench_stream(
+        session,
+        output,
+        Duration::ZERO,
+        |_| {
+            chunks
+                .iter()
+                .map(|chunk| vec![ExecEvent::Output(chunk.clone())])
+                .collect()
+        },
+        |_, generation| replies.load(Ordering::Acquire) > generation,
+        cx,
+    );
+    assert_eq!(replies.load(Ordering::Acquire), bursts);
+}
+
 #[gpui::bench(inputs = loads(TERMINAL_BYTES), input_name = "bytes", group = "Terminal output burst")]
 fn terminal_burst(bytes: &Load, cx: &mut BenchAppContext) {
     let session = Session::open(Screen::PodsShell, flock_demo::snapshot(), cx);
@@ -143,39 +183,20 @@ fn terminal_burst(bytes: &Load, cx: &mut BenchAppContext) {
     let Some(request) = request else {
         panic!("the pod terminal did not start a shell");
     };
-    let started = ExecEvent::Started {
-        note: SHELL_NOTE.into(),
-    };
-    assert!(
-        request.output.send_blocking(started),
-        "the terminal stopped listening"
-    );
-    let replies = Arc::new(AtomicU64::new(0));
-    let counted = replies.clone();
-    let input = request.input.clone();
-    thread::spawn(move || {
-        while let Some(bytes) = input.recv_blocking() {
-            let answered = bytes.windows(STATUS_OK.len()).any(|w| w == STATUS_OK);
-            if answered {
-                counted.fetch_add(1, Ordering::AcqRel);
-            }
-        }
+    bench_terminal(&session, request.input, &request.output, bytes.0, cx);
+}
+
+#[gpui::bench(inputs = loads(TERMINAL_BYTES), input_name = "bytes", group = "Node shell output burst")]
+fn node_shell_burst(bytes: &Load, cx: &mut BenchAppContext) {
+    let session = Session::open(Screen::NodesShell, flock_demo::snapshot(), cx);
+    let request = session.command(|command| match command {
+        Command::NodeShell(request) => Some(request),
+        _ => None,
     });
-    let output = cat_output(bytes.0);
-    let bursts = bench_stream(
-        &session,
-        &request.output,
-        Duration::ZERO,
-        |_| {
-            output
-                .iter()
-                .map(|chunk| vec![ExecEvent::Output(chunk.clone())])
-                .collect()
-        },
-        |_, generation| replies.load(Ordering::Acquire) > generation,
-        cx,
-    );
-    assert_eq!(replies.load(Ordering::Acquire), bursts);
+    let Some(request) = request else {
+        panic!("the node shell did not start");
+    };
+    bench_terminal(&session, request.input, &request.output, bytes.0, cx);
 }
 
 #[gpui::bench(inputs = loads(CLUSTER_COUNTS), input_name = "clusters", group = "Overview snapshot apply")]
@@ -236,6 +257,6 @@ gpui::bench_group! {
         .sample_size(SAMPLES)
         .warm_up_time(WARM_UP)
         .measurement_time(MEASUREMENT);
-    targets = pod_log_follow, multi_log_follow, terminal_burst, overview_apply, flux_graph_apply, flux_graph_pan
+    targets = pod_log_follow, multi_log_follow, terminal_burst, node_shell_burst, overview_apply, flux_graph_apply, flux_graph_pan
 }
 gpui::bench_main!(benches);

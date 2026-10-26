@@ -389,6 +389,14 @@ pub fn sentinel(generation: u64) -> String {
     format!("{SENTINEL} {generation}")
 }
 
+pub fn is_sentinel(message: &str, generation: u64) -> bool {
+    let shown = message
+        .strip_prefix(SENTINEL)
+        .and_then(|rest| rest.strip_prefix(' '))
+        .and_then(|number| number.parse::<u64>().ok());
+    shown == Some(generation)
+}
+
 fn clock(seq: u64) -> String {
     let ms = seq * LINE_STEP_MS;
     let seconds = ms / MILLIS_PER_SECOND;
@@ -673,6 +681,10 @@ mod tests {
             Some(true)
         );
         assert_eq!(lines.last().map(|l| l.message.clone()), Some(sentinel(2)));
+        assert!(is_sentinel(&sentinel(2), 2));
+        assert!(!is_sentinel(&sentinel(2), 1));
+        assert!(!is_sentinel(&sentinel(12), 1));
+        assert!(!is_sentinel("2", 2));
         assert_eq!(lines_per_tick(1, LOG_TICK), 1);
     }
 
