@@ -1033,6 +1033,8 @@ fn revealed(command: &Command) -> Option<&flock_core::ResourceRef> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::{Root, Store};
     use flock_core::ClusterId;
@@ -1079,7 +1081,7 @@ mod tests {
             })
             .detach();
         });
-        assert!(backend.try_send(Update::Snapshot(Box::default())).is_ok());
+        assert!(backend.try_send(Update::Snapshot(Arc::default())).is_ok());
         cx.run_until_parked();
         let before = first.read_with(cx, |shell, _| shell.state.clone());
         assert!(
@@ -1116,20 +1118,15 @@ mod tests {
             age: std::time::Duration::ZERO,
             events: Vec::new(),
         });
-        assert!(
-            backend
-                .try_send(Update::Snapshot(Box::new(snapshot.clone())))
-                .is_ok()
-        );
+        let snapshot = Arc::new(snapshot);
+        let sent = Update::Snapshot(Arc::clone(&snapshot));
+        assert!(backend.try_send(sent).is_ok());
         cx.run_until_parked();
-        assert_eq!(
-            first.read_with(cx, |shell, _| shell.state.snapshot.clone()),
-            snapshot
-        );
-        assert_eq!(
-            second.read_with(cx, |shell, _| shell.state.snapshot.clone()),
-            snapshot
-        );
+        let shares = |shell: &Entity<Shell>, cx: &mut TestAppContext| {
+            shell.read_with(cx, |shell, _| Arc::ptr_eq(&shell.state.snapshot, &snapshot))
+        };
+        assert!(shares(&first, cx));
+        assert!(shares(&second, cx));
         cx.simulate_keystrokes(second_window, "cmd-shift-w");
         cx.run_until_parked();
         assert_eq!(cx.read(|cx| cx.windows().len()), 1);
@@ -1209,7 +1206,7 @@ mod tests {
         let (commands, received) = async_channel::unbounded();
         let store = cx.new(|cx| Store::new(updates, commands, cx));
         let (shell, window) = cx.update(|cx| open_window(&store, Vec::new(), cx));
-        assert!(backend.try_send(Update::Snapshot(Box::default())).is_ok());
+        assert!(backend.try_send(Update::Snapshot(Arc::default())).is_ok());
         cx.run_until_parked();
         let saved = flock_core::tabs::SavedWindow {
             panes: [Page::GitOps, Page::Changes]
@@ -1257,7 +1254,7 @@ mod tests {
         let (commands, received) = async_channel::unbounded();
         let store = cx.new(|cx| Store::new(updates, commands, cx));
         let (_shell, window) = cx.update(|cx| open_window(&store, Vec::new(), cx));
-        assert!(backend.try_send(Update::Snapshot(Box::default())).is_ok());
+        assert!(backend.try_send(Update::Snapshot(Arc::default())).is_ok());
         cx.run_until_parked();
         while received.try_recv().is_ok() {}
         cx.simulate_keystrokes(window, "cmd-alt-r");
@@ -1286,7 +1283,7 @@ mod tests {
         let (commands, _received) = async_channel::unbounded();
         let store = cx.new(|cx| Store::new(updates, commands, cx));
         let (first, first_window) = cx.update(|cx| open_window(&store, Vec::new(), cx));
-        assert!(backend.try_send(Update::Snapshot(Box::default())).is_ok());
+        assert!(backend.try_send(Update::Snapshot(Arc::default())).is_ok());
         cx.run_until_parked();
         cx.simulate_keystrokes(first_window, "cmd-t cmd-t cmd-1");
         cx.run_until_parked();

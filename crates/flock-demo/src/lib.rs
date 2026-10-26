@@ -25,6 +25,7 @@ mod simulate;
 mod workload;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
 
@@ -59,7 +60,7 @@ enum Input {
 fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
     let mut state = snapshot();
     if updates
-        .send_blocking(Update::Snapshot(Box::new(state.clone())))
+        .send_blocking(Update::Snapshot(Arc::new(state.clone())))
         .is_err()
     {
         return;
@@ -136,7 +137,7 @@ fn run(updates: &Sender<Update>, commands: &Receiver<Command>) {
         };
         if changed
             && updates
-                .send_blocking(Update::Snapshot(Box::new(state.clone())))
+                .send_blocking(Update::Snapshot(Arc::new(state.clone())))
                 .is_err()
         {
             return;
@@ -603,7 +604,7 @@ mod tests {
         let (command_tx, command_rx) = async_channel::unbounded();
         Box::new(DemoBackend).start(update_tx, command_rx);
         let first = update_rx.recv_blocking();
-        assert_eq!(first, Ok(Update::Snapshot(Box::new(snapshot()))));
+        assert_eq!(first, Ok(Update::Snapshot(Arc::new(snapshot()))));
         assert!(command_tx.send_blocking(Command::ToggleSidebar).is_ok());
     }
 }

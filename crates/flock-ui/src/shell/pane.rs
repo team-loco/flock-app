@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use flock_core::tabs::{Divider, PaneId, TabId};
@@ -186,7 +187,7 @@ impl PaneScreens {
         }
     }
 
-    pub(super) fn set_snapshot(&self, snapshot: &Snapshot, cx: &mut Context<Shell>) {
+    pub(super) fn set_snapshot(&self, snapshot: &Arc<Snapshot>, cx: &mut Context<Shell>) {
         self.flock
             .update(cx, |flock, cx| flock.set_snapshot(snapshot, cx));
         self.problems
@@ -199,8 +200,7 @@ impl PaneScreens {
             .update(cx, |screen, cx| screen.set_snapshot(snapshot, cx));
         self.settings
             .update(cx, |settings, cx| settings.set_snapshot(snapshot, cx));
-        self.pods
-            .update(cx, |pods, cx| pods.set_snapshot(snapshot, cx));
+        self.pods.update(cx, |pods, _| pods.set_snapshot(snapshot));
     }
 }
 

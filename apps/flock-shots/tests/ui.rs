@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Context as _;
 use flock::Screen;
 use flock_core::resource::page_for_kind;
@@ -2151,7 +2153,8 @@ fn open_staging_action(ui: &mut Ui, action: &'static str) -> anyhow::Result<()> 
 }
 
 fn staging_name(ui: &Ui) -> Option<String> {
-    let clusters = ui.state().snapshot.clusters;
+    let state = ui.state();
+    let clusters = &state.snapshot.clusters;
     clusters
         .iter()
         .find(|c| c.id.as_str() == "staging")
@@ -2840,7 +2843,7 @@ fn without_detail(cluster: &ClusterId) -> flock_core::Update {
     let mut snapshot = flock_demo::snapshot();
     snapshot.details.remove(cluster);
     snapshot.pages.remove(cluster);
-    flock_core::Update::Snapshot(Box::new(snapshot))
+    flock_core::Update::Snapshot(Arc::new(snapshot))
 }
 
 #[test]
@@ -3997,7 +4000,7 @@ fn a_namespace_page_scopes_the_list_it_opens_before_the_backend_answers() -> any
             groups: vec![contents],
         },
     );
-    updates.try_send(flock_core::Update::Snapshot(Box::new(snapshot)))?;
+    updates.try_send(flock_core::Update::Snapshot(Arc::new(snapshot)))?;
     ui.settle()?;
     ui.click("namespace-all-events")?;
     assert_eq!(ui.state().location().page, Page::Events);
@@ -4041,7 +4044,7 @@ fn a_detail_page_scopes_the_list_it_opens_before_the_backend_answers() -> anyhow
             groups: vec![pods],
         },
     );
-    updates.try_send(flock_core::Update::Snapshot(Box::new(snapshot)))?;
+    updates.try_send(flock_core::Update::Snapshot(Arc::new(snapshot)))?;
     ui.settle()?;
     ui.click("related-list-Pods")?;
     assert_eq!(ui.state().location().page, Page::Pods);
@@ -4061,7 +4064,7 @@ fn a_namespace_pick_survives_stale_snapshots_and_navigation_before_the_backend_a
     ui.click("resource-namespace")?;
     ui.click("resource-namespace-option-0")?;
     assert_eq!(picked(&ui, SAMPLE, "Deployment"), everywhere);
-    let stale = flock_core::Update::Snapshot(Box::new(flock_demo::snapshot()));
+    let stale = flock_core::Update::Snapshot(Arc::new(flock_demo::snapshot()));
     updates.try_send(stale)?;
     ui.settle()?;
     assert_eq!(picked(&ui, SAMPLE, "Deployment"), everywhere);
@@ -5125,7 +5128,7 @@ fn a_nav_row_with_three_badges_keeps_its_full_label() -> anyhow::Result<()> {
     for cluster in &mut snapshot.clusters {
         cluster.nav.insert(Page::HelmReleases, counts);
     }
-    updates.try_send(flock_core::Update::Snapshot(Box::new(snapshot)))?;
+    updates.try_send(flock_core::Update::Snapshot(Arc::new(snapshot)))?;
     ui.settle()?;
     let label = Page::HelmReleases.label();
     let runs = [TextRun {

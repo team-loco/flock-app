@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use crate::crd::{Crd, CrdKey, CustomObjects, Definition};
 use crate::helm::{HelmKey, HelmRelease, HelmReleaseDetail};
@@ -232,25 +233,33 @@ impl Snapshot {
         Status::worst(self.clusters.iter().map(|c| c.status))
     }
 
-    pub fn keep_loaded(&mut self, previous: Self) {
-        let Self { details, pods, .. } = previous;
-        for (id, detail) in details {
-            if self.connected_cluster(&id) && !self.details.contains_key(&id) {
-                self.details.insert(id, detail);
-            }
-        }
-        let unbuilt: BTreeSet<ClusterId> = self
+    pub fn keep_loaded(next: &mut Arc<Self>, previous: &Self) {
+        let details: Vec<(ClusterId, ClusterDetail)> = previous
+            .details
+            .iter()
+            .filter(|(id, _)| next.connected_cluster(id) && !next.details.contains_key(*id))
+            .map(|(id, detail)| (id.clone(), detail.clone()))
+            .collect();
+        let unbuilt: BTreeSet<&ClusterId> = next
             .clusters
             .iter()
             .filter(|cluster| cluster.is_connected())
             .filter(|cluster| cluster.nav.get(&Page::Pods).and_then(|c| c.total) > Some(0))
-            .filter(|cluster| !self.pods.iter().any(|pod| pod.cluster == cluster.id))
-            .map(|cluster| cluster.id.clone())
+            .filter(|cluster| !next.pods.iter().any(|pod| pod.cluster == cluster.id))
+            .map(|cluster| &cluster.id)
             .collect();
-        let kept = pods
-            .into_iter()
-            .filter(|pod| unbuilt.contains(&pod.cluster));
-        self.pods.extend(kept);
+        let pods: Vec<crate::pods::Pod> = previous
+            .pods
+            .iter()
+            .filter(|pod| unbuilt.contains(&pod.cluster))
+            .cloned()
+            .collect();
+        if details.is_empty() && pods.is_empty() {
+            return;
+        }
+        let next = Arc::make_mut(next);
+        next.details.extend(details);
+        next.pods.extend(pods);
     }
 
     fn connected_cluster(&self, id: &ClusterId) -> bool {
@@ -444,7 +453,10 @@ pub(crate) mod tests {
             .insert(ResourceKind::Deployment, vec![row]);
         next.details.insert(ClusterId::new("b"), rebuilt.clone());
         next.pods = vec![pod_on("b", "new-b")];
-        next.keep_loaded(previous);
+        let mut next = Arc::new(next);
+        let shared = next.clone();
+        Snapshot::keep_loaded(&mut next, &previous);
+        assert!(!Arc::ptr_eq(&next, &shared));
         assert_eq!(
             next.detail(&ClusterId::new("a")),
             Some(&ClusterDetail::default())
@@ -456,12 +468,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_cluster_with_no_pods_drops_the_rows_it_had() {
+    fn a_cluster_with_no_pods_drops_its_rows_and_keeps_sharing_the_snapshot() {
         let mut previous = sample();
         previous.pods = vec![pod_on("a", "gone")];
-        let mut next = sample();
-        next.keep_loaded(previous);
+        let mut next = Arc::new(sample());
+        let shared = next.clone();
+        Snapshot::keep_loaded(&mut next, &previous);
         assert_eq!(next.pods, Vec::new());
+        assert!(Arc::ptr_eq(&next, &shared));
     }
 
     #[test]

@@ -1773,7 +1773,7 @@ async fn run(backend: LiveBackend, updates: Sender<Update>, commands: Receiver<C
                 publish.fired();
                 dirty = false;
                 live.observe_changes();
-                if updates.send(Update::Snapshot(Box::new(live.snapshot()))).await.is_err() {
+                if updates.send(Update::Snapshot(Arc::new(live.snapshot()))).await.is_err() {
                     live.save_histories();
                     return;
                 }

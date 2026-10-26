@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use flock_core::notify::{Alert, Notifier};
@@ -8,7 +9,7 @@ use crate::kit::{Toast, toast};
 
 #[derive(Default)]
 struct Updates {
-    snapshot: Option<Snapshot>,
+    snapshot: Option<Arc<Snapshot>>,
     subscribers: Vec<Sender<Update>>,
 }
 
@@ -16,7 +17,7 @@ impl Updates {
     fn subscribe(&mut self) -> Receiver<Update> {
         let (sender, receiver) = async_channel::unbounded();
         if let Some(snapshot) = &self.snapshot {
-            let update = Update::Snapshot(Box::new(snapshot.clone()));
+            let update = Update::Snapshot(snapshot.clone());
             let _ = sender.try_send(update);
         }
         self.subscribers.push(sender);
@@ -25,7 +26,7 @@ impl Updates {
 
     fn publish(&mut self, update: &Update) {
         if let Update::Snapshot(snapshot) = update {
-            self.snapshot = Some(*snapshot.clone());
+            self.snapshot = Some(snapshot.clone());
         }
         self.subscribers
             .retain(|sender| sender.try_send(update.clone()).is_ok());
@@ -107,20 +108,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn windows_share_updates_and_late_windows_receive_the_latest_snapshot() {
+    fn windows_share_one_snapshot_and_late_windows_receive_the_latest() {
         let mut updates = Updates::default();
         let first = updates.subscribe();
         let second = updates.subscribe();
-        let snapshot = Update::Snapshot(Box::default());
+        let shared: Arc<Snapshot> = Arc::default();
+        let snapshot = Update::Snapshot(Arc::clone(&shared));
+        let receives_shared = |receiver: &Receiver<Update>| {
+            let received = receiver.try_recv();
+            matches!(&received, Ok(Update::Snapshot(got)) if Arc::ptr_eq(got, &shared))
+        };
         updates.publish(&snapshot);
-        assert_eq!(first.try_recv(), Ok(snapshot.clone()));
-        assert_eq!(second.try_recv(), Ok(snapshot.clone()));
+        assert!(receives_shared(&first));
+        assert!(receives_shared(&second));
         drop(first);
         let third = updates.subscribe();
-        assert_eq!(third.try_recv(), Ok(snapshot.clone()));
+        assert!(receives_shared(&third));
         updates.publish(&snapshot);
-        assert_eq!(second.try_recv(), Ok(snapshot.clone()));
-        assert_eq!(third.try_recv(), Ok(snapshot));
+        assert!(receives_shared(&second));
+        assert!(receives_shared(&third));
         assert_eq!(updates.subscribers.len(), 2);
     }
 }

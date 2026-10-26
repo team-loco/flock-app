@@ -1,4 +1,5 @@
 use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use flock_core::compare::{Field, SpecDiff};
@@ -195,7 +196,7 @@ impl Harness {
             };
             if let Update::Snapshot(snapshot) = update {
                 if done(&snapshot) {
-                    return *snapshot;
+                    return Arc::unwrap_or_clone(snapshot);
                 }
                 last = snapshot.cluster(&cluster()).cloned();
             }

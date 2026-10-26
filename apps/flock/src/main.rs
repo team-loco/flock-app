@@ -441,7 +441,7 @@ mod tests {
         });
         assert!(
             backend
-                .try_send(flock_core::Update::Snapshot(Box::new(snapshot)))
+                .try_send(flock_core::Update::Snapshot(std::sync::Arc::new(snapshot)))
                 .is_ok()
         );
         cx.update(|cx| bring_to_front(store.clone(), None, cx));
@@ -482,7 +482,7 @@ mod tests {
         });
         assert!(
             backend
-                .try_send(flock_core::Update::Snapshot(Box::default()))
+                .try_send(flock_core::Update::Snapshot(std::sync::Arc::default()))
                 .is_ok()
         );
         cx.run_until_parked();

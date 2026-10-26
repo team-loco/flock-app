@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -81,23 +82,23 @@ impl AddClusters {
                         .insert(ClusterId::new(&cluster.name), cluster.context.clone());
                     flock.clusters.push(summary(cluster));
                 }
-                send(updates, Update::Snapshot(Box::new(flock.clone())));
+                send(updates, Update::Snapshot(Arc::new(flock.clone())));
             }
             Command::RemoveCluster(id) => {
                 self.added.remove(id);
                 flock.remove_cluster(id);
-                send(updates, Update::Snapshot(Box::new(flock.clone())));
+                send(updates, Update::Snapshot(Arc::new(flock.clone())));
             }
             Command::RenameCluster(id, input) => {
                 if let Some(cluster) = flock.clusters.iter_mut().find(|c| &c.id == id) {
                     let fallback = id.to_string();
                     cluster.name = display_name(input).unwrap_or(fallback);
                 }
-                send(updates, Update::Snapshot(Box::new(flock.clone())));
+                send(updates, Update::Snapshot(Arc::new(flock.clone())));
             }
             Command::SwitchContext(id, to) => {
                 self.added.insert(id.clone(), to.clone());
-                send(updates, Update::Snapshot(Box::new(flock.clone())));
+                send(updates, Update::Snapshot(Arc::new(flock.clone())));
             }
             _ => return false,
         }

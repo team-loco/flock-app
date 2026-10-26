@@ -115,7 +115,7 @@ impl Running {
                 continue;
             };
             if done(&snapshot) {
-                return *snapshot;
+                return Arc::unwrap_or_clone(snapshot);
             }
         }
     }

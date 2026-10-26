@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use flock_core::overview::{MetricsServer, Overview, UtilizationSource};
 use flock_core::{Command, Page, Receiver, Sender, Snapshot, Status, Update, WatchState};
 
@@ -97,7 +99,7 @@ pub(crate) fn backend(fixture: StateFixture) -> (Receiver<Update>, Sender<Comman
     let (updates, receiver) = async_channel::unbounded();
     let (sender, commands) = async_channel::unbounded();
     std::thread::spawn(move || {
-        let first = Update::Snapshot(Box::new(snapshot(fixture)));
+        let first = Update::Snapshot(Arc::new(snapshot(fixture)));
         if updates.send_blocking(first).is_err() {
             return;
         }
@@ -107,7 +109,7 @@ pub(crate) fn backend(fixture: StateFixture) -> (Receiver<Update>, Sender<Comman
                 command => command,
             };
             if let Command::Connect(_) = command {
-                let loaded = Update::Snapshot(Box::new(flock_demo::snapshot()));
+                let loaded = Update::Snapshot(Arc::new(flock_demo::snapshot()));
                 if updates.send_blocking(loaded).is_err() {
                     return;
                 }
