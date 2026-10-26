@@ -30,7 +30,7 @@ use crate::theme::{
     ActiveTheme, FIELD_LABEL, FONT_MONO, Palette, ROW_TABLE, RULE, SECTION_HEADER, SPACE_1,
     SPACE_3, SPACE_5, SPACE_6, SPACE_8, TEXT_BODY, TEXT_GLYPH, TEXT_MONO, TEXT_SMALL,
 };
-use inspector::{Shown, WorkloadInspector};
+use inspector::{WorkloadContent, WorkloadInspector};
 
 pub const KEY_CONTEXT: &str = "Workload";
 
@@ -382,14 +382,14 @@ impl WorkloadScreen {
         let Some(workload) = self.workload.clone() else {
             return;
         };
-        let shown = Shown {
+        let content = WorkloadContent {
             pod: self.selected_pod().cloned(),
             workload,
             container: self.container,
             related: self.related.clone(),
         };
         self.inspector
-            .update(cx, |inspector, cx| inspector.show(shown, cx));
+            .update(cx, |inspector, cx| inspector.shown.show(content, cx));
     }
 
     fn selected_pod(&self) -> Option<&Pod> {

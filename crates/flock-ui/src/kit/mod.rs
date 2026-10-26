@@ -26,6 +26,7 @@ mod prose;
 mod section;
 mod select;
 mod selectable;
+mod shown;
 mod snapshot_row;
 mod split;
 mod status;
@@ -74,6 +75,7 @@ pub use prose::Prose;
 pub use section::ClickableSection;
 pub use select::{Select, SelectEvent};
 pub use selectable::{SelectAllText, Selectable, SelectableText, SelectableWords};
+pub use shown::Shown;
 pub use snapshot_row::{SnapshotRow, SnapshotRows};
 pub use split::Split;
 #[cfg(test)]

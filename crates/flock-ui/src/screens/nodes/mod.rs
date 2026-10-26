@@ -30,7 +30,7 @@ use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR_NODE, Palette, SEARCH_WIDTH, SPACE_3, SPACE_4, SPACE_5,
     SPACE_6, TEXT_BODY, TEXT_LABEL, TEXT_MONO,
 };
-use inspector::{NodeInspector, Shown};
+use inspector::{NodeContent, NodeInspector};
 use shell::{NodeShell, TERMINAL_ID, ask_shell};
 
 const VERSION_SEPARATOR: char = '-';
@@ -394,14 +394,14 @@ impl NodesScreen {
             .into_iter()
             .map(PodEvent::from)
             .collect();
-        let shown = Shown {
+        let content = NodeContent {
             node: node.clone(),
             cluster: self.cluster.clone(),
             skewed,
             events,
         };
         self.inspector
-            .update(cx, |inspector, cx| inspector.show(shown, cx));
+            .update(cx, |inspector, cx| inspector.shown.show(content, cx));
     }
 
     fn set_inspector_actions(&mut self, cx: &mut Context<Self>) {

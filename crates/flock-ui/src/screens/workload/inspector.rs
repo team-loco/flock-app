@@ -13,13 +13,13 @@ use super::{
 };
 use crate::kit::{
     EVENTS, ErrorBlocks, EventList, KeyValue, PanelSection, SectionLabel, Segmented,
-    SelectableText, YamlRow,
+    SelectableText, Shown, YamlRow,
 };
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section, related_count};
 use crate::theme::{ActiveTheme, Palette, RULE, SECTION_HEADER, SPACE_6, TEXT_BODY};
 
 #[derive(PartialEq)]
-pub(super) struct Shown {
+pub(super) struct WorkloadContent {
     pub(super) workload: Workload,
     pub(super) container: usize,
     pub(super) pod: Option<Pod>,
@@ -28,26 +28,18 @@ pub(super) struct Shown {
 
 pub(super) struct WorkloadInspector {
     screen: WeakEntity<WorkloadScreen>,
-    shown: Option<Shown>,
+    pub(super) shown: Shown<WorkloadContent>,
 }
 
 impl WorkloadInspector {
     pub(super) fn new(screen: WeakEntity<WorkloadScreen>) -> Self {
         Self {
             screen,
-            shown: None,
+            shown: Shown::default(),
         }
     }
 
-    pub(super) fn show(&mut self, shown: Shown, cx: &mut Context<Self>) {
-        if self.shown.as_ref() == Some(&shown) {
-            return;
-        }
-        self.shown = Some(shown);
-        cx.notify();
-    }
-
-    fn inspector(&self, shown: &Shown, cx: &App) -> AnyElement {
+    fn inspector(&self, shown: &WorkloadContent, cx: &App) -> AnyElement {
         let palette = *cx.palette();
         let workload = &shown.workload;
         let names: Vec<String> = workload.containers.iter().map(|c| c.name.clone()).collect();
@@ -113,7 +105,7 @@ impl WorkloadInspector {
             .collect();
         let last_exit = self
             .shown
-            .as_ref()
+            .get()
             .and_then(|shown| shown.pod.as_ref())
             .and_then(|pod| pod.container(&spec.name))
             .and_then(|status| status.last_exit.as_ref())
@@ -163,7 +155,7 @@ impl WorkloadInspector {
             }
         });
         let section = PanelSection::new(INSPECTOR_ID, RELATED).closed();
-        match self.shown.as_ref().and_then(|shown| shown.related.as_ref()) {
+        match self.shown.get().and_then(|shown| shown.related.as_ref()) {
             Some(related) => section
                 .count(related_count(related).to_string())
                 .child(inspector_section(Some(related), &pick, cx)),
@@ -174,7 +166,7 @@ impl WorkloadInspector {
 
 impl Render for WorkloadInspector {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        match &self.shown {
+        match self.shown.get() {
             Some(shown) => self.inspector(shown, cx),
             None => div().into_any_element(),
         }
@@ -232,7 +224,7 @@ mod tests {
     fn shown_pod(window: &WindowHandle<WorkloadScreen>, cx: &mut TestAppContext) -> Option<String> {
         let name = window.update(cx, |screen, _, cx| {
             let inspector = screen.inspector.read(cx);
-            let shown = inspector.shown.as_ref()?;
+            let shown = inspector.shown.get()?;
             shown.pod.as_ref().map(|pod| pod.name.clone())
         });
         name.ok().flatten()

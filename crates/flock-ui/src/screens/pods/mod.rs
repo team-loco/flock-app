@@ -26,7 +26,7 @@ mod streams;
 
 pub(crate) use streams::exit_note;
 
-use inspector::PodInspector;
+use inspector::{PodContent, PodInspector};
 use streams::{LogSession, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
@@ -561,14 +561,16 @@ impl PodsScreen {
     }
 
     fn sync_inspector(&mut self, cx: &mut Context<Self>) {
-        let pod = self.selected_pod();
+        let pod = self.selected_pod().cloned();
         let related = self.selected.as_ref().and_then(|target| {
             self.related
                 .iter()
                 .find(|related| &related.target == target)
+                .cloned()
         });
+        let content = PodContent { pod, related };
         self.inspector
-            .update(cx, |inspector, cx| inspector.show(pod, related, cx));
+            .update(cx, |inspector, cx| inspector.shown.show(content, cx));
     }
 }
 

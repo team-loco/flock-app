@@ -16,7 +16,7 @@ use super::{
 };
 use crate::kit::{
     ActionMenu, Button, CONDITIONS, ConditionTable, Inspector, KeyValue, LabelChips, Link,
-    PanelSection,
+    PanelSection, Shown,
 };
 use crate::screens::edit::edit_command;
 use crate::screens::{ALL_LINK, ScreenEvent};
@@ -25,7 +25,7 @@ use crate::theme::{
 };
 
 #[derive(PartialEq)]
-pub(super) struct Shown {
+pub(super) struct NodeContent {
     pub(super) node: Node,
     pub(super) cluster: Option<ClusterId>,
     pub(super) skewed: bool,
@@ -35,7 +35,7 @@ pub(super) struct Shown {
 pub(super) struct NodeInspector {
     screen: WeakEntity<NodesScreen>,
     actions: Entity<ActionMenu>,
-    shown: Option<Shown>,
+    pub(super) shown: Shown<NodeContent>,
 }
 
 impl NodeInspector {
@@ -43,19 +43,11 @@ impl NodeInspector {
         Self {
             screen,
             actions,
-            shown: None,
+            shown: Shown::default(),
         }
     }
 
-    pub(super) fn show(&mut self, shown: Shown, cx: &mut Context<Self>) {
-        if self.shown.as_ref() == Some(&shown) {
-            return;
-        }
-        self.shown = Some(shown);
-        cx.notify();
-    }
-
-    fn inspector(&self, shown: &Shown, palette: &Palette) -> AnyElement {
+    fn inspector(&self, shown: &NodeContent, palette: &Palette) -> AnyElement {
         let node = &shown.node;
         let skewed = shown.skewed;
         let kubelet_color = if skewed { palette.warn } else { palette.fg };
@@ -136,7 +128,7 @@ impl NodeInspector {
         }
     }
 
-    fn top_pods(&self, shown: &Shown, palette: &Palette) -> AnyElement {
+    fn top_pods(&self, shown: &NodeContent, palette: &Palette) -> AnyElement {
         let node = &shown.node;
         let heading = pod_line(
             div().child(BY_REQUEST).into_any_element(),
@@ -199,7 +191,7 @@ impl NodeInspector {
 impl Render for NodeInspector {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
-        match &self.shown {
+        match self.shown.get() {
             Some(shown) => self.inspector(shown, &palette),
             None => div().into_any_element(),
         }
@@ -281,10 +273,7 @@ mod tests {
     fn shown(window: &WindowHandle<NodesScreen>, cx: &mut TestAppContext) -> Option<String> {
         let name = window.update(cx, |screen, _, cx| {
             let inspector = screen.inspector.read(cx);
-            inspector
-                .shown
-                .as_ref()
-                .map(|shown| shown.node.name.clone())
+            inspector.shown.get().map(|shown| shown.node.name.clone())
         });
         name.ok().flatten()
     }
