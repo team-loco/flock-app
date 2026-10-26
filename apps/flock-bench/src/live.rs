@@ -351,16 +351,17 @@ pub fn bench_scroll(
             }
         },
     );
-    if let Some(finished) = finished.take() {
-        let drawn = cx
-            .update_window(session.window, |_, window, _| draws(window))
-            .unwrap_or_default();
-        assert_eq!(finished.dispatched, turns, "wheel steps were dropped");
-        assert!(
-            drawn > finished.draws_at_last_step,
-            "no frame drew after the last wheel step"
-        );
-    }
+    let Some(finished) = finished.take() else {
+        panic!("the last wheel step never ran");
+    };
+    let Ok(drawn) = cx.update_window(session.window, |_, window, _| draws(window)) else {
+        panic!("the bench window closed before the scroll finished");
+    };
+    assert_eq!(finished.dispatched, turns, "wheel steps were dropped");
+    assert!(
+        drawn > finished.draws_at_last_step,
+        "no frame drew after the last wheel step"
+    );
     sessions.get()
 }
 
