@@ -13,7 +13,7 @@ use super::{WorkloadScreen, logs_tab_label};
 use crate::kit::confirm;
 use crate::kit::{
     Button, Dock, DockState, DockTab, EventList, InputEvent, Level, LogLine, LogView, MenuItem,
-    Segmented, Terminal, TerminalEvent, TextField, TextFieldState,
+    Segmented, Terminal, TerminalEvent, TextField, TextFieldState, drain,
 };
 use crate::screens::multilog::MultiLogs;
 use crate::screens::no_shell::{DEBUG_IMAGE, confirm_debug, no_shell_state, start_debug_button};
@@ -143,15 +143,11 @@ impl WorkloadScreen {
             sink,
         }));
         self.log_task = Some(cx.spawn(async move |this, cx| {
-            while let Ok(line) = lines.recv().await {
-                let pushed = this.update(cx, |screen, cx| {
-                    let line = kit_line(line);
-                    screen.logs.update(cx, |logs, cx| logs.push(line, cx));
-                });
-                if pushed.is_err() {
-                    break;
-                }
-            }
+            drain(lines, this, cx, |screen: &mut Self, batch, cx| {
+                let lines = batch.into_iter().map(kit_line);
+                screen.logs.update(cx, |logs, cx| logs.extend(lines, cx));
+            })
+            .await;
         }));
     }
 
@@ -266,12 +262,12 @@ impl WorkloadScreen {
             output,
         }));
         let task = cx.spawn(async move |this, cx| {
-            while let Ok(event) = events.recv().await {
-                let applied = this.update(cx, |screen, cx| screen.exec_event(event, cx));
-                if applied.is_err() {
-                    break;
+            drain(events, this, cx, |screen: &mut Self, batch, cx| {
+                for event in batch {
+                    screen.exec_event(event, cx);
                 }
-            }
+            })
+            .await;
         });
         self.exec = Some(ExecSession {
             input,
@@ -479,7 +475,7 @@ impl WorkloadScreen {
                 .closable(close_with(cx, Self::close_logs_tab))
                 .detail(logs_detail)
                 .tools(self.log_tools(cx).into_any_element())
-                .content(self.logs.clone()),
+                .content(LogView::pane(&self.logs)),
         };
         Dock::new(&self.dock)
             .tab(logs_tab)
@@ -501,7 +497,7 @@ impl WorkloadScreen {
 
     fn terminal_content(&self, cx: &mut Context<Self>) -> AnyElement {
         if !self.exec.as_ref().is_some_and(|s| s.no_shell) {
-            return self.terminal.clone().into_any_element();
+            return Terminal::pane(&self.terminal).into_any_element();
         }
         let start = start_debug_button(START_DEBUG_ID)
             .on_click(cx.listener(|this, _, window, cx| this.confirm_debug_container(window, cx)));

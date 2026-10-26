@@ -27,6 +27,7 @@ mod select;
 mod selectable;
 mod split;
 mod status;
+mod stream;
 mod table;
 mod terminal;
 mod text;
@@ -74,6 +75,7 @@ pub use split::Split;
 pub(crate) use status::STATUSES;
 pub(crate) use status::status_symbols;
 pub use status::{StatusGlyph, StatusText};
+pub use stream::drain;
 pub use table::{
     Align, Column, RowActions, SortDirection, TABLE_CONTEXT, Table, TableEvent, Width,
     min_row_width, resized,

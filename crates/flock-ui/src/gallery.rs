@@ -604,7 +604,7 @@ impl Gallery {
                     DockTab::new("Logs")
                         .detail("x2lqp · api")
                         .tools(tools)
-                        .content(self.logs.clone()),
+                        .content(LogView::pane(&self.logs)),
                 )
                 .tab(
                     DockTab::new("Events")

@@ -6,7 +6,7 @@ use gpui::{
 
 use crate::kit::{
     ActionMenu, FILTER_PLACEHOLDER, InputEvent, LogView, MetaLine, PageHeader, TextField,
-    TextFieldState,
+    TextFieldState, drain,
 };
 use crate::screens::workload::kit_line;
 use crate::theme::{ActiveTheme, RULE, SPACE_3, SPACE_4, SPACE_8};
@@ -84,15 +84,11 @@ impl LogsScreen {
             sink,
         }));
         self.stream = Some(cx.spawn(async move |this, cx| {
-            while let Ok(line) = lines.recv().await {
-                let pushed = this.update(cx, |screen, cx| {
-                    let line = kit_line(line);
-                    screen.logs.update(cx, |logs, cx| logs.push(line, cx));
-                });
-                if pushed.is_err() {
-                    break;
-                }
-            }
+            drain(lines, this, cx, |screen: &mut Self, batch, cx| {
+                let lines = batch.into_iter().map(kit_line);
+                screen.logs.update(cx, |logs, cx| logs.extend(lines, cx));
+            })
+            .await;
         }));
     }
 
@@ -122,7 +118,7 @@ impl Render for LogsScreen {
                     crate::kit::PageTitle::new(self.pod.name.clone())
                         .leading(self.navigation.clone()),
                 )
-                .child(div().flex_1().min_h_0().child(self.logs.clone()));
+                .child(div().flex_1().min_h_0().child(LogView::pane(&self.logs)));
         }
         let facts = [
             self.container.as_str(),
@@ -151,6 +147,6 @@ impl Render for LogsScreen {
                     .border_color(palette.line)
                     .child(self.tools(cx)),
             )
-            .child(div().flex_1().min_h_0().child(self.logs.clone()))
+            .child(div().flex_1().min_h_0().child(LogView::pane(&self.logs)))
     }
 }

@@ -11,7 +11,7 @@ use gpui::{
 use super::{CONTAINER_SELECT, PodsScreen};
 use crate::kit::{
     Button, Dock, DockState, DockTab, EmptyState, LogView, MenuItem, Terminal, TerminalEvent,
-    TextField, Toast, confirm, toast,
+    TextField, Toast, confirm, drain, toast,
 };
 use crate::screens::no_shell::{DEBUG_IMAGE, confirm_debug, no_shell_state, start_debug_button};
 use crate::screens::workload::kit_line;
@@ -250,15 +250,11 @@ impl PodsScreen {
             sink,
         }));
         let task = cx.spawn(async move |this, cx| {
-            while let Ok(line) = lines.recv().await {
-                let pushed = this.update(cx, |screen, cx| {
-                    let line = kit_line(line).with_fields();
-                    screen.logs.update(cx, |logs, cx| logs.push(line, cx));
-                });
-                if pushed.is_err() {
-                    break;
-                }
-            }
+            drain(lines, this, cx, |screen: &mut Self, batch, cx| {
+                let lines = batch.into_iter().map(|line| kit_line(line).with_fields());
+                screen.logs.update(cx, |logs, cx| logs.extend(lines, cx));
+            })
+            .await;
         });
         self.log = Some(LogSession { key, _task: task });
     }
@@ -318,12 +314,12 @@ impl PodsScreen {
             output,
         }));
         let task = cx.spawn(async move |this, cx| {
-            while let Ok(event) = events.recv().await {
-                let applied = this.update(cx, |screen, cx| screen.exec_event(event, cx));
-                if applied.is_err() {
-                    break;
+            drain(events, this, cx, |screen: &mut Self, batch, cx| {
+                for event in batch {
+                    screen.exec_event(event, cx);
                 }
-            }
+            })
+            .await;
         });
         self.shell = Some(ShellSession {
             key,
@@ -576,7 +572,7 @@ impl PodsScreen {
             .filter(|_| self.log_instance() == LogInstance::Previous)
             .map(previous_banner);
         let Some(banner) = banner else {
-            return self.logs.clone().into_any_element();
+            return LogView::pane(&self.logs).into_any_element();
         };
         let palette = *cx.palette();
         div()
@@ -597,13 +593,13 @@ impl PodsScreen {
                     .text_size(TEXT_SMALL)
                     .child(banner),
             )
-            .child(div().flex_1().min_h_0().child(self.logs.clone()))
+            .child(div().flex_1().min_h_0().child(LogView::pane(&self.logs)))
             .into_any_element()
     }
 
     fn terminal_content(&self, cx: &mut Context<Self>) -> AnyElement {
         if !self.shell.as_ref().is_some_and(|s| s.no_shell) {
-            return self.terminal.clone().into_any_element();
+            return Terminal::pane(&self.terminal).into_any_element();
         }
         let start = start_debug_button(START_DEBUG_ID)
             .on_click(cx.listener(|this, _, window, cx| this.confirm_debug_container(window, cx)));
