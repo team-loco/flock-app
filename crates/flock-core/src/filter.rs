@@ -187,6 +187,7 @@ impl StatusFilter {
 }
 
 const NODE_NAME: &str = "node";
+const SEARCH_SEPARATOR: &str = "\n";
 
 pub type FieldValues<'a> = Vec<Cow<'a, str>>;
 pub type FieldFn<T, C = ()> = for<'a> fn(&'a T, &'a C, &mut FieldValues<'a>);
@@ -207,10 +208,44 @@ impl<T> FilterSpec<T> {
     ) -> bool {
         self.matches_in(row, &(), query, namespace, label_sets)
     }
+
+    pub fn search_text(&self, row: &T) -> String {
+        let mut values = FieldValues::new();
+        for (_, field) in self.fields {
+            field(row, &(), &mut values);
+        }
+        let mut text = values.join(SEARCH_SEPARATOR);
+        text.make_ascii_lowercase();
+        text
+    }
+
+    pub fn matches_search(
+        &self,
+        row: &T,
+        query: &TextFilter,
+        namespace: Option<&str>,
+        label_sets: &[&BTreeMap<String, String>],
+        search_text: &str,
+    ) -> bool {
+        self.scope_matches(row, &(), query, namespace, label_sets)
+            && query.matches_search_text(search_text)
+    }
 }
 
 impl<T, C> FilterSpec<T, C> {
     pub fn matches_in(
+        &self,
+        row: &T,
+        context: &C,
+        query: &TextFilter,
+        namespace: Option<&str>,
+        label_sets: &[&BTreeMap<String, String>],
+    ) -> bool {
+        self.scope_matches(row, context, query, namespace, label_sets)
+            && self.text_matches(row, context, query)
+    }
+
+    fn scope_matches(
         &self,
         row: &T,
         context: &C,
@@ -225,10 +260,7 @@ impl<T, C> FilterSpec<T, C> {
         };
         let labels_ok = query.labels.is_empty()
             || (self.labels && label_sets.iter().any(|labels| query.matches_labels(labels)));
-        namespace_ok
-            && labels_ok
-            && self.node_matches(row, context, query)
-            && self.text_matches(row, context, query)
+        namespace_ok && labels_ok && self.node_matches(row, context, query)
     }
 
     fn node_matches(&self, row: &T, context: &C, query: &TextFilter) -> bool {
@@ -290,6 +322,22 @@ impl TextFilter {
                 .iter()
                 .any(|field| field.to_ascii_lowercase().contains(word.as_str()))
         })
+    }
+
+    pub fn matches_search_text(&self, search_text: &str) -> bool {
+        self.words
+            .iter()
+            .all(|word| search_text.contains(word.as_str()))
+    }
+
+    pub fn narrows(&self, previous: &Self) -> bool {
+        self.namespace == previous.namespace
+            && self.node == previous.node
+            && self.labels == previous.labels
+            && previous
+                .words
+                .iter()
+                .all(|old| self.words.iter().any(|new| new.contains(old.as_str())))
     }
 
     pub fn matches_namespace(&self, namespace: Option<&str>) -> bool {
@@ -568,5 +616,56 @@ mod tests {
         assert!(!toy_matches("ns:delta"));
         assert!(toy_matches("label:team=core"));
         assert!(!toy_matches("label:team=other"));
+    }
+
+    #[test]
+    fn search_text_matches_like_the_fields_it_joins() {
+        let row = Toy {
+            title: "Checkout-API".into(),
+            ..toy()
+        };
+        let text = TOY.search_text(&row);
+        let queries = [
+            "",
+            "check",
+            "API",
+            "checkout-api",
+            "beta",
+            "api beta",
+            "tbeta",
+            "api\nbeta",
+            "gamma",
+            "label:team=core",
+            "label:team=web",
+            "ns:delta",
+            "node:beta",
+        ];
+        for query in queries {
+            let query = TextFilter::parse(query);
+            let namespace = Some(row.namespace.as_str());
+            let labels = [&row.labels];
+            assert_eq!(
+                TOY.matches_search(&row, &query, namespace, &labels, &text),
+                TOY.matches(&row, &query, namespace, &labels),
+                "{query:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_query_narrows_one_whose_words_it_extends() {
+        let narrows =
+            |new: &str, old: &str| TextFilter::parse(new).narrows(&TextFilter::parse(old));
+        assert!(narrows("checkout", "check"));
+        assert!(narrows("check", ""));
+        assert!(narrows("check out", "check"));
+        assert!(narrows("xcheckx", "check"));
+        assert!(narrows("check ns:pay", "check ns:pay"));
+        assert!(!narrows("chec", "check"));
+        assert!(!narrows("", "check"));
+        assert!(!narrows("check ns:pay", "check"));
+        assert!(!narrows("check ns:payments", "check ns:pay"));
+        assert!(!narrows("check node:a", "check"));
+        assert!(!narrows("check l:app=web", "check l:app"));
     }
 }
