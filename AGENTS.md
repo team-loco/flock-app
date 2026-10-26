@@ -30,6 +30,9 @@ Every tool is pinned in `mise.toml`. `mise run <task>`:
   temporary kubeconfig holding only `kind-fleet-a`, `kind-fleet-b` and `kind-flock-loco` (real Loco), with `wait_until(..)` and
   `pause(..)` for real time. The ignored `live_pages_render_for_review` renders every live page
   dark, light and with non-default highlights into `target/qa/`.
+- `bench:ui` runs the `#[gpui::bench]` UI responsiveness benchmarks in `apps/flock-bench` (`-- --test` runs
+  each once; a Criterion filter such as `-- 'Snapshot apply'` picks one group). The package must never
+  enable gpui's `test-support`; the task fails if it does.
 - `e2e:up` / `e2e:down` create and remove the kind + Flux scenario clusters (fleet-a, fleet-b, and flock-loco with real Loco)
 - `e2e:test` brings them up, verifies, and runs every `FLOCK_E2E` test (flags: `--skip-up`, `--no-teardown`)
 

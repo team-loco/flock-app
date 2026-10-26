@@ -48,6 +48,7 @@ Spec column points at `design/`.
 | I5 | animation polish + parity pass, dark and light, every screen | | | todo |
 | I6 | headless screenshots (`mise run shot`) and UI interaction test helper (`flock_shots::Ui`), no on-screen window | claude | headless-shots | done |
 | CPERF | scale scenarios, snapshot benchmarks and performance fixes | claude | cperf-scale | done |
+| UIBENCH | GPUI UI responsiveness benchmarks (`mise run bench:ui`): snapshot apply, Pods table scroll and Pods filter typing at 1k/5k/20k pods | claude | gpui-bench | review |
 
 ## Font repair
 
