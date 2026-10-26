@@ -57,6 +57,17 @@ impl<T: 'static> SnapshotRows<T> {
         self.search.matching(self.items(), query)
     }
 
+    pub fn matched_items(&self, query: &TextFilter) -> Vec<(usize, &T)>
+    where
+        T: Searchable,
+    {
+        let items = self.items();
+        self.matching(query)
+            .iter()
+            .filter_map(|&ix| items.get(ix).map(|item| (ix, item)))
+            .collect()
+    }
+
     pub fn all(self: &Rc<Self>) -> Vec<SnapshotRow<T>> {
         self.rows(0..self.items().len())
     }
@@ -152,6 +163,12 @@ pub(crate) mod tests {
         assert_eq!(rows.first().map(SnapshotRow::index), Some(1));
         assert_eq!(source.all().len(), 2);
         assert_eq!(*source.matching(&TextFilter::parse("SEC")), [1]);
+        let matched = source.matched_items(&TextFilter::parse("fir"));
+        let found: Vec<(usize, &str)> = matched
+            .iter()
+            .map(|(ix, event)| (*ix, event.reason.as_str()))
+            .collect();
+        assert_eq!(found, [(0, "first")]);
     }
 
     #[test]

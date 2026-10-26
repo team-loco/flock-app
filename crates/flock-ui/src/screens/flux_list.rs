@@ -131,16 +131,15 @@ impl FluxListScreen {
     }
 
     fn refresh_rows(&mut self, cx: &mut Context<Self>) {
-        let flux = self.flux.items();
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let matched = self.flux.matching(&query);
-        let base: Vec<(usize, &FluxObject)> = matched
-            .iter()
-            .filter(|ix| self.objects.binary_search(ix).is_ok())
-            .filter_map(|&ix| flux.get(ix).map(|o| (ix, o)))
+        let base: Vec<(usize, &FluxObject)> = self
+            .flux
+            .matched_items(&query)
+            .into_iter()
+            .filter(|(ix, _)| self.objects.binary_search(ix).is_ok())
             .collect();
         let chips = StatusFilter::counts(base.iter().map(|(_, o)| o.status()))
             .into_iter()

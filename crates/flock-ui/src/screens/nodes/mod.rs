@@ -265,10 +265,10 @@ impl NodesScreen {
             (bar.query().clone(), bar.chip())
         };
         let pool = self.pool.as_deref();
-        let matched = self.nodes.matching(&query);
-        let base: Vec<(usize, &Node)> = matched
-            .iter()
-            .filter_map(|&ix| nodes.get(ix).map(|n| (ix, n)))
+        let base: Vec<(usize, &Node)> = self
+            .nodes
+            .matched_items(&query)
+            .into_iter()
             .filter(|(_, n)| pool.is_none_or(|pool| n.pool() == pool))
             .collect();
         let base_nodes: Vec<&Node> = base.iter().map(|(_, node)| *node).collect();

@@ -104,11 +104,7 @@ impl NamespacesScreen {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let matched = self.namespaces.matching(&query);
-        let base: Vec<(usize, &Namespace)> = matched
-            .iter()
-            .filter_map(|&ix| namespaces.get(ix).map(|n| (ix, n)))
-            .collect();
+        let base = self.namespaces.matched_items(&query);
         let chips = StatusFilter::counts(base.iter().map(|(_, n)| n.status))
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))
