@@ -7,8 +7,8 @@ use flock_core::emptiness::Noun;
 use flock_core::filter::label_values;
 use flock_core::multilog::LabelSelector;
 use flock_core::pods::{
-    Container, FailingElsewhere, Pod, PodFilter, PodPhase, PodQuery, Usage, filter_counts,
-    nav_counts,
+    Container, FailingElsewhere, Pod, PodFilter, PodPhase, PodQuery, PodSearch, Usage,
+    filter_counts, nav_counts,
 };
 use flock_core::related::Related;
 use flock_core::resources::{NamespaceCount, POD_LIST, namespace_counts};
@@ -72,6 +72,8 @@ pub struct PodsScreen {
     cluster_namespaces: BTreeMap<ClusterId, Vec<String>>,
     shown: usize,
     query: PodQuery,
+    pod_search: PodSearch,
+    matched: Option<Matched>,
     selected: Option<ResourceRef>,
     panel_open: bool,
     related: Vec<Related>,
@@ -98,6 +100,12 @@ pub struct PodsScreen {
 
 impl EventEmitter<Command> for PodsScreen {}
 
+struct Matched {
+    cluster: ClusterId,
+    query: PodQuery,
+    base: Vec<usize>,
+}
+
 #[derive(Clone)]
 struct PodRow {
     snapshot: Arc<Snapshot>,
@@ -105,11 +113,10 @@ struct PodRow {
 }
 
 impl PodRow {
-    fn all(snapshot: &Arc<Snapshot>, matched: &[&Pod]) -> Vec<Self> {
+    fn all(snapshot: &Arc<Snapshot>, matched: &[usize]) -> Vec<Self> {
         matched
             .iter()
-            .filter_map(|pod| snapshot.pods.element_offset(pod))
-            .map(|ix| Self {
+            .map(|&ix| Self {
                 snapshot: Arc::clone(snapshot),
                 ix,
             })
@@ -169,7 +176,7 @@ impl PodsScreen {
                 };
                 this.query.text = text;
                 this.query.filter = PodFilter::ALL.get(chip).copied().unwrap_or_default();
-                this.refresh(cx);
+                this.refresh_rows(cx);
             }),
             cx.subscribe(&search, |this, state, event: &InputEvent, cx| {
                 if let InputEvent::Change = event {
@@ -202,6 +209,8 @@ impl PodsScreen {
             cluster_namespaces: BTreeMap::new(),
             shown: 0,
             query: PodQuery::default(),
+            pod_search: PodSearch::default(),
+            matched: None,
             selected: None,
             panel_open: true,
             related: Vec::new(),
@@ -229,6 +238,8 @@ impl PodsScreen {
 
     pub fn set_snapshot(&mut self, snapshot: &Arc<Snapshot>) {
         self.snapshot = Arc::clone(snapshot);
+        self.pod_search = PodSearch::default();
+        self.matched = None;
         self.related = snapshot
             .details
             .values()
@@ -345,11 +356,27 @@ impl PodsScreen {
         Some((target, label))
     }
 
-    fn cluster_pods(&self) -> Vec<&Pod> {
-        match &self.cluster {
-            Some(cluster) => self.query.base(&self.snapshot.pods, cluster),
-            None => Vec::new(),
-        }
+    fn base(&mut self) -> Vec<usize> {
+        let Some(cluster) = self.cluster.clone() else {
+            self.matched = None;
+            return Vec::new();
+        };
+        let pods = &self.snapshot.pods;
+        let base = match self.matched.take() {
+            Some(previous)
+                if previous.cluster == cluster && self.query.narrows(&previous.query) =>
+            {
+                self.query
+                    .base_within(pods, &self.pod_search, &cluster, previous.base)
+            }
+            _ => self.query.base(pods, &self.pod_search, &cluster),
+        };
+        self.matched = Some(Matched {
+            cluster,
+            query: self.query.clone(),
+            base: base.clone(),
+        });
+        base
     }
 
     fn namespace_counts(&self) -> Vec<NamespaceCount> {
@@ -393,21 +420,10 @@ impl PodsScreen {
                 .map(|pod| &pod.labels),
         );
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
-        let rows: Vec<PodRow> = match &self.cluster {
-            Some(cluster) => {
-                let matched = self.query.apply(&self.snapshot.pods, cluster);
-                PodRow::all(&self.snapshot, &matched)
-            }
-            None => Vec::new(),
-        };
         let counts = self.namespace_counts();
         let total = self.cluster_total();
         let chosen = self.query.namespace.as_deref();
         set_namespace_options(&self.namespace, &counts, total, chosen, cx);
-        let chips = filter_counts(&self.cluster_pods())
-            .into_iter()
-            .map(|(filter, n)| chip_label(filter.label(), n))
-            .collect();
         let elsewhere = self
             .cluster
             .as_ref()
@@ -418,6 +434,19 @@ impl PodsScreen {
                 cx.notify();
             }
         });
+        self.refresh_rows(cx);
+    }
+
+    fn refresh_rows(&mut self, cx: &mut Context<Self>) {
+        let base = self.base();
+        let pods = &self.snapshot.pods;
+        let matched = self.query.apply(pods, &base);
+        let rows = PodRow::all(&self.snapshot, &matched);
+        let base_pods: Vec<&Pod> = base.iter().filter_map(|&ix| pods.get(ix)).collect();
+        let chips = filter_counts(&base_pods)
+            .into_iter()
+            .map(|(filter, n)| chip_label(filter.label(), n))
+            .collect();
         let shown = rows.len();
         self.shown = shown;
         let total = self.cluster_total();
