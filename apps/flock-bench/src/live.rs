@@ -252,7 +252,8 @@ pub fn bench_stream<T: Send + 'static>(
 }
 
 struct Step<C> {
-    next: Option<Snapshot>,
+    next: Option<Arc<Snapshot>>,
+    sent: Arc<Snapshot>,
     check: C,
     stop: Arc<AtomicBool>,
 }
@@ -271,8 +272,10 @@ pub fn bench_snapshots<C>(
             session.drain_commands();
             let stop = Arc::new(AtomicBool::new(false));
             let (snapshot, check) = next(generation.get());
+            let sent = Arc::new(snapshot);
             let pending = Step {
-                next: Some(snapshot),
+                next: Some(sent.clone()),
+                sent,
                 check,
                 stop: stop.clone(),
             };
@@ -281,11 +284,12 @@ pub fn bench_snapshots<C>(
         },
         |step, _, _, cx| {
             if let Some(next) = step.next.take() {
-                let sent = session.updates.try_send(Update::Snapshot(Arc::new(next)));
+                let sent = session.updates.try_send(Update::Snapshot(next));
                 assert!(sent.is_ok(), "the store stopped listening");
                 return;
             }
-            if landed(&session.shell.read(cx).state().snapshot, &step.check) {
+            let shown = &session.shell.read(cx).state().snapshot;
+            if Arc::ptr_eq(shown, &step.sent) && landed(shown, &step.check) {
                 applied.set(applied.get() + 1);
                 step.stop.store(true, Ordering::Release);
             }
@@ -295,14 +299,23 @@ pub fn bench_snapshots<C>(
     applied.get()
 }
 
-struct Pan {
+struct Wheel {
     first_draw: u64,
     stop: Arc<AtomicBool>,
 }
 
 pub fn bench_pan(session: &Session, cx: &mut BenchAppContext) -> u64 {
+    bench_scroll(session, pane_center(), PAN_TURNS, pan_step, cx)
+}
+
+pub fn bench_scroll(
+    session: &Session,
+    position: Point<Pixels>,
+    turns: u64,
+    delta: impl Fn(u64) -> Point<Pixels>,
+    cx: &mut BenchAppContext,
+) -> u64 {
     let sessions = Rc::new(Cell::new(0_u64));
-    let center = pane_center();
     cx.bench_renderer_session(
         SESSION_TIMEOUT,
         |cx| {
@@ -311,24 +324,24 @@ pub fn bench_pan(session: &Session, cx: &mut BenchAppContext) -> u64 {
                 .update_window(session.window, |_, window, _| draws(window))
                 .unwrap_or_default();
             let stop = Arc::new(AtomicBool::new(false));
-            let pan = Pan {
+            let wheel = Wheel {
                 first_draw,
                 stop: stop.clone(),
             };
-            (pan, session.window, stop)
+            (wheel, session.window, stop)
         },
-        |pan, turn, window, cx| {
-            let wheel = ScrollWheelEvent {
-                position: center,
-                delta: ScrollDelta::Pixels(pan_step(turn)),
+        |wheel, turn, window, cx| {
+            let event = ScrollWheelEvent {
+                position,
+                delta: ScrollDelta::Pixels(delta(turn)),
                 ..ScrollWheelEvent::default()
             };
-            window.dispatch_event(PlatformInput::ScrollWheel(wheel), cx);
-            if turn + 1 == PAN_TURNS {
-                let drawn = draws(window) - pan.first_draw;
-                assert!(drawn >= turn, "{drawn} frames for {turn} pan steps");
+            window.dispatch_event(PlatformInput::ScrollWheel(event), cx);
+            if turn + 1 == turns {
+                let drawn = draws(window) - wheel.first_draw;
+                assert!(drawn >= turn, "{drawn} frames for {turn} wheel steps");
                 sessions.set(sessions.get() + 1);
-                pan.stop.store(true, Ordering::Release);
+                wheel.stop.store(true, Ordering::Release);
             }
         },
     );
