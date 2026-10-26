@@ -21,7 +21,7 @@ export const ICON_ASSET_SIZE = 224;
 
 export const iconPath = (size: number, format: "png" | "webp") => `/icon-${size}.${format}`;
 
-export type Accent = "primary" | "violet" | "ok" | "err" | "warn";
+export type Accent = "primary" | "violet" | "ok" | "err";
 
 export type Feature = {
   kicker: string;
@@ -37,76 +37,51 @@ export const FEATURES: Feature[] = [
   {
     kicker: "Multi-cluster",
     accent: "primary",
-    title: "Every cluster in one table",
-    body: "Flock is multi-cluster from the ground up. Every cluster stays connected, so their state, capacity and problems sit next to each other instead of behind a context switch.",
+    title: "Every cluster in one window",
+    body: "Every cluster in your kubeconfig stays connected. Pick a workload and see it on all of them, with only the differences shown.",
     points: [
       "all clusters connected at once",
-      "compare clusters side by side in split panes",
+      "compare a workload across clusters",
       "native, written in Rust",
+      "open source, Apache-2.0",
     ],
     screen: "flock",
     alt: "Flock listing every connected cluster with its status, capacity and problems",
   },
   {
-    kicker: "Metrics",
+    kicker: "GitOps",
     accent: "violet",
-    title: "Resources and metrics, visualized",
-    body: "CPU, memory and pod capacity for every node, pool and namespace, with requests and limits drawn on the same bar.",
+    title: "See which commit is on which cluster",
+    body: "Flux Kustomizations, HelmReleases and sources for every cluster, linked to the commit that changed them.",
     points: [
-      "live usage per node and namespace",
-      "requests vs. allocatable per pool",
-      "history over 1h, 6h, 24h, 7d",
+      "commit-to-cluster tracing",
+      "drift against what Flux last applied",
+      "dependency graph; reconcile, suspend, diff",
     ],
-    screen: "nodes",
-    alt: "Node list with CPU, memory and pod usage bars",
-  },
-  {
-    kicker: "Logs and terminal",
-    accent: "ok",
-    title: "Real-time logs and a terminal for every pod",
-    body: "Logs stream as they are written, parsed into fields. Open a shell in any container from the same window.",
-    points: [
-      "real-time log streaming",
-      "logs from before the last restart",
-      "terminal in any container",
-    ],
-    screen: "logs",
-    alt: "Streaming pod logs parsed into fields",
+    screen: "changes",
+    alt: "Commits listed with their rollout status on each cluster, and the rendered diff of the selected commit",
   },
   {
     kicker: "Problems",
     accent: "err",
-    title: "Errors as Kubernetes reports them",
-    body: "Each failing object with its reason, message and age, straight from the API. Filter by severity, open the object in one click.",
-    points: ["grouped by cluster", "conditions and events alongside", "one list for every cluster"],
+    title: "Everything that's broken, in one list",
+    body: "Failing objects from every cluster, with the reason Kubernetes gives and the events next to it.",
+    points: ["grouped by cluster", "conditions and events alongside", "cluster health in the menu bar"],
     screen: "fleet-problems",
     alt: "Problems from every cluster, grouped by cluster, with an inspector showing events",
   },
   {
-    kicker: "Helm",
-    accent: "warn",
-    title: "Helm releases and Flux",
-    body: "Every Helm release with its chart, revision history and values. Flux Kustomizations and HelmReleases for every cluster, with the commit that changed them.",
+    kicker: "Debugging",
+    accent: "ok",
+    title: "Logs, shells and debug containers",
+    body: "Stream logs from every pod of a workload at once. Open a shell in any container, or a debug container when the image has none.",
     points: [
-      "chart and app version per release",
-      "release history and values",
-      "reconcile, suspend, diff for Flux",
+      "logs from all pods, parsed into fields",
+      "logs from before the last restart",
+      "port-forward and YAML editing from ⌘K",
     ],
-    screen: "helm-releases",
-    alt: "Helm releases across clusters with chart and app versions",
-  },
-  {
-    kicker: "Port forwarding and editing",
-    accent: "primary",
-    title: "Port forwards and a resource editor",
-    body: "Forward a port from any pod or service. Edit any resource as YAML.",
-    points: [
-      "port-forward from ⌘K",
-      "YAML editor for any resource",
-      "VS Code shortcuts: ⌘P, ⌘⇧P, ⌘B, ⌘J",
-    ],
-    screen: "command",
-    alt: "Command palette open over a cluster",
+    screen: "logs",
+    alt: "Streaming pod logs parsed into fields",
   },
 ];
 
