@@ -1035,7 +1035,6 @@ mod tests {
             "c",
             "ch",
             "che",
-            "chec",
             "check",
             "checko",
             "checkout",

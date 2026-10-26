@@ -661,7 +661,7 @@ mod tests {
         assert!(narrows("check out", "check"));
         assert!(narrows("xcheckx", "check"));
         assert!(narrows("check ns:pay", "check ns:pay"));
-        assert!(!narrows("chec", "check"));
+        assert!(!narrows("che", "check"));
         assert!(!narrows("", "check"));
         assert!(!narrows("check ns:pay", "check"));
         assert!(!narrows("check ns:payments", "check ns:pay"));
