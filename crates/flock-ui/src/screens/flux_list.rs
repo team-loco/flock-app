@@ -1,7 +1,10 @@
+use std::rc::Rc;
+use std::sync::Arc;
+
 use flock_core::emptiness::Noun;
 use flock_core::filter::{StatusFilter, label_values};
 use flock_core::overview::plural;
-use flock_core::{ClusterSummary, Command, FluxAction, FluxObject, Page};
+use flock_core::{ClusterId, ClusterSummary, Command, FluxAction, FluxObject, Page, Snapshot};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
     Render, Styled, WeakEntity, Window, div, px,
@@ -9,8 +12,8 @@ use gpui::{
 
 use super::{ListShape, ScreenEvent, empty_list};
 use crate::kit::{
-    Column, FilterBar, FilterEvent, MenuItem, Table, TableEvent, chip_label, reason_cell,
-    reason_tooltip,
+    Column, FilterBar, FilterEvent, MenuItem, SnapshotRow, SnapshotRows, Table, TableEvent,
+    chip_label, reason_cell, reason_tooltip,
 };
 use crate::screens::{edit_item, new_tab_item};
 use crate::theme::{REASON_MIN, REASON_WEIGHT};
@@ -23,12 +26,16 @@ const STATUS_WEIGHT: f32 = 2.;
 const STATUS_MIN: Pixels = px(300.);
 const REASON: &str = "Reason";
 
+type FluxRow = SnapshotRow<FluxObject>;
+
 pub struct FluxListScreen {
+    cluster: Option<ClusterId>,
     cluster_name: String,
     page: Page,
     shown: usize,
-    objects: Vec<FluxObject>,
-    table: Entity<Table<FluxObject>>,
+    flux: Rc<SnapshotRows<FluxObject>>,
+    objects: Vec<usize>,
+    table: Entity<Table<FluxRow>>,
     filter: Entity<FilterBar>,
 }
 
@@ -40,11 +47,9 @@ impl FluxListScreen {
         let table = cx.new(|cx| {
             Table::new("flux-list", columns(), cx)
                 .click_opens()
-                .row_actions(move |object: &FluxObject, _: &[&FluxObject]| {
-                    row_items(object, &screen)
-                })
-                .row_key(|o: &FluxObject| format!("{}/{}", o.key.namespace, o.key.name).into())
-                .type_ahead(|o: &FluxObject| o.key.name.clone().into())
+                .row_actions(move |object: &FluxRow, _: &[&FluxRow]| row_items(object, &screen))
+                .row_key(|o: &FluxRow| format!("{}/{}", o.key.namespace, o.key.name).into())
+                .type_ahead(|o: &FluxRow| o.key.name.clone().into())
         });
         let filter = cx.new(|cx| FilterBar::new("flux-filter", window, cx));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
@@ -61,9 +66,11 @@ impl FluxListScreen {
         })
         .detach();
         Self {
+            cluster: None,
             cluster_name: String::new(),
             page: Page::Kustomizations,
             shown: 0,
+            flux: SnapshotRows::empty(),
             objects: Vec::new(),
             table,
             filter,
@@ -82,25 +89,28 @@ impl FluxListScreen {
         &mut self,
         cluster: &ClusterSummary,
         page: Page,
-        flux: &[FluxObject],
+        snapshot: &Arc<Snapshot>,
         cx: &mut Context<Self>,
     ) {
         self.cluster_name.clone_from(&cluster.name);
-        let changed = self.page != page;
+        let changed = self.page != page || self.cluster.as_ref() != Some(&cluster.id);
         self.page = page;
+        self.cluster = Some(cluster.id.clone());
         let cluster = &cluster.id;
         let scope = format!("{}/{}", cluster.as_str(), page.label());
         self.table
             .update(cx, |table, cx| table.set_scope(scope, cx));
-        let objects: Vec<FluxObject> = flux
-            .iter()
-            .filter(|o| &o.key.cluster == cluster && o.key.kind.page() == page)
-            .cloned()
-            .collect();
-        if !changed && self.objects == objects {
+        if !changed && self.flux.from(snapshot) {
             return;
         }
-        self.objects = objects;
+        self.flux = SnapshotRows::new(snapshot, |snapshot| &snapshot.flux);
+        self.objects = snapshot
+            .flux
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| &o.key.cluster == cluster && o.key.kind.page() == page)
+            .map(|(ix, _)| ix)
+            .collect();
         self.refresh(cx);
     }
 
@@ -109,23 +119,30 @@ impl FluxListScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let labels = label_values(self.objects.iter().map(|object| &object.labels));
+        let flux = self.flux.items();
+        let objects = || {
+            self.objects
+                .iter()
+                .filter_map(|&ix| flux.get(ix).map(|o| (ix, o)))
+        };
+        let labels = label_values(objects().map(|(_, object)| &object.labels));
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
-        let base: Vec<&FluxObject> = self.objects.iter().filter(|o| o.matches(&query)).collect();
-        let chips = StatusFilter::counts(base.iter().map(|o| o.status()))
+        let base: Vec<(usize, &FluxObject)> =
+            objects().filter(|(_, o)| o.matches(&query)).collect();
+        let chips = StatusFilter::counts(base.iter().map(|(_, o)| o.status()))
             .into_iter()
             .map(|(filter, n)| chip_label(filter.label(), n))
             .collect();
         let chip = StatusFilter::at(chip);
-        let rows: Vec<FluxObject> = base
+        let kept = base
             .into_iter()
-            .filter(|o| chip.keeps(o.status()))
-            .cloned()
-            .collect();
+            .filter(|(_, o)| chip.keeps(o.status()))
+            .map(|(ix, _)| ix);
+        let rows = self.flux.rows(kept);
         let shown = rows.len();
         self.shown = shown;
         let total = self.objects.len();
@@ -217,29 +234,31 @@ fn row_items(object: &FluxObject, screen: &WeakEntity<FluxListScreen>) -> Vec<Me
     items
 }
 
-fn columns() -> Vec<Column<FluxObject>> {
+fn columns() -> Vec<Column<FluxRow>> {
     vec![
-        Column::status_text("Name", FluxObject::status, |o: &FluxObject| {
-            o.key.name.clone().into()
-        })
+        Column::status_text(
+            "Name",
+            |o: &FluxRow| o.status(),
+            |o: &FluxRow| o.key.name.clone().into(),
+        )
         .mono()
         .highlight()
         .flex(NAME_WEIGHT, NAME_MIN)
-        .sort_by_key(|o: &FluxObject| o.key.name.clone()),
-        Column::text("Namespace", |o: &FluxObject| o.key.namespace.clone().into())
+        .sort_by_key(|o: &FluxRow| o.key.name.clone()),
+        Column::text("Namespace", |o: &FluxRow| o.key.namespace.clone().into())
             .mono()
             .fixed(NAMESPACE_WIDTH)
-            .sort_by_key(|o: &FluxObject| o.key.namespace.clone()),
-        Column::text("Kind", |o: &FluxObject| o.key.kind.label().into())
+            .sort_by_key(|o: &FluxRow| o.key.namespace.clone()),
+        Column::text("Kind", |o: &FluxRow| o.key.kind.label().into())
             .fixed(KIND_WIDTH)
-            .sort_by_key(|o: &FluxObject| o.key.kind.label()),
-        Column::text("Status", |o: &FluxObject| o.phase.label().into())
+            .sort_by_key(|o: &FluxRow| o.key.kind.label()),
+        Column::text("Status", |o: &FluxRow| o.phase.label().into())
             .flex(STATUS_WEIGHT, STATUS_MIN),
-        Column::new(REASON, |o: &FluxObject, palette| {
+        Column::new(REASON, |o: &FluxRow, palette| {
             reason_cell(o.status(), o.current_diagnosis(), palette)
         })
-        .tooltip(|o: &FluxObject| reason_tooltip(o.current_diagnosis()))
+        .tooltip(|o: &FluxRow| reason_tooltip(o.current_diagnosis()))
         .flex(REASON_WEIGHT, REASON_MIN)
-        .sort_by_key(|o: &FluxObject| o.current_diagnosis().map(|d| d.reason.clone())),
+        .sort_by_key(|o: &FluxRow| o.current_diagnosis().map(|d| d.reason.clone())),
     ]
 }

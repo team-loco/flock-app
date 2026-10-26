@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -157,9 +158,14 @@ impl EventFilter {
     }
 }
 
-pub fn filter_counts(events: &[Event], query: &TextFilter) -> Vec<(EventFilter, usize)> {
-    let matching: Vec<&Event> = events
+pub fn filter_counts(
+    events: &[Event],
+    scoped: &[usize],
+    query: &TextFilter,
+) -> Vec<(EventFilter, usize)> {
+    let matching: Vec<&Event> = scoped
         .iter()
+        .filter_map(|&ix| events.get(ix))
         .filter(|e| e.matches(EventFilter::All, query))
         .collect();
     EventFilter::ALL
@@ -168,14 +174,16 @@ pub fn filter_counts(events: &[Event], query: &TextFilter) -> Vec<(EventFilter, 
         .collect()
 }
 
+fn warnings_order(a: &Event, b: &Event) -> Ordering {
+    b.is_warning()
+        .cmp(&a.is_warning())
+        .then(b.status.cmp(&a.status))
+        .then(a.age.cmp(&b.age))
+}
+
 pub fn warnings_first(events: &[Event]) -> Vec<Event> {
     let mut sorted = events.to_vec();
-    sorted.sort_by(|a, b| {
-        b.is_warning()
-            .cmp(&a.is_warning())
-            .then(b.status.cmp(&a.status))
-            .then(a.age.cmp(&b.age))
-    });
+    sorted.sort_by(warnings_order);
     sorted
 }
 
@@ -187,23 +195,30 @@ pub fn counts(events: &[Event]) -> Counts {
     }
 }
 
-pub fn in_namespace(events: &[Event], namespace: Option<&str>) -> Vec<Event> {
+pub fn in_namespace(events: &[Event], namespace: Option<&str>) -> Vec<usize> {
     events
         .iter()
-        .filter(|event| {
+        .enumerate()
+        .filter(|(_, event)| {
             namespace.is_none_or(|namespace| event.namespace.as_deref() == Some(namespace))
         })
-        .cloned()
+        .map(|(ix, _)| ix)
         .collect()
 }
 
-pub fn filter_events(events: &[Event], filter: EventFilter, query: &TextFilter) -> Vec<Event> {
-    let kept: Vec<Event> = events
+pub fn filter_events(
+    events: &[Event],
+    scoped: &[usize],
+    filter: EventFilter,
+    query: &TextFilter,
+) -> Vec<usize> {
+    let mut kept: Vec<(usize, &Event)> = scoped
         .iter()
-        .filter(|e| e.matches(filter, query))
-        .cloned()
+        .filter_map(|&ix| events.get(ix).map(|event| (ix, event)))
+        .filter(|(_, event)| event.matches(filter, query))
         .collect();
-    warnings_first(&kept)
+    kept.sort_by(|(_, a), (_, b)| warnings_order(a, b));
+    kept.into_iter().map(|(ix, _)| ix).collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -265,28 +280,30 @@ impl ClusterEvent {
     }
 }
 
+fn newest_order(a: &ClusterEvent, b: &ClusterEvent) -> Ordering {
+    a.event
+        .age
+        .cmp(&b.event.age)
+        .then_with(|| a.cluster.cmp(&b.cluster))
+        .then_with(|| a.event.key().cmp(&b.event.key()))
+}
+
 pub fn newest_first(events: &mut [ClusterEvent]) {
-    events.sort_by(|a, b| {
-        a.event
-            .age
-            .cmp(&b.event.age)
-            .then_with(|| a.cluster.cmp(&b.cluster))
-            .then_with(|| a.event.key().cmp(&b.event.key()))
-    });
+    events.sort_by(newest_order);
 }
 
 pub fn filter_cluster_events(
     events: &[ClusterEvent],
     filter: EventFilter,
     query: &TextFilter,
-) -> Vec<ClusterEvent> {
-    let mut kept: Vec<ClusterEvent> = events
+) -> Vec<usize> {
+    let mut kept: Vec<(usize, &ClusterEvent)> = events
         .iter()
-        .filter(|event| event.matches(filter, query))
-        .cloned()
+        .enumerate()
+        .filter(|(_, event)| event.matches(filter, query))
         .collect();
-    newest_first(&mut kept);
-    kept
+    kept.sort_by(|(_, a), (_, b)| newest_order(a, b));
+    kept.into_iter().map(|(ix, _)| ix).collect()
 }
 
 pub fn cluster_filter_counts(
@@ -326,6 +343,15 @@ mod tests {
         events.iter().map(|e| e.reason.as_str()).collect()
     }
 
+    fn filtered<'a>(events: &'a [Event], filter: EventFilter, query: &str) -> Vec<&'a str> {
+        let all: Vec<usize> = (0..events.len()).collect();
+        let query = TextFilter::parse(query);
+        filter_events(events, &all, filter, &query)
+            .into_iter()
+            .map(|ix| events[ix].reason.as_str())
+            .collect()
+    }
+
     #[test]
     fn list_label_tokens_match_metadata() {
         let mut event = event(Status::Ok, "Created", 1);
@@ -340,9 +366,9 @@ mod tests {
         let mut other = rows[0].clone();
         other.namespace = Some("default".into());
         rows.push(other);
-        assert_eq!(in_namespace(&rows, None).len(), 2);
-        assert_eq!(in_namespace(&rows, Some("payments")).len(), 1);
-        assert_eq!(in_namespace(&rows, Some("missing")).len(), 0);
+        assert_eq!(in_namespace(&rows, None), [0, 1]);
+        assert_eq!(in_namespace(&rows, Some("payments")), [0]);
+        assert_eq!(in_namespace(&rows, Some("missing")), [0_usize; 0]);
     }
 
     #[test]
@@ -420,36 +446,18 @@ mod tests {
             event(Status::Warn, "FailedMount", 6),
         ];
         assert_eq!(
-            reasons(&filter_events(
-                &events,
-                EventFilter::Warnings,
-                &TextFilter::default()
-            )),
+            filtered(&events, EventFilter::Warnings, ""),
             ["BackOff", "FailedMount"]
         );
+        assert_eq!(filtered(&events, EventFilter::Normal, ""), ["Scheduled"]);
         assert_eq!(
-            reasons(&filter_events(
-                &events,
-                EventFilter::Normal,
-                &TextFilter::default()
-            )),
-            ["Scheduled"]
-        );
-        assert_eq!(
-            reasons(&filter_events(
-                &events,
-                EventFilter::All,
-                &TextFilter::parse("mount")
-            )),
+            filtered(&events, EventFilter::All, "mount"),
             ["FailedMount"]
         );
+        assert_eq!(filtered(&events, EventFilter::Normal, "backoff"), [""; 0]);
         assert_eq!(
-            reasons(&filter_events(
-                &events,
-                EventFilter::Normal,
-                &TextFilter::parse("backoff")
-            )),
-            [""; 0]
+            filter_events(&events, &[2, 0], EventFilter::All, &TextFilter::default()),
+            [2, 0]
         );
     }
 
@@ -476,7 +484,10 @@ mod tests {
             flux_event("east", "GitRepository", "NewArtifact", 1),
         ];
         let all = filter_cluster_events(&rows, EventFilter::All, &TextFilter::default());
-        let reasons: Vec<&str> = all.iter().map(|e| e.event.reason.as_str()).collect();
+        let reasons: Vec<&str> = all
+            .iter()
+            .map(|&ix| rows[ix].event.reason.as_str())
+            .collect();
         assert_eq!(
             reasons,
             ["NewArtifact", "UpgradeFailed", "ReconciliationSucceeded"]

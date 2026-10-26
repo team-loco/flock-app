@@ -1,3 +1,6 @@
+use std::rc::Rc;
+use std::sync::Arc;
+
 use flock_core::events::{ClusterEvent, EventFilter, cluster_filter_counts, filter_cluster_events};
 use flock_core::filter::label_values;
 use flock_core::time::age;
@@ -8,7 +11,10 @@ use gpui::{
 };
 
 use super::events::reason_cell;
-use crate::kit::{Column, EmptyState, FilterBar, FilterEvent, Table, TableEvent, chip_label};
+use crate::kit::{
+    Column, EmptyState, FilterBar, FilterEvent, SnapshotRow, SnapshotRows, Table, TableEvent,
+    chip_label,
+};
 use crate::theme::{
     EVENT_AGE_WIDTH, EVENT_COUNT_WIDTH, EVENT_MESSAGE_MIN, EVENT_MESSAGE_WEIGHT,
     EVENT_NAMESPACE_WIDTH, EVENT_OBJECT_MIN, EVENT_OBJECT_WEIGHT, EVENT_REASON_WIDTH,
@@ -19,11 +25,13 @@ const NO_NAMESPACE: &str = "—";
 const NO_EVENTS: &str = "No Flux events on any connected cluster.";
 const NO_MATCH: &str = "No Flux events match this filter.";
 
+type FluxEventRow = SnapshotRow<ClusterEvent>;
+
 pub struct FluxEventsScreen {
-    events: Vec<ClusterEvent>,
+    events: Rc<SnapshotRows<ClusterEvent>>,
     shown: usize,
     filter: Entity<FilterBar>,
-    table: Entity<Table<ClusterEvent>>,
+    table: Entity<Table<FluxEventRow>>,
 }
 
 impl EventEmitter<Command> for FluxEventsScreen {}
@@ -32,16 +40,16 @@ impl FluxEventsScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
             Table::new("flux-events", columns(), cx)
-                .type_ahead(|event: &ClusterEvent| event.name().to_owned().into())
-                .row_key(|event: &ClusterEvent| event.key().into())
+                .type_ahead(|event: &FluxEventRow| event.name().to_owned().into())
+                .row_key(|event: &FluxEventRow| event.key().into())
                 .click_opens()
-                .row_status(|e: &ClusterEvent| {
+                .row_status(|e: &FluxEventRow| {
                     (e.event.status == Status::Err).then_some(Status::Err)
                 })
         });
         cx.subscribe(&table, |_, table, event: &TableEvent, cx| {
             if let TableEvent::Opened(ix) = *event
-                && let Some(command) = table.read(cx).row(ix).and_then(ClusterEvent::open)
+                && let Some(command) = table.read(cx).row(ix).and_then(|row| row.open())
             {
                 cx.emit(command);
             }
@@ -53,7 +61,7 @@ impl FluxEventsScreen {
         })
         .detach();
         Self {
-            events: Vec::new(),
+            events: SnapshotRows::empty(),
             shown: 0,
             filter,
             table,
@@ -68,19 +76,20 @@ impl FluxEventsScreen {
         gpui::Focusable::focus_handle(&self.table, cx)
     }
 
-    pub fn set_snapshot(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
-        if self.events == snapshot.flux_events {
+    pub fn set_snapshot(&mut self, snapshot: &Arc<Snapshot>, cx: &mut Context<Self>) {
+        if self.events.from(snapshot) {
             return;
         }
-        self.events.clone_from(&snapshot.flux_events);
+        self.events = SnapshotRows::new(snapshot, |snapshot| &snapshot.flux_events);
         self.refresh(cx);
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let labels = label_values(self.events.iter().map(|row| &row.event.labels));
+        let events = self.events.items();
+        let labels = label_values(events.iter().map(|row| &row.event.labels));
         self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
         let query = self.filter.read(cx).query().clone();
-        let chips = cluster_filter_counts(&self.events, &query)
+        let chips = cluster_filter_counts(events, &query)
             .into_iter()
             .map(|(filter, count)| chip_label(filter.label(), count))
             .collect();
@@ -89,9 +98,11 @@ impl FluxEventsScreen {
             bar.chip()
         });
         let filter = EventFilter::ALL.get(chip).copied().unwrap_or_default();
-        let rows = filter_cluster_events(&self.events, filter, &query);
+        let matched = filter_cluster_events(events, filter, &query);
+        let total = events.len();
+        let rows = self.events.rows(matched);
         self.shown = rows.len();
-        let (shown, total) = (rows.len(), self.events.len());
+        let shown = rows.len();
         self.filter
             .update(cx, |bar, cx| bar.set_matches(shown, total, cx));
         let words = query.words;
@@ -105,7 +116,7 @@ impl FluxEventsScreen {
 
 impl Render for FluxEventsScreen {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let body: AnyElement = if self.events.is_empty() {
+        let body: AnyElement = if self.events.items().is_empty() {
             EmptyState::new(NO_EVENTS).into_any_element()
         } else if self.shown == 0 {
             EmptyState::new(NO_MATCH).into_any_element()
@@ -121,28 +132,28 @@ impl Render for FluxEventsScreen {
     }
 }
 
-fn columns() -> Vec<Column<ClusterEvent>> {
+fn columns() -> Vec<Column<FluxEventRow>> {
     vec![
-        Column::new("Reason", |e: &ClusterEvent, _| reason_cell(&e.event))
+        Column::new("Reason", |e: &FluxEventRow, _| reason_cell(&e.event))
             .fit_by(
-                |e: &ClusterEvent| e.event.reason.clone().into(),
+                |e: &FluxEventRow| e.event.reason.clone().into(),
                 GLYPH_SLOT + SPACE_4,
             )
             .fixed(EVENT_REASON_WIDTH)
-            .sort_by_key(|e: &ClusterEvent| e.event.reason.clone()),
-        Column::text("Cluster", |e: &ClusterEvent| e.cluster_name.clone().into())
+            .sort_by_key(|e: &FluxEventRow| e.event.reason.clone()),
+        Column::text("Cluster", |e: &FluxEventRow| e.cluster_name.clone().into())
             .highlight()
             .fixed(FLUX_EVENT_CLUSTER_WIDTH)
-            .sort_by_key(|e: &ClusterEvent| e.cluster_name.clone()),
-        Column::text("Object", |e: &ClusterEvent| e.event.object.clone().into())
+            .sort_by_key(|e: &FluxEventRow| e.cluster_name.clone()),
+        Column::text("Object", |e: &FluxEventRow| e.event.object.clone().into())
             .highlight()
             .selectable()
             .mono()
             .flex(EVENT_OBJECT_WEIGHT, EVENT_OBJECT_MIN)
-            .sort_by_key(|e: &ClusterEvent| e.event.object.clone()),
+            .sort_by_key(|e: &FluxEventRow| e.event.object.clone()),
         Column::colored_text(
             "Namespace",
-            |e: &ClusterEvent| {
+            |e: &FluxEventRow| {
                 e.event
                     .namespace
                     .clone()
@@ -152,32 +163,32 @@ fn columns() -> Vec<Column<ClusterEvent>> {
             |_, p| p.fg2,
         )
         .fixed(EVENT_NAMESPACE_WIDTH)
-        .sort_by_key(|e: &ClusterEvent| e.event.namespace.clone()),
+        .sort_by_key(|e: &FluxEventRow| e.event.namespace.clone()),
         Column::colored_text(
             "Message",
-            |e: &ClusterEvent| e.event.message.clone().into(),
+            |e: &FluxEventRow| e.event.message.clone().into(),
             |_, p| p.fg2,
         )
         .highlight()
         .mono()
-        .tooltip(|e: &ClusterEvent| e.event.message.clone().into())
+        .tooltip(|e: &FluxEventRow| e.event.message.clone().into())
         .flex(EVENT_MESSAGE_WEIGHT, EVENT_MESSAGE_MIN),
         Column::colored_text(
             "Age",
-            |e: &ClusterEvent| age(e.event.age).into(),
+            |e: &FluxEventRow| age(e.event.age).into(),
             |_, p| p.mute,
         )
         .mono()
         .fixed(EVENT_AGE_WIDTH)
-        .sort_by_key(|e: &ClusterEvent| e.event.age),
+        .sort_by_key(|e: &FluxEventRow| e.event.age),
         Column::colored_text(
             "Count",
-            |e: &ClusterEvent| e.event.count.to_string().into(),
+            |e: &FluxEventRow| e.event.count.to_string().into(),
             |_, p| p.mute,
         )
         .mono()
         .end()
         .fixed(EVENT_COUNT_WIDTH)
-        .sort_by_key(|e: &ClusterEvent| e.event.count),
+        .sort_by_key(|e: &FluxEventRow| e.event.count),
     ]
 }

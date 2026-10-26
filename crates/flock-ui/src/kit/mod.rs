@@ -25,6 +25,7 @@ mod prose;
 mod section;
 mod select;
 mod selectable;
+mod snapshot_row;
 mod split;
 mod status;
 mod stream;
@@ -70,6 +71,7 @@ pub use prose::Prose;
 pub use section::ClickableSection;
 pub use select::{Select, SelectEvent};
 pub use selectable::{SelectAllText, Selectable, SelectableText, SelectableWords};
+pub use snapshot_row::{SnapshotRow, SnapshotRows};
 pub use split::Split;
 #[cfg(test)]
 pub(crate) use status::STATUSES;

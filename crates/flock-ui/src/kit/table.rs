@@ -433,11 +433,11 @@ pub fn next_sort(
 
 pub fn changed_statuses(
     before: &HashMap<SharedString, Status>,
-    after: &[(SharedString, Status)],
+    after: &HashMap<SharedString, Status>,
 ) -> Vec<SharedString> {
     after
         .iter()
-        .filter(|(key, status)| before.get(key).is_some_and(|old| old != status))
+        .filter(|&(key, status)| before.get(key).is_some_and(|old| old != status))
         .map(|(key, _)| key.clone())
         .collect()
 }
@@ -482,6 +482,7 @@ pub struct Table<R: 'static> {
     status: Option<RowStatus<R>>,
     key: Option<RowKey<R>>,
     name: Option<RowKey<R>>,
+    statuses: Option<HashMap<SharedString, Status>>,
     flashes: HashMap<SharedString, u64>,
     flash_generation: u64,
     flash_timer: Option<Task<()>>,
@@ -530,6 +531,7 @@ impl<R: 'static> Table<R> {
             status: None,
             key: None,
             name: None,
+            statuses: None,
             flashes: HashMap::new(),
             flash_generation: 0,
             flash_timer: None,
@@ -753,6 +755,7 @@ impl<R: 'static> Table<R> {
 
     pub fn rows(mut self, rows: Vec<R>) -> Self {
         self.rows = Rc::new(rows);
+        self.statuses = None;
         self.auto = None;
         self.resort();
         self
@@ -966,25 +969,32 @@ impl<R: 'static> Table<R> {
         self.selected_row().map(|row| key(row))
     }
 
-    fn record_flashes(&mut self, next: &[R]) -> bool {
+    fn statuses_of(&self, rows: &[R]) -> Option<HashMap<SharedString, Status>> {
         let (Some(key), Some(status)) = (&self.key, &self.status) else {
+            return None;
+        };
+        let statuses = rows
+            .iter()
+            .filter_map(|row| status(row).map(|s| (key(row), s)))
+            .collect();
+        Some(statuses)
+    }
+
+    fn record_flashes(&mut self, next: &[R]) -> bool {
+        let Some(after) = self.statuses_of(next) else {
             return false;
         };
-        let before: HashMap<SharedString, Status> = self
-            .rows
-            .iter()
-            .filter_map(|row| status(row).map(|s| (key(row), s)))
-            .collect();
-        let after: Vec<(SharedString, Status)> = next
-            .iter()
-            .filter_map(|row| status(row).map(|s| (key(row), s)))
-            .collect();
+        let before = match self.statuses.take() {
+            Some(before) => before,
+            None => self.statuses_of(&self.rows).unwrap_or_default(),
+        };
         let mut flashed = false;
         for changed in changed_statuses(&before, &after) {
             self.flash_generation += 1;
             self.flashes.insert(changed, self.flash_generation);
             flashed = true;
         }
+        self.statuses = Some(after);
         flashed
     }
 
@@ -1415,6 +1425,8 @@ impl<R: 'static> Render for Table<R> {
 mod tests {
     use gpui::px;
 
+    use super::super::SnapshotRow;
+
     use super::*;
 
     #[test]
@@ -1493,11 +1505,11 @@ mod tests {
             (SharedString::from("a"), Status::Ok),
             (SharedString::from("b"), Status::Warn),
         ]);
-        let after = [
+        let after = HashMap::from([
             (SharedString::from("a"), Status::Err),
             (SharedString::from("b"), Status::Warn),
             (SharedString::from("c"), Status::Err),
-        ];
+        ]);
         assert_eq!(changed_statuses(&before, &after), [SharedString::from("a")]);
     }
 
@@ -1544,6 +1556,119 @@ mod tests {
             assert!(table.is_marked(1));
             assert!(!table.is_marked(0));
         });
+    }
+
+    fn snapshot_table(
+        rows: Vec<SnapshotRow<flock_core::events::Event>>,
+        cx: &mut gpui::TestAppContext,
+    ) -> Entity<Table<SnapshotRow<flock_core::events::Event>>> {
+        type Row = SnapshotRow<flock_core::events::Event>;
+        cx.new(|cx| {
+            let columns = vec![
+                Column::text("Reason", |row: &Row| row.reason.clone().into())
+                    .sort_by_key(|row: &Row| row.reason.clone()),
+            ];
+            Table::new("snapshot-rows", columns, cx)
+                .row_key(|row: &Row| row.reason.clone().into())
+                .row_status(|row: &Row| (row.status != Status::Ok).then_some(row.status))
+                .multi_select()
+                .rows(rows)
+        })
+    }
+
+    fn reasons(rows: &[&SnapshotRow<flock_core::events::Event>]) -> Vec<String> {
+        rows.iter().map(|row| row.reason.clone()).collect()
+    }
+
+    #[gpui::test]
+    fn snapshot_rows_keep_selection_marks_sort_and_flashes_across_snapshots(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use super::super::snapshot_row::tests::{event, events};
+        let cluster = flock_core::ClusterId::new("a");
+        let before = events(
+            &cluster,
+            vec![
+                event("b", Status::Warn),
+                event("a", Status::Ok),
+                event("c", Status::Ok),
+            ],
+        );
+        let table = snapshot_table(before.all(), cx);
+        table.update(cx, |table, cx| {
+            table.select(Some(0), cx);
+            table.toggle_mark(2);
+            table.toggle_sort(0, cx);
+            assert_eq!(reasons(&table.marked_rows()), ["b", "c"]);
+        });
+        let after = events(
+            &cluster,
+            vec![
+                event("c", Status::Ok),
+                event("d", Status::Ok),
+                event("b", Status::Err),
+                event("a", Status::Ok),
+            ],
+        );
+        table.update(cx, |table, cx| {
+            table.set_rows(after.all(), cx);
+            let selected = table.selected_row().map(|row| row.reason.clone());
+            assert_eq!(selected.as_deref(), Some("b"));
+            assert_eq!(reasons(&table.marked_rows()), ["b", "c"]);
+            let sorted: Vec<String> = table
+                .order
+                .iter()
+                .filter_map(|&ix| table.row(ix))
+                .map(|row| row.reason.clone())
+                .collect();
+            assert_eq!(sorted, ["a", "b", "c", "d"]);
+            assert!(table.flashes.contains_key("b"));
+            assert_eq!(table.flashes.len(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn updating_rows_derives_each_status_key_once(cx: &mut gpui::TestAppContext) {
+        let keys = Rc::new(std::cell::Cell::new(0_usize));
+        let counted = keys.clone();
+        let rows = |status| {
+            (0..100)
+                .map(|ix| (ix, status))
+                .collect::<Vec<(usize, Status)>>()
+        };
+        let table = cx.new(|cx| {
+            Table::new("keys", Vec::new(), cx)
+                .row_key(move |row: &(usize, Status)| {
+                    counted.set(counted.get() + 1);
+                    row.0.to_string().into()
+                })
+                .row_status(|row| Some(row.1))
+                .rows(rows(Status::Ok))
+        });
+        table.update(cx, |table, cx| table.set_rows(rows(Status::Warn), cx));
+        keys.set(0);
+        table.update(cx, |table, cx| table.set_rows(rows(Status::Err), cx));
+        assert_eq!(keys.get(), 100);
+        assert_eq!(table.read_with(cx, |table, _| table.flashes.len()), 100);
+    }
+
+    #[gpui::test]
+    fn updating_rows_without_selection_marks_or_status_derives_no_keys(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let keys = Rc::new(std::cell::Cell::new(0_usize));
+        let counted = keys.clone();
+        let table = cx.new(|cx| {
+            Table::new("keys", Vec::new(), cx)
+                .row_key(move |row: &usize| {
+                    counted.set(counted.get() + 1);
+                    row.to_string().into()
+                })
+                .multi_select()
+                .rows((0..100).collect())
+        });
+        table.update(cx, |table, cx| table.set_rows((0..100).rev().collect(), cx));
+        assert_eq!(keys.get(), 0);
     }
 
     #[gpui::test]

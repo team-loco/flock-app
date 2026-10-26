@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -32,8 +31,8 @@ use streams::{LogSession, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
     ActionMenu, Column, ConfirmDialog, DockState, FILTER_PLACEHOLDER, FilterBar, FilterEvent,
-    InputEvent, InspectorPane, Link, LogView, MenuItem, Select, SelectEvent, ShowAll, StatusText,
-    Table, TableEvent, Terminal, TextFieldState, chip_label, confirm,
+    InputEvent, InspectorPane, Link, LogView, MenuItem, Select, SelectEvent, ShowAll, SnapshotRow,
+    SnapshotRows, StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label, confirm,
 };
 use crate::screens::{
     ALL_NAMESPACES, ListShape, chosen_namespace, edit_item, empty_list, new_tab_item,
@@ -106,31 +105,7 @@ struct Matched {
     base: Vec<usize>,
 }
 
-#[derive(Clone)]
-struct PodRow {
-    snapshot: Arc<Snapshot>,
-    ix: usize,
-}
-
-impl PodRow {
-    fn all(snapshot: &Arc<Snapshot>, matched: &[usize]) -> Vec<Self> {
-        matched
-            .iter()
-            .map(|&ix| Self {
-                snapshot: Arc::clone(snapshot),
-                ix,
-            })
-            .collect()
-    }
-}
-
-impl Deref for PodRow {
-    type Target = Pod;
-
-    fn deref(&self) -> &Pod {
-        &self.snapshot.pods[self.ix]
-    }
-}
+type PodRow = SnapshotRow<Pod>;
 
 impl PodsScreen {
     pub fn list_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
@@ -441,7 +416,7 @@ impl PodsScreen {
         let base = self.base();
         let pods = &self.snapshot.pods;
         let matched = self.query.apply(pods, &base);
-        let rows = PodRow::all(&self.snapshot, &matched);
+        let rows = SnapshotRows::new(&self.snapshot, |snapshot| &snapshot.pods).rows(matched);
         let base_pods: Vec<&Pod> = base.iter().filter_map(|&ix| pods.get(ix)).collect();
         let chips = filter_counts(&base_pods)
             .into_iter()
@@ -954,7 +929,7 @@ mod tests {
             let table = screen.table.read(cx);
             let rows: Vec<&PodRow> = (0..=PODS).map_while(|ix| table.row(ix)).collect();
             let shares = |(ix, row): (usize, &&PodRow)| {
-                row.ix == ix && Arc::ptr_eq(&row.snapshot, &snapshot)
+                row.index() == ix && Arc::ptr_eq(row.snapshot(), &snapshot)
             };
             rows.len() == PODS && rows.iter().enumerate().all(shares)
         });
