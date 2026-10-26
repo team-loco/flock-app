@@ -11,14 +11,12 @@ use flock_bench::live::{
     cat_output, fleet, flip_phase, flux_clone, flux_graph, loads, log_sources, multi_burst,
     multi_prefill, pod_burst, prefill_lines, running, sentinel, viewed_cluster,
 };
+use flock_bench::{MEASUREMENT, SAMPLES, WARM_UP};
 use flock_core::multilog::MERGED_LINES;
 use flock_core::{Command, ExecEvent, LogTarget, Page, ResourceRef};
 use flock_ui::kit::LOG_CAPACITY;
 use gpui::{AppContext as _, BenchAppContext};
 
-const SAMPLES: usize = 10;
-const WARM_UP: Duration = Duration::from_secs(1);
-const MEASUREMENT: Duration = Duration::from_secs(3);
 const POD_KIND: &str = "Pod";
 const SHELL_NOTE: &str = "flock-bench shell";
 
