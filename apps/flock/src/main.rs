@@ -135,25 +135,25 @@ fn main() -> anyhow::Result<()> {
     let self_update = start_updater();
     let failure = Rc::new(RefCell::new(None));
     let failed = failure.clone();
-    gpui_platform::application()
-        .with_assets(assets::Assets)
-        .run(move |cx: &mut App| {
-            flock_ui::prefs::init(prefs_dir.as_deref(), cx);
-            let launched = launch(
-                cx,
-                forced,
-                Stores { settings, tabs },
-                self_update,
-                update_rx,
-                command_tx,
-                screen,
-                &preset,
-            );
-            if let Err(error) = launched {
-                failed.replace(Some(error));
-                cx.quit();
-            }
-        });
+    let app = gpui_platform::application().with_assets(assets::Assets);
+    app.on_reopen(reopen);
+    app.run(move |cx: &mut App| {
+        flock_ui::prefs::init(prefs_dir.as_deref(), cx);
+        let launched = launch(
+            cx,
+            forced,
+            Stores { settings, tabs },
+            self_update,
+            update_rx,
+            command_tx,
+            screen,
+            &preset,
+        );
+        if let Err(error) = launched {
+            failed.replace(Some(error));
+            cx.quit();
+        }
+    });
     failure.take().map_or(Ok(()), Err)
 }
 
@@ -299,6 +299,12 @@ fn launch(
         open_flock_window(store.clone(), Vec::new(), Some(&saved), cx)?;
     }
     Ok(())
+}
+
+fn reopen(cx: &mut App) {
+    if cx.windows().is_empty() {
+        cx.dispatch_action(&NewWindow);
+    }
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -503,5 +509,38 @@ mod tests {
         cx.simulate_keystrokes(second, "cmd-n");
         cx.run_until_parked();
         assert_eq!(cx.read(|cx| cx.windows().len()), 2);
+    }
+
+    #[gpui::test]
+    fn reopening_opens_a_window_only_when_none_is_open(cx: &mut gpui::TestAppContext) {
+        let (_backend, updates) = async_channel::unbounded();
+        let (commands, _received) = async_channel::unbounded();
+        cx.update(|cx| {
+            launch(
+                cx,
+                Some(Appearance::Dark),
+                Stores::default(),
+                None,
+                updates,
+                commands,
+                Screen::Flock,
+                &Preset::default(),
+            )
+            .unwrap_or_else(|error| panic!("test launch: {error}"));
+        });
+        cx.run_until_parked();
+        let first = cx
+            .read(|cx| cx.windows().into_iter().next())
+            .unwrap_or_else(|| panic!("first window missing"));
+        cx.update(reopen);
+        cx.run_until_parked();
+        assert_eq!(cx.read(App::windows), vec![first]);
+        let closed = cx.update(|cx| first.update(cx, |_, window, _| window.remove_window()));
+        assert!(closed.is_ok());
+        cx.run_until_parked();
+        assert_eq!(cx.read(|cx| cx.windows().len()), 0);
+        cx.update(reopen);
+        cx.run_until_parked();
+        assert_eq!(cx.read(|cx| cx.windows().len()), 1);
     }
 }
