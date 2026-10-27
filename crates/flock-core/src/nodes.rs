@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::time::Duration;
 
+use crate::allocation::PodShare;
 use crate::diagnosis::{self, Condition, Diagnosis};
 use crate::filter::{FilterSpec, Labels, Searchable};
 use crate::issue::{Issue, named};
@@ -59,6 +61,7 @@ pub struct Node {
     pub taints: Vec<String>,
     pub labels: Vec<String>,
     pub top_pods: Vec<NodePod>,
+    pub allocation: Arc<[PodShare]>,
 }
 
 impl Searchable for Node {
@@ -324,6 +327,7 @@ pub(crate) mod tests {
             taints: Vec::new(),
             labels: Vec::new(),
             top_pods: Vec::new(),
+            allocation: Arc::default(),
         }
     }
 

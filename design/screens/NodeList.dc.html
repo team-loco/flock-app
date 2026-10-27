@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nodes</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hv:hover{background:var(--hover)}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
+  <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+    <div style="flex:0 0 auto;display:flex"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="nodes" loco="{{ false }}" counts="{{navCounts}}" hint-size="200px,874px"></dc-import></div>
+    <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-direction:column">
+      <dc-import name="PaneTabs" theme="{{theme}}" tabs="{{paneTabs}}" hint-size="100%,32px"></dc-import>
+
+      <div style="flex:1;min-height:0;display:flex">
+        <div style="flex:999 1 520px;min-width:0;height:100%;display:flex;flex-direction:column">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line)">
+            <h1 style="margin:0;font-size:15px;font-weight:600">Nodes</h1>
+            <button aria-haspopup="listbox" style="height:24px;display:flex;align-items:center;gap:6px;padding:0 8px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg);font-family:'IBM Plex Mono',monospace;font-size:12px;cursor:pointer">pool <span>all</span><svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="color:var(--mute)"><path d="m4 6 4 4 4-4"/></svg></button>
+            <div role="group" aria-label="Status" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden">
+              <sc-for list="{{filters}}" as="p" hint-placeholder-count="5">
+                <button aria-pressed="{{p.pressed}}" onClick="{{p.pick}}" style="height:22px;padding:0 8px;border:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;cursor:pointer;{{p.style}}">{{p.label}} <span style="color:{{p.nc}}">{{p.n}}</span></button>
+              </sc-for>
+            </div>
+            <span style="flex:1"></span>
+            <label style="display:flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid var(--line2);border-radius:3px;width:220px;box-sizing:border-box;color:var(--mute)">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+              <input aria-label="Filter nodes" placeholder="Filter" style="flex:1;min-width:0;border:0;background:transparent;outline:none;color:var(--fg);font-family:'IBM Plex Mono',monospace;font-size:12px">
+            </label>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:auto">
+            <div style="display:grid;grid-template-columns:minmax(130px,1.6fr) minmax(90px,1fr) 176px 56px minmax(112px,.8fr) minmax(112px,.8fr) 64px 40px;column-gap:10px;align-items:center;height:28px;padding:0 16px;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--mute);position:sticky;top:0;background:var(--editor)">
+              <span>Name</span><span>Pool</span><span>Status</span><span style="text-align:right">Pods</span><span style="white-space:nowrap">CPU requested</span><span style="white-space:nowrap">Memory requested</span><span>Kubelet</span><span style="text-align:right">Age</span>
+            </div>
+            <sc-for list="{{rows}}" as="r" hint-placeholder-count="10">
+              <div onClick="{{r.pick}}" aria-selected="{{r.on}}" role="row" class="hv" style="display:grid;grid-template-columns:minmax(130px,1.6fr) minmax(90px,1fr) 176px 56px minmax(112px,.8fr) minmax(112px,.8fr) 64px 40px;column-gap:10px;align-items:center;height:28px;padding:0 16px;border-bottom:1px solid var(--line);font-family:'IBM Plex Mono',monospace;font-size:12px;cursor:pointer;{{r.bg}}">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.name}}</span>
+                <span style="color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.pool}}</span>
+                <span style="font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;color:{{r.sc}};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.status}}</span>
+                <span style="text-align:right;color:var(--fg2)">{{r.pods}}</span>
+                <span style="display:flex;align-items:center;gap:6px"><span style="flex:1;height:3px;background:var(--line2);display:flex"><span style="width:{{r.cpuW}};background:{{r.cpuC}}"></span></span><span style="width:32px;text-align:right;color:{{r.cpuT}}">{{r.cpu}}</span></span>
+                <span style="display:flex;align-items:center;gap:6px"><span style="flex:1;height:3px;background:var(--line2);display:flex"><span style="width:{{r.memW}};background:{{r.memC}}"></span></span><span style="width:32px;text-align:right;color:{{r.memT}}">{{r.mem}}</span></span>
+                <span style="color:{{r.vc}}">{{r.ver}}</span>
+                <span style="text-align:right;color:var(--mute)">{{r.age}}</span>
+              </div>
+            </sc-for>
+            <div style="padding:8px 16px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{shown}} of 64 nodes · requests / allocatable</div>
+          </div>
+          <section aria-label="Allocation" style="height:330px;flex:none;border-top:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-width:0">
+            <div style="display:flex;align-items:center;gap:10px;height:34px;padding:0 16px;border-bottom:1px solid var(--line);flex:none">
+              <span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Allocation</span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">{{n.name}}</span>
+              <div role="group" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden"><sc-for list="{{tm.modes}}" as="r" hint-placeholder-count="2"><button aria-pressed="{{r.on}}" onClick="{{r.pick}}" style="height:20px;padding:0 8px;border:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;cursor:pointer;{{r.style}}">{{r.label}}</button></sc-for></div>
+              <div role="group" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden"><sc-for list="{{tm.res}}" as="r" hint-placeholder-count="2"><button aria-pressed="{{r.on}}" onClick="{{r.pick}}" style="height:20px;padding:0 8px;border:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;cursor:pointer;{{r.style}}">{{r.label}}</button></sc-for></div>
+              <span style="flex:1"></span>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:12px">{{tm.sum}} <span style="color:{{tm.pctC}}">{{tm.pct}}</span></span>
+            </div>
+            <div style="flex:1;min-height:0;display:flex;gap:16px;padding:10px 16px 12px">
+              <div role="img" aria-label="{{tm.aria}}" onMouseLeave="{{tm.leave}}" style="flex:1;min-width:0;position:relative;border-radius:3px;overflow:hidden;background:repeating-linear-gradient(135deg,transparent 0 4px,var(--line2) 4px 5px)">
+                <sc-for list="{{tm.tiles}}" as="pd" hint-placeholder-count="8">
+                  <div onMouseEnter="{{pd.enter}}" onClick="{{pd.pick}}" style="position:absolute;left:{{pd.x}}%;top:{{pd.y}}%;width:{{pd.w}}%;height:{{pd.h}}%;box-sizing:border-box;border:1.5px solid var(--panel);cursor:pointer;{{pd.dim}}">
+                    <sc-for list="{{pd.cs}}" as="cc" hint-placeholder-count="2"><div style="position:absolute;left:{{cc.x}}%;top:{{cc.y}}%;width:{{cc.w}}%;height:{{cc.h}}%;box-sizing:border-box;{{cc.bd}}background:{{cc.bg}}"></div></sc-for>
+                    <div style="position:absolute;left:5px;top:3px;right:4px;display:flex;flex-direction:column;pointer-events:none;font-family:'IBM Plex Mono',monospace;font-size:10.5px;line-height:13px;color:#FFFFFF;text-shadow:0 1px 1px rgba(0,0,0,.25);{{pd.lab}}"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500">{{pd.short}}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85">{{pd.amt}}</span></div>
+                  </div>
+                </sc-for>
+                <div style="position:absolute;left:{{tm.free.x}}%;top:{{tm.free.y}}%;width:{{tm.free.w}}%;height:{{tm.free.h}}%;padding:4px 6px;box-sizing:border-box;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--mute);pointer-events:none;{{tm.free.show}}"><span style="background:var(--panel);padding:0 2px">{{tm.free.t}}</span></div>
+              </div>
+              <div style="flex:0 0 250px;min-width:0;display:flex;flex-direction:column;gap:12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px">
+                <div style="display:flex;flex-direction:column;gap:3px;min-height:74px">
+                  <div style="display:flex;align-items:center;gap:6px;min-width:0"><span style="width:8px;height:8px;flex:none;border-radius:2px;background:{{tm.cur.c}}"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--mute)">{{tm.cur.ns}}</span>{{tm.cur.pod}}</span></div>
+                  <div style="padding-left:14px;color:var(--fg2)">{{tm.cur.tot}}</div>
+                  <sc-for list="{{tm.cur.cs}}" as="k" hint-placeholder-count="2"><div style="padding-left:14px;display:flex;gap:8px;color:var(--fg2)"><span style="color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{k.name}}</span><span style="flex:1"></span><span>{{k.v}}</span></div></sc-for>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:4px;color:var(--fg2)">
+                  <sc-for list="{{tm.legend}}" as="lg" hint-placeholder-count="6"><div style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:{{lg.c}}"></span>{{lg.ns}}<span style="flex:1"></span><span>{{lg.v}}</span></div></sc-for>
+                  <div style="display:flex;align-items:center;gap:6px;{{tm.freeShow}}"><span style="width:8px;height:8px;border-radius:2px;background:repeating-linear-gradient(135deg,transparent 0 2px,var(--sep) 2px 3px);box-shadow:inset 0 0 0 1px var(--line2)"></span>{{tm.freeLabel}}<span style="flex:1"></span><span>{{tm.freeV}}</span></div>
+                  <div style="display:flex;align-items:center;gap:6px;{{tm.limKey}}"><span style="width:8px;height:8px;border-radius:2px;background:linear-gradient(to top,var(--fg2) 50%,var(--line2) 50%)"></span>requested / limit</div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <aside aria-label="Inspector" style="flex:1 1 340px;min-width:0;height:100%;overflow:auto;border-left:1px solid var(--line);background:var(--panel);font-size:12.5px">
+          <div style="display:flex;align-items:center;gap:8px;min-height:30px;padding:4px 8px 4px 12px;border-bottom:1px solid var(--line)">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{n.name}}</span>
+            <button style="height:22px;padding:0 10px;border:1px solid var(--acc);border-radius:3px;background:var(--acc);color:var(--onacc);font-family:inherit;font-size:12px;font-weight:500;cursor:pointer">Shell</button>
+            <button aria-label="More actions" title="Cordon, drain, view YAML" style="height:22px;width:26px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg2);font-family:inherit;font-size:13px;cursor:pointer;padding:0">⋯</button>
+          </div>
+
+          <sc-if value="{{hasProblems}}" hint-placeholder-val="{{ true }}">
+            <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)">
+              <sc-for list="{{problems}}" as="pb" hint-placeholder-count="1">
+                <a class="hv" href="#" style="display:flex;flex-direction:column;gap:3px;padding:8px 12px;border-left:3px solid {{pb.c}};background:var(--raise);text-decoration:none;color:var(--fg)">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;font-weight:500;color:{{pb.c}}">{{pb.reason}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.55;word-break:break-word">{{pb.msg}}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{pb.obj}}</span>
+                </a>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <section style="padding:0 12px;border-bottom:1px solid var(--line)">
+            <div style="display:flex;align-items:center;gap:8px;height:30px"><button onClick="{{tg.usage}}" aria-expanded="{{op.usage}}" style="flex:1;min-width:0;height:100%;display:flex;align-items:center;gap:8px;padding:0;border:0;background:transparent;color:var(--fg);font-family:inherit;cursor:pointer;text-align:left"><span style="width:10px;flex:none;color:var(--mute);font-size:10px">{{ar.usage}}</span><span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Usage</span></button></div>
+            <sc-if value="{{op.usage}}" hint-placeholder-val="{{ true }}">
+              <div style="margin:0 0 12px 18px;display:flex;flex-direction:column;gap:12px">
+                <sc-for list="{{n.usage}}" as="u" hint-placeholder-count="4">
+                  <div style="display:flex;flex-direction:column;gap:5px">
+                    <div style="display:flex;align-items:baseline;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:12px"><span style="font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;color:var(--mute);width:64px">{{u.k}}</span><span>{{u.v}}</span><span style="flex:1"></span><span style="color:{{u.pc}}">{{u.p}}</span></div>
+                    <div style="position:relative;height:5px;background:var(--line2);margin-left:72px"><div style="width:{{u.w}};height:100%;background:{{u.c}}"></div><div style="position:absolute;left:{{u.req}};top:-3px;width:2px;height:11px;background:var(--fg2);{{u.reqShow}}"></div></div>
+                    <div style="margin-left:72px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{u.sub}}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </section>
+
+          <section style="padding:0 12px;border-bottom:1px solid var(--line)">
+            <div style="display:flex;align-items:center;gap:8px;height:30px"><button onClick="{{tg.details}}" aria-expanded="{{op.details}}" style="flex:1;min-width:0;height:100%;display:flex;align-items:center;gap:8px;padding:0;border:0;background:transparent;color:var(--fg);font-family:inherit;cursor:pointer;text-align:left"><span style="width:10px;flex:none;color:var(--mute);font-size:10px">{{ar.details}}</span><span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Details</span></button></div>
+            <sc-if value="{{op.details}}" hint-placeholder-val="{{ true }}">
+              <dl style="margin:0 0 10px 18px;display:grid;grid-template-columns:72px minmax(0,1fr);row-gap:5px;column-gap:10px">
+                <sc-for list="{{n.fields}}" as="f" hint-placeholder-count="8">
+                  <div style="display:contents"><dt style="color:var(--mute)">{{f.k}}</dt><dd style="margin:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:{{f.c}};word-break:break-all">{{f.v}}</dd></div>
+                </sc-for>
+              </dl>
+            </sc-if>
+          </section>
+
+          <section style="padding:0 12px;border-bottom:1px solid var(--line)">
+            <div style="display:flex;align-items:center;gap:8px;height:30px"><button onClick="{{tg.taints}}" aria-expanded="{{op.taints}}" style="flex:1;min-width:0;height:100%;display:flex;align-items:center;gap:8px;padding:0;border:0;background:transparent;color:var(--fg);font-family:inherit;cursor:pointer;text-align:left"><span style="width:10px;flex:none;color:var(--mute);font-size:10px">{{ar.taints}}</span><span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Taints</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{n.taintCount}}</span></button></div>
+            <sc-if value="{{op.taints}}" hint-placeholder-val="{{ true }}">
+              <div style="margin:0 0 10px 18px;display:flex;flex-wrap:wrap;gap:4px">
+                <sc-for list="{{n.taints}}" as="lb" hint-placeholder-count="2"><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;padding:2px 6px;border-radius:3px;background:var(--raise);color:var(--fg);word-break:break-all">{{lb}}</span></sc-for>
+              </div>
+            </sc-if>
+          </section>
+
+          <section style="padding:0 12px;border-bottom:1px solid var(--line)">
+            <div style="display:flex;align-items:center;gap:8px;height:30px"><button onClick="{{tg.labels}}" aria-expanded="{{op.labels}}" style="flex:1;min-width:0;height:100%;display:flex;align-items:center;gap:8px;padding:0;border:0;background:transparent;color:var(--fg);font-family:inherit;cursor:pointer;text-align:left"><span style="width:10px;flex:none;color:var(--mute);font-size:10px">{{ar.labels}}</span><span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Labels</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{n.labelCount}}</span></button></div>
+            <sc-if value="{{op.labels}}" hint-placeholder-val="{{ false }}">
+              <div style="margin:0 0 10px 18px;display:flex;flex-wrap:wrap;gap:4px">
+                <sc-for list="{{n.labels}}" as="lb" hint-placeholder-count="4"><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;padding:2px 6px;border-radius:3px;background:var(--raise);color:var(--fg);word-break:break-all">{{lb}}</span></sc-for>
+              </div>
+            </sc-if>
+          </section>
+
+          <section style="padding:0 12px;border-bottom:1px solid var(--line)">
+            <div style="display:flex;align-items:center;gap:8px;height:30px"><button onClick="{{tg.conds}}" aria-expanded="{{op.conds}}" style="flex:1;min-width:0;height:100%;display:flex;align-items:center;gap:8px;padding:0;border:0;background:transparent;color:var(--fg);font-family:inherit;cursor:pointer;text-align:left"><span style="width:10px;flex:none;color:var(--mute);font-size:10px">{{ar.conds}}</span><span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Conditions</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:{{n.condC}}">{{n.condSum}}</span></button></div>
+            <sc-if value="{{op.conds}}" hint-placeholder-val="{{ false }}">
+              <dl style="margin:0 0 10px 18px;display:grid;grid-template-columns:minmax(0,1fr) 44px 36px;row-gap:5px;column-gap:10px;font-family:'IBM Plex Mono',monospace;font-size:11.5px">
+                <sc-for list="{{n.conds}}" as="c" hint-placeholder-count="5">
+                  <div style="display:contents"><dt>{{c.t}}</dt><dd style="margin:0;color:{{c.c}}">{{c.s}}</dd><dd style="margin:0;text-align:right;color:var(--mute)">{{c.age}}</dd></div>
+                </sc-for>
+              </dl>
+            </sc-if>
+          </section>
+
+          <section style="padding:0 12px;border-bottom:1px solid var(--line)">
+            <div style="display:flex;align-items:center;gap:8px;height:30px"><button onClick="{{tg.pods}}" aria-expanded="{{op.pods}}" style="flex:1;min-width:0;height:100%;display:flex;align-items:center;gap:8px;padding:0;border:0;background:transparent;color:var(--fg);font-family:inherit;cursor:pointer;text-align:left"><span style="width:10px;flex:none;color:var(--mute);font-size:10px">{{ar.pods}}</span><span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Pods</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{n.podSum}}</span></button><a href="PodList.dc.html" style="font-size:12px;color:var(--acc);text-decoration:none;flex:none">All →</a></div>
+            <sc-if value="{{op.pods}}" hint-placeholder-val="{{ true }}">
+              <div style="margin:0 0 10px 18px;display:grid;grid-template-columns:minmax(0,1fr) 44px 48px;row-gap:5px;column-gap:10px;font-family:'IBM Plex Mono',monospace;font-size:11.5px">
+                <span style="font-family:'IBM Plex Sans',sans-serif;font-size:11px;color:var(--mute)">by CPU request</span><span style="font-family:'IBM Plex Sans',sans-serif;font-size:11px;color:var(--mute);text-align:right">CPU</span><span style="font-family:'IBM Plex Sans',sans-serif;font-size:11px;color:var(--mute);text-align:right">Mem</span>
+                <sc-for list="{{n.pods}}" as="p" hint-placeholder-count="5">
+                  <div style="display:contents"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{p.name}} <span style="color:var(--mute)">{{p.ns}}</span></span><span style="text-align:right;color:var(--fg2)">{{p.cpu}}</span><span style="text-align:right;color:var(--fg2)">{{p.mem}}</span></div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </section>
+
+          <section style="padding:0 12px;border-bottom:1px solid var(--line)">
+            <div style="display:flex;align-items:center;gap:8px;height:30px"><button onClick="{{tg.events}}" aria-expanded="{{op.events}}" style="flex:1;min-width:0;height:100%;display:flex;align-items:center;gap:8px;padding:0;border:0;background:transparent;color:var(--fg);font-family:inherit;cursor:pointer;text-align:left"><span style="width:10px;flex:none;color:var(--mute);font-size:10px">{{ar.events}}</span><span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Events</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{n.evSum}}</span></button></div>
+            <sc-if value="{{op.events}}" hint-placeholder-val="{{ true }}">
+              <div style="margin:0 0 10px 18px;display:flex;flex-direction:column;gap:8px">
+                <sc-for list="{{n.events}}" as="e" hint-placeholder-count="3">
+                  <div style="display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:8px"><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{e.age}}</span><span style="display:flex;flex-direction:column;gap:1px;min-width:0"><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:{{e.c}}">{{e.reason}}</span><span style="font-size:12.5px;line-height:1.45;color:var(--fg2);word-break:break-word">{{e.msg}}</span></span></div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </section>
+                  <a class="hv" href="Command.dc.html" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px 0 30px;border-bottom:1px solid var(--line);color:var(--mute);text-decoration:none"><span style="flex:1;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase">YAML</span><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h4v4M13.5 2.5 8 8M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/></svg></a>
+        </aside>
+      </div>
+    </div>
+  </div>
+  <dc-import name="StatusBar" theme="{{theme}}" version="v1.31.2" cluster="prod-us-east" hint-size="100%,26px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { sel: 0, f: 'All', res: 'cpu', mode: 'req', hov: '', pick: '', op: { usage: true, details: true, taints: true, labels: false, conds: false, pods: true, events: true } };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  __icons(o) {
+    const P = {"✕":["M8 1.6 14.4 8 8 14.4 1.6 8Z","currentColor","none","none"],"▲":["M8 2.2 14.3 13.25H1.7Z M8 6.5v3.1 M8 11.4v.1","none","currentColor","none"],"●":["M8 4.4a3.6 3.6 0 1 1 0 7.2a3.6 3.6 0 1 1 0-7.2Z","currentColor","none","none"],"◐":["M8 2a6 6 0 1 1-6 6","none","currentColor","none"],"‖":["M6 3.75v8.5M10 3.75v8.5","none","currentColor","none"],"○":["M8 2.25a5.75 5.75 0 1 1 0 11.5a5.75 5.75 0 1 1 0-11.5Z","none","currentColor","2.1 2.1"]};
+    const mk = (s) => { const c = s.charAt(0); if (!P[c]) return { d: '', f: 'none', s: 'none', da: 'none', w: '0', m: '0', t: s }; const r = s.slice(1).replace(/^\s+/, ''); const p = P[c]; return { d: p[0], f: p[1], s: p[2], da: p[3], w: '1em', m: r ? '.35em' : '0', t: r }; };
+    const seen = new Set();
+    const walk = (x) => { if (!x || typeof x !== 'object' || seen.has(x)) return; seen.add(x); if (Array.isArray(x)) { x.forEach(walk); return; } Object.keys(x).forEach((k) => { const v = x[k]; if (typeof v === 'string') { if (!k.endsWith('__i')) x[k + '__i'] = mk(v); } else walk(v); }); };
+    walk(o); return o;
+  }
+  allocModel() {
+    const light = this.vars().theme === 'light';
+    const PAL = light ? ['#2a78d6', '#1baf7a', '#6250d6', '#e87ba4', '#eb6834', '#c98500'] : ['#3987e5', '#199e70', '#9085e9', '#d55181', '#d95926', '#c98500'];
+    const NS = ['ml', 'analytics', 'search', 'payments', 'web', 'observability'];
+    const colorOf = (ns) => ns === 'other' ? 'var(--sep)' : PAL[NS.indexOf(ns)];
+    const P = (ns, pod, cs) => ({ ns, pod, cs: cs.map(([name, cpu, mem, side, lc, lm]) => ({ name, cpu, mem, side: !!side, lcpu: lc != null ? lc : cpu * (side ? 2 : 1.4), lmem: lm != null ? lm : mem * 1.2 })) });
+    const POOLS = {
+      'general-arm': { cpu: 15.89, mem: 61, pods: [
+        P('ml', 'ml-batch-5c7f-x8n2q', [['trainer', 3, 16, 0, 6, 21.6]]),
+        P('search', 'search-indexer-6f9-2kq8x', [['indexer', 1.8, 3.5], ['envoy', .2, .5, 1]]),
+        P('search', 'search-indexer-6f9-a8rn2', [['indexer', 1.8, 3.5], ['envoy', .2, .5, 1]]),
+        P('analytics', 'trino-worker-3', [['trino', 1.5, 8]]),
+        P('analytics', 'trino-worker-7', [['trino', 1.5, 8]]),
+        P('payments', 'payments-worker-5d8b-7hx2c', [['worker', .75, 1], ['envoy', .1, .125, 1]]),
+        P('web', 'web-frontend-6c9-qq2lm', [['next', .5, .75], ['envoy', .1, .125, 1]]),
+        P('payments', 'checkout-api-7f9c6d-m8vtn', [['api', .4, .5], ['envoy', .1, .125, 1]]),
+        P('observability', 'otel-collector-8k2xd', [['otelcol', .35, .75], ['filelog', .15, .25, 1]])
+      ], rest: [1.65, 3.4, 2.16, 3.4] },
+      'memory-x86': { cpu: 31.75, mem: 245, pods: [
+        P('analytics', 'clickhouse-0', [['clickhouse', 6, 96], ['backup', .25, 1, 1]]),
+        P('analytics', 'clickhouse-1', [['clickhouse', 6, 96], ['backup', .25, 1, 1]]),
+        P('search', 'opensearch-data-2', [['opensearch', 2, 24]]),
+        P('observability', 'loki-ingester-1', [['ingester', 1, 8]])
+      ], rest: [1.2, 6, 2.5, 9] },
+      gpu: { cpu: 7.9, mem: 30, pods: [
+        P('ml', 'trainer-28812-x7k2p', [['trainer', 4, 12, 0, 4, 12]]),
+        P('ml', 'inference-7d9-mm2kq', [['server', 2.8, 4], ['envoy', .2, .25, 1]])
+      ], rest: [.65, 1.75, 1.4, 3] },
+      builds: { cpu: 7.9, mem: 14.5, pods: [
+        P('web', 'buildkitd-0', [['buildkitd', .8, 1.5]]),
+        P('web', 'build-a41e07c-xk2pq', [['build', .5, .6]])
+      ], rest: [.4, .5, .9, 1.2] }
+    };
+    return { colorOf, NS, POOLS };
+  }
+  allocNode(pool, frac, name) {
+    const M = this.allocModel(), def = M.POOLS[pool];
+    const pods = def.pods.map((p) => Object.assign({}, p, { cs: p.cs.map((c) => ({ name: c.name, side: c.side, cpu: c.cpu * frac, mem: c.mem * frac, lcpu: c.lcpu * frac, lmem: c.lmem * frac })) }));
+    return { name, pool, alloc: { cpu: def.cpu, mem: def.mem }, pods, rest: { cpu: def.rest[0] * frac, mem: def.rest[1] * frac, lcpu: def.rest[2] * frac, lmem: def.rest[3] * frac }, nRest: 34 };
+  }
+  allocLayout(node, res, mode, W, H, focus, hov, labels) {
+    const M = this.allocModel();
+    const lim = mode === 'lim';
+    const key = lim ? 'l' + res : res;
+    const fmt = (n) => res === 'cpu' ? (n < 1 ? Math.round(n * 1000) + 'm' : (Math.round(n * 100) / 100).toString()) : (n < 1 ? Math.round(n * 1024) + 'Mi' : (n >= 100 ? Math.round(n) : Math.round(n * 10) / 10) + 'Gi');
+    const id = (p) => p.ns + '/' + p.pod;
+    const items = node.pods.map((p) => Object.assign({}, p, { v: p.cs.reduce((a, c) => a + c[key], 0), r: p.cs.reduce((a, c) => a + c[res], 0) }));
+    items.sort((a, b) => b.v - a.v);
+    items.push({ ns: 'other', pod: '+' + node.nRest + ' pods', other: true, cs: [], v: node.rest[key], r: node.rest[res] });
+    const alloc = node.alloc[res];
+    const total = items.reduce((a, p) => a + p.v, 0), reqTotal = items.reduce((a, p) => a + p.r, 0);
+    const free = Math.max(0, alloc - total);
+    const nodes = items.map((p) => ({ p, v: p.v })).concat(free > 0 ? [{ free: true, v: free }] : []);
+    const sc = (W * H) / nodes.reduce((a, n) => a + n.v, 0);
+    nodes.forEach((n) => { n.a = n.v * sc; });
+    const out = [];
+    const worst = (row, side) => { const s = row.reduce((a, r) => a + r.a, 0); let m = 0; row.forEach((r) => { m = Math.max(m, (side * side * r.a) / (s * s), (s * s) / (side * side * r.a)); }); return m; };
+    const lay = (row, rc) => { const s = row.reduce((a, r) => a + r.a, 0); if (rc.w >= rc.h) { const w = s / rc.h; let y = rc.y; row.forEach((r) => { const h = r.a / w; out.push(Object.assign(r, { x: rc.x, y, w, h })); y += h; }); return { x: rc.x + w, y: rc.y, w: rc.w - w, h: rc.h }; } const h = s / rc.w; let x = rc.x; row.forEach((r) => { const w = r.a / h; out.push(Object.assign(r, { x, y: rc.y, w, h })); x += w; }); return { x: rc.x, y: rc.y + h, w: rc.w, h: rc.h - h }; };
+    let rc = { x: 0, y: 0, w: W, h: H }, list = nodes.slice(), row = [];
+    while (list.length) { const side = Math.min(rc.w, rc.h), n = list[0]; if (!row.length || worst(row.concat([n]), side) <= worst(row, side)) { row.push(n); list.shift(); } else { rc = lay(row, rc); row = []; } }
+    if (row.length) lay(row, rc);
+    const pc = (r) => ({ x: (r.x / W * 100).toFixed(3), y: (r.y / H * 100).toFixed(3), w: (r.w / W * 100).toFixed(3), h: (r.h / H * 100).toFixed(3) });
+    const fill = (c, side, part) => {
+      const tint = 'color-mix(in srgb,' + c + ' 38%,var(--panel))';
+      if (side) return 'repeating-linear-gradient(135deg,' + c + ' 0 3px,' + tint + ' 3px 6px)';
+      if (part >= .999) return c;
+      return 'linear-gradient(to top,' + c + ' ' + (part * 100).toFixed(1) + '%,' + tint + ' ' + (part * 100).toFixed(1) + '%)';
+    };
+    const tiles = out.filter((r) => !r.free).map((r) => {
+      const p = r.p, c = M.colorOf(p.ns), horiz = r.w >= r.h;
+      const parts = p.other ? [{ v: p.v, part: p.v ? p.r / p.v : 1, side: false }] : p.cs.map((q) => ({ v: q[key], part: q[key] ? q[res] / q[key] : 1, side: q.side }));
+      let off = 0;
+      const cs = parts.map((q, i) => { const f = p.v ? q.v / p.v : 1; const o = { x: horiz ? off : 0, y: horiz ? 0 : off, w: horiz ? f * 100 : 100, h: horiz ? 100 : f * 100, bg: fill(c, q.side, lim ? q.part : 1), bd: i ? (horiz ? 'border-left:1px solid var(--panel);' : 'border-top:1px solid var(--panel);') : '' }; off += f * 100; return o; });
+      const big = labels && r.w > 58 && r.h > 30;
+      return Object.assign(pc(r), {
+        id: id(p), short: p.other ? p.pod : p.pod.replace(/-[a-z0-9]{3,10}-[a-z0-9]{5}$/, ''), amt: fmt(p.v), lab: big ? '' : 'display:none;',
+        cs: cs.map((q) => ({ x: q.x.toFixed(3), y: q.y.toFixed(3), w: q.w.toFixed(3), h: q.h.toFixed(3), bg: q.bg, bd: q.bd })),
+        dim: (hov && hov !== id(p) ? 'opacity:.45;' : '') + (focus && id(p) === focus ? 'outline:2px solid var(--fg);outline-offset:-2px;z-index:1;' : '')
+      });
+    });
+    const fr = out.find((r) => r.free);
+    const over = total > alloc;
+    const nsTot = {}; items.forEach((p) => { nsTot[p.ns] = (nsTot[p.ns] || 0) + p.v; });
+    const cur = items.find((p) => id(p) === (hov || focus)) || items[0];
+    return {
+      tiles, items, fmt, id,
+      free: fr ? Object.assign(pc(fr), { show: '', t: fr.w > 70 && fr.h > 18 ? (lim ? 'headroom ' : 'unrequested ') + fmt(free) : '' }) : { x: 0, y: 0, w: 0, h: 0, show: 'display:none;', t: '' },
+      sum: fmt(total) + ' / ' + fmt(alloc), pct: Math.round(total / alloc * 100) + '%', pctC: over ? 'var(--warn)' : 'var(--fg2)', over,
+      freeV: fmt(free), freeLabel: lim ? 'not limited' : 'unrequested',
+      legend: M.NS.filter((n) => nsTot[n]).map((n) => ({ ns: n, c: M.colorOf(n), v: fmt(nsTot[n]) })).concat([{ ns: 'other', c: 'var(--sep)', v: fmt(nsTot.other || 0) }]),
+      cur: { c: M.colorOf(cur.ns), ns: cur.other ? '' : cur.ns + '/', pod: cur.pod, tot: fmt(cur.r) + ' req · ' + fmt(cur.other ? node.rest['l' + res] : cur.cs.reduce((a, q) => a + q['l' + res], 0)) + ' lim',
+        cs: cur.other ? [{ name: 'kube-proxy, aws-node, fluent-bit, …', v: '' }] : cur.cs.map((q) => ({ name: q.name + (q.side ? ' · sidecar' : ''), v: fmt(q[res]) + ' / ' + fmt(q['l' + res]) })) }
+    };
+  }
+  allocCluster() {
+    const M = this.allocModel();
+    let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    const spec = [['general-arm', 40, .88], ['memory-x86', 16, .54], ['gpu', 4, .97], ['builds', 4, .22]];
+    return spec.map(([pool, n, pct]) => {
+      const def = M.POOLS[pool];
+      const nodes = [];
+      for (let i = 0; i < n; i++) {
+        const name = pool === 'general-arm' && i === 0 ? 'ip-10-4-31-12' : 'ip-10-4-' + (10 + Math.floor(rnd() * 50)) + '-' + (2 + Math.floor(rnd() * 250));
+        const keep = def.pods.filter((p, j) => i === 0 || j === 0 || rnd() < .72);
+        const base = keep.reduce((a, p) => a + p.cs.reduce((b, c) => b + c.cpu, 0), 0) + def.rest[0];
+        const target = def.cpu * Math.min(.985, Math.max(.3, pct + (rnd() - .5) * .3));
+        const frac = i === 0 && pool === 'general-arm' ? 1 : target / base;
+        const node = this.allocNode(pool, frac, name);
+        if (!(i === 0 && pool === 'general-arm')) node.pods = node.pods.filter((p) => keep.some((k) => k.pod === p.pod));
+        nodes.push(node);
+      }
+      return { pool, nodes, type: { 'general-arm': 'm7g.4xlarge', 'memory-x86': 'r6i.8xlarge', gpu: 'g5.2xlarge', builds: 'c7g.2xlarge' }[pool] };
+    });
+  }
+  allocView(x, st) {
+    const node = this.allocNode(x.pool in this.allocModel().POOLS ? x.pool : 'general-arm', x.cpu / 89, x.name);
+    const L = this.allocLayout(node, st.res, st.mode, 760, 270, st.pick, st.hov, true);
+    const seg = (opts, cur, keyName) => opts.map(([k, label]) => { const on = cur === k; return { label, on: on ? 'true' : 'false', style: on ? 'background:var(--sel);color:var(--selfg);' : 'background:transparent;color:var(--fg2);', pick: () => this.setState({ [keyName]: k }) }; });
+    L.tiles.forEach((t) => { t.enter = () => { if (this.state.hov !== t.id) this.setState({ hov: t.id }); }; t.pick = () => this.setState({ pick: this.state.pick === t.id ? '' : t.id }); });
+    return Object.assign(L, {
+      modes: seg([['req', 'Requests'], ['lim', 'Limits']], st.mode, 'mode'),
+      res: seg([['cpu', 'CPU'], ['mem', 'Memory']], st.res, 'res'),
+      aria: (st.mode === 'lim' ? 'Limits' : 'Requests') + ' on ' + x.name + ' by pod and container',
+      leave: () => this.setState({ hov: '' }),
+      freeShow: L.free.show, limKey: st.mode === 'lim' ? '' : 'display:none;'
+    });
+  }
+  renderVals() { return this.__icons(this.__rv()); }
+  __rv() {
+    const v = this.vars();
+    const st = this.state;
+    const E = (n) => ({ t: '✕ ' + n, c: 'var(--err)' });
+    const W = (n) => ({ t: '▲ ' + n, c: 'var(--warn)' });
+    const ok = 'var(--ok)', warn = 'var(--warn)', err = 'var(--err)', mute = 'var(--mute)', fg = 'var(--fg)', fg2 = 'var(--fg2)';
+    const allTrue = (age) => [['Ready', 'True', ok], ['MemoryPressure', 'False', mute], ['DiskPressure', 'False', mute], ['PIDPressure', 'False', mute], ['NetworkUnavailable', 'False', mute]].map(([t, s, c]) => ({ t, s, c, age }));
+    const N = (name, pool, type, zone, status, pods, cpu, mem, ver, age, extra) => Object.assign({ name, pool, type, zone, status, pods, cpu, mem, ver, age }, extra || {});
+    const nodes = [
+      N('ip-10-4-31-12', 'general-arm', 'm7g.4xlarge', 'us-east-1b', 'Ready, SchedulingDisabled', '43/58', 89, 77, 'v1.31.2', '41d', { pressure: true }),
+      N('ip-10-4-12-87', 'general-arm', 'm7g.4xlarge', 'us-east-1a', 'Ready', '52/58', 94, 81, 'v1.31.2', '12d'),
+      N('ip-10-4-14-201', 'general-arm', 'm7g.4xlarge', 'us-east-1a', 'Ready', '47/58', 86, 70, 'v1.31.2', '12d'),
+      N('ip-10-4-22-63', 'general-arm', 'm7g.4xlarge', 'us-east-1c', 'Ready', '44/58', 83, 66, 'v1.31.2', '6d'),
+      N('ip-10-4-40-7', 'builds', 'c7g.2xlarge', 'us-east-1b', 'Ready', '9/58', 22, 18, 'v1.31.2', '2d'),
+      N('ip-10-4-51-30', 'memory-x86', 'r6i.8xlarge', 'us-east-1a', 'Ready', '31/234', 54, 94, 'v1.30.4', '88d'),
+      N('ip-10-4-51-44', 'memory-x86', 'r6i.8xlarge', 'us-east-1b', 'Ready', '29/234', 51, 96, 'v1.30.4', '88d'),
+      N('ip-10-4-60-2', 'gpu', 'g5.2xlarge', 'us-east-1a', 'Ready', '6/58', 97, 60, 'v1.31.2', '20d'),
+      N('ip-10-4-60-9', 'gpu', 'g5.2xlarge', 'us-east-1c', 'Ready', '6/58', 97, 58, 'v1.31.2', '20d')
+    ];
+    const counts = { All: 64, Ready: 63, NotReady: 0, Cordoned: 1, Pressure: 1 };
+    const labels = { All: 'All', Ready: 'Ready', NotReady: 'NotReady', Cordoned: 'Cordoned', Pressure: 'Pressure' };
+    const filters = Object.keys(counts).map((k) => { const on = st.f === k; return { label: labels[k], n: counts[k], nc: counts[k] ? (on ? 'var(--selfg)' : fg2) : mute, pressed: on ? 'true' : 'false', style: on ? 'background:var(--sel);color:var(--selfg);' : 'background:transparent;color:var(--fg2);', pick: () => this.setState({ f: k }) }; });
+    const keep = (x) => st.f === 'All' || (st.f === 'Ready' && !x.status.includes('Disabled')) || ((st.f === 'Cordoned' || st.f === 'Pressure') && x.pressure);
+    const pc = (p) => p >= 95 ? err : (p >= 90 ? warn : 'var(--acc)');
+    const rows = nodes.map((x, i) => ({ x, i })).filter(({ x }) => keep(x)).map(({ x, i }) => ({
+      name: x.name, pool: x.pool, status: x.pressure ? 'Ready,SchedulingDisabled' : x.status, sc: x.pressure ? warn : ok,
+      pods: x.pods, cpu: x.cpu + '%', cpuW: Math.min(100, x.cpu) + '%', cpuC: pc(x.cpu), cpuT: x.cpu >= 90 ? pc(x.cpu) : fg2,
+      mem: x.mem + '%', memW: Math.min(100, x.mem) + '%', memC: pc(x.mem), memT: x.mem >= 90 ? pc(x.mem) : fg2,
+      ver: x.ver, vc: x.ver === 'v1.31.2' ? fg2 : warn, age: x.age,
+      on: i === st.sel ? 'true' : 'false', bg: i === st.sel ? 'background:var(--sel);color:var(--selfg);' : '',
+      pick: () => this.setState({ sel: i })
+    }));
+    const x = nodes[st.sel];
+    const U = (k, val, p, w, c, req, sub) => ({ k, v: val, p, pc: c === 'var(--acc)' ? fg2 : c, w, c, req: req || '0', reqShow: req ? '' : 'display:none;', sub });
+    const sel = x.pressure ? {
+      usage: [
+        U('CPU', '11.2 / 15.89 cores', '70% used', '70%', 'var(--acc)', '89%', 'requested 14.1 (89%) · limits 21.9 (138%)'),
+        U('Memory', '46.8 / 61.0 GiB', '77% used', '77%', 'var(--acc)', '77%', 'requested 47.0 (77%) · limits 58.1 (95%)'),
+        U('Disk', '46.1 / 50 GiB', '92% used', '92%', warn, '', 'ephemeral · evicts at 90%'),
+        U('Pods', '43 / 58', '74%', '74%', 'var(--acc)', '', 'max-pods 58')
+      ],
+      fields: [['pool', 'general-arm · karpenter', 'var(--acc)'], ['instance', 'm7g.4xlarge · on-demand', fg], ['zone', 'us-east-1b', fg], ['internal IP', '10.4.31.12', fg], ['kubelet', 'v1.31.2-eks-7f9249a', fg], ['OS image', 'Bottlerocket OS 1.24.1 (aws-k8s-1.31)', fg], ['runtime', 'containerd://1.7.22', fg], ['created', '2026-09-10 08:14 · 41d', fg]],
+      taints: ['node.kubernetes.io/unschedulable:NoSchedule', 'node.kubernetes.io/disk-pressure:NoSchedule'],
+      labels: ['karpenter.sh/nodepool=general-arm', 'node.kubernetes.io/instance-type=m7g.4xlarge', 'topology.kubernetes.io/zone=us-east-1b', 'kubernetes.io/arch=arm64'],
+      conds: [{ t: 'Ready', s: 'True', c: ok, age: '41d' }, { t: 'MemoryPressure', s: 'False', c: mute, age: '41d' }, { t: 'DiskPressure', s: 'True', c: warn, age: '42m' }, { t: 'PIDPressure', s: 'False', c: mute, age: '41d' }, { t: 'NetworkUnavailable', s: 'False', c: mute, age: '41d' }],
+      condSum: '1 of 5 not ok', condC: warn,
+      pods: [{ name: 'search-indexer-6f9-2kq8x', ns: 'search', cpu: '2', mem: '4Gi' }, { name: 'trino-worker-3', ns: 'analytics', cpu: '1.5', mem: '8Gi' }, { name: 'checkout-api-7f9c6d-m8vtn', ns: 'payments', cpu: '500m', mem: '512Mi' }, { name: 'otel-collector-8k2xd', ns: 'observability-node', cpu: '200m', mem: '400Mi' }, { name: 'cilium-7wq4n', ns: 'kube-system', cpu: '100m', mem: '128Mi' }],
+      podSum: '43 · top 5',
+      events: [
+        { age: '42m', reason: 'NodeHasDiskPressure', c: warn, msg: 'Node ip-10-4-31-12 status is now: NodeHasDiskPressure' },
+        { age: '41m', reason: 'EvictionThresholdMet', c: warn, msg: 'Attempting to reclaim ephemeral-storage' },
+        { age: '40m', reason: 'NodeNotSchedulable', c: mute, msg: 'Node ip-10-4-31-12 status is now: NodeNotSchedulable' }
+      ],
+      evSum: '3 · last 1h',
+      problems: [{ c: warn, reason: 'KubeletHasDiskPressure', msg: 'kubelet has disk pressure', obj: 'DiskPressure=True · 42m' }]
+    } : {
+      usage: [
+        U('CPU', Math.round(x.cpu * 0.8 * 0.1589 * 10) / 10 + ' / 15.89 cores', Math.round(x.cpu * 0.8) + '% used', Math.round(x.cpu * 0.8) + '%', 'var(--acc)', x.cpu + '%', 'requests ' + x.cpu + '%'),
+        U('Memory', 'of 61.0 GiB', Math.round(x.mem * 0.9) + '% used', Math.round(x.mem * 0.9) + '%', 'var(--acc)', Math.min(100, x.mem) + '%', 'requests ' + x.mem + '%'),
+        U('Disk', '18.4 / 50 GiB', '37% used', '37%', 'var(--acc)', '', 'ephemeral-storage'),
+        U('Pods', x.pods, '', '50%', 'var(--acc)', '', '')
+      ],
+      fields: [['pool', x.pool, 'var(--acc)'], ['instance', x.type, fg], ['zone', x.zone, fg], ['kubelet', x.ver, x.ver === 'v1.31.2' ? fg : warn], ['created', x.age + ' ago', fg]],
+      taints: [], labels: ['karpenter.sh/nodepool=' + x.pool, 'topology.kubernetes.io/zone=' + x.zone],
+      conds: allTrue(x.age), condSum: 'Ready · no pressure', condC: ok,
+      pods: [], podSum: x.pods.split('/')[0], events: [], evSum: '0 · last 1h', problems: []
+    };
+    sel.fields = sel.fields.map(([k, val, c]) => ({ k, v: val, c }));
+    const n = Object.assign({ name: x.name, taintCount: String(sel.taints.length), labelCount: String(sel.labels.length) }, sel);
+    return {
+      theme: v.theme, vars: v.vars,
+      navCounts: { nodes: [W(1)], events: [E(109), W(41)], 'problems-cl': [E(109), W(41)], pods: [E(106)], deployments: [E(103)], statefulsets: [E(4)], jobs: [E(17)] },
+      paneTabs: [{ kind: '', label: 'Nodes', ctx: 'prod-us-east', active: true }, { kind: 'cluster', label: 'Overview', ctx: 'prod-us-east' }],
+      filters, rows, shown: rows.length, n, tm: this.allocView(x, st),
+      hasProblems: sel.problems.length > 0, problems: sel.problems,
+      op: st.op,
+      ar: Object.fromEntries(Object.entries(st.op).map(([k, o]) => [k, o ? '▾' : '▸'])),
+      tg: Object.fromEntries(Object.keys(st.op).map((k) => [k, () => this.setState({ op: Object.assign({}, st.op, { [k]: !st.op[k] }) })]))
+    };
+  }
+}
+</script>
+</body>
+</html>

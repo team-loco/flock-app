@@ -1,5 +1,7 @@
+use std::sync::Arc;
 use std::time::Duration;
 
+use flock_core::allocation::PodShare;
 use flock_core::nodes::{Node, NodePod, state_label};
 use flock_core::{
     ClusterDetail, ClusterId, Command, Counts, Forward, Page, ResourceKind, ResourceRef, Seen,
@@ -169,20 +171,25 @@ fn recount_nodes(snapshot: &mut Snapshot, target: &ResourceRef) {
     else {
         return;
     };
-    let loads: Vec<(u32, Vec<NodePod>)> = snapshot
+    let loads: Vec<(u32, Vec<NodePod>, Arc<[PodShare]>)> = snapshot
         .detail(&target.cluster)
         .map(|detail| {
             detail
                 .nodes
                 .iter()
-                .map(|node| crate::detail::node_load(&snapshot.pods, &node.name))
+                .map(|node| {
+                    let (count, top) = crate::detail::node_load(&snapshot.pods, &node.name);
+                    let shares = crate::detail::node_allocation(&snapshot.pods, node);
+                    (count, top, shares)
+                })
                 .collect()
         })
         .unwrap_or_default();
     if let Some(detail) = detail(snapshot, target) {
-        for (node, (count, top)) in detail.nodes.iter_mut().zip(loads) {
+        for (node, (count, top, shares)) in detail.nodes.iter_mut().zip(loads) {
             node.pods = count;
             node.top_pods = top;
+            node.allocation = shares;
         }
     }
     let flagged = u32::try_from(summary.cordoned + summary.not_ready).unwrap_or(u32::MAX);
@@ -395,6 +402,8 @@ mod tests {
         let after = node(&snapshot, &node_name);
         assert_eq!(after.pods, before);
         assert!(after.top_pods.iter().all(|top| top.name != pod.name));
+        assert!(after.allocation.iter().all(|share| share.name != pod.name));
+        assert_eq!(after.allocation.len(), after.pods as usize);
         for top in &after.top_pods {
             let listed = snapshot
                 .pods

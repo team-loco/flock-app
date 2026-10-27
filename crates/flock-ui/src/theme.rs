@@ -218,6 +218,26 @@ pub const GRAPH_EDGE: Pixels = px(1.);
 pub const GRAPH_EDGE_ACTIVE: Pixels = px(1.5);
 pub const GRAPH_LEGEND_SWATCH: Pixels = px(8.);
 pub const GRAPH_COMPARE_COLUMN: Pixels = px(180.);
+pub const ALLOCATION_HEIGHT: Pixels = px(330.);
+pub const ALLOCATION_HEADER: Pixels = px(34.);
+pub const ALLOCATION_SIDE: Pixels = px(250.);
+pub const ALLOCATION_CURRENT: Pixels = px(74.);
+pub const TILE_BORDER: Pixels = px(1.5);
+pub const TILE_FOCUS: Pixels = px(2.);
+pub const TILE_LABEL_X: Pixels = px(5.);
+pub const TILE_LABEL_Y: Pixels = px(3.);
+pub const TILE_LABEL_LINE: Pixels = px(13.);
+pub const TILE_LABEL_MIN_WIDTH: f32 = 58.;
+pub const TILE_LABEL_MIN_HEIGHT: f32 = 30.;
+pub const FREE_LABEL_MIN_WIDTH: f32 = 70.;
+pub const FREE_LABEL_MIN_HEIGHT: f32 = 18.;
+pub const TILE_DIM: f32 = 0.45;
+pub const TILE_TINT: f32 = 0.38;
+pub const TILE_AMOUNT_OPACITY: f32 = 0.85;
+pub const SIDECAR_STRIPE: f32 = 3.;
+pub const FREE_HATCH_WIDTH: f32 = 1.;
+pub const FREE_HATCH_INTERVAL: f32 = 4.;
+pub const CATEGORIES: usize = flock_core::allocation::NAMESPACE_SLOTS;
 
 pub const DIALOG_WIDE: Pixels = px(720.);
 pub const PICK_CHECK_COLUMN: Pixels = px(20.);
@@ -313,6 +333,8 @@ pub struct Palette {
     pub delfg: Hsla,
     pub shadow: Hsla,
     pub scrim: Hsla,
+    pub categorical: [Hsla; CATEGORIES],
+    pub on_tile: Hsla,
 }
 
 impl Palette {
@@ -352,6 +374,15 @@ impl Palette {
             delfg: rgb(0x00FF_9C9C).into(),
             shadow: rgba(0x0000_0080).into(),
             scrim: rgba(0x0405_078C).into(),
+            categorical: [
+                rgb(0x0039_87E5).into(),
+                rgb(0x0019_9E70).into(),
+                rgb(0x0090_85E9).into(),
+                rgb(0x00D5_5181).into(),
+                rgb(0x00D9_5926).into(),
+                rgb(0x00C9_8500).into(),
+            ],
+            on_tile: rgb(0x00FF_FFFF).into(),
         }
     }
 
@@ -391,6 +422,15 @@ impl Palette {
             delfg: rgb(0x00A1_2626).into(),
             shadow: rgba(0x1418_202E).into(),
             scrim: rgba(0x1418_2038).into(),
+            categorical: [
+                rgb(0x002A_78D6).into(),
+                rgb(0x001B_AF7A).into(),
+                rgb(0x0062_50D6).into(),
+                rgb(0x00E8_7BA4).into(),
+                rgb(0x00EB_6834).into(),
+                rgb(0x00C9_8500).into(),
+            ],
+            on_tile: rgb(0x00FF_FFFF).into(),
         }
     }
 

@@ -16,6 +16,7 @@ use gpui::{
     ParentElement, Pixels, Render, SharedString, Styled, WeakEntity, Window, div, px,
 };
 
+mod allocation;
 mod inspector;
 mod shell;
 
@@ -30,6 +31,7 @@ use crate::theme::{
     ActiveTheme, FONT_MONO, INSPECTOR_NODE, Palette, SEARCH_WIDTH, SPACE_3, SPACE_4, SPACE_5,
     SPACE_6, TEXT_BODY, TEXT_LABEL, TEXT_MONO,
 };
+use allocation::Allocation;
 use inspector::{NodeContent, NodeInspector};
 use shell::{NodeShell, TERMINAL_ID, ask_shell};
 
@@ -80,6 +82,7 @@ pub struct NodesScreen {
     shell: Option<NodeShell>,
     terminal: Entity<Terminal>,
     dock: Entity<DockState>,
+    allocation: Allocation,
 }
 
 #[derive(Clone)]
@@ -182,6 +185,7 @@ impl NodesScreen {
             shell: None,
             terminal,
             dock,
+            allocation: Allocation::default(),
         }
     }
 
@@ -353,6 +357,9 @@ impl NodesScreen {
     }
 
     fn select(&mut self, name: Option<String>, cx: &mut Context<Self>) {
+        if self.selected != name {
+            self.allocation.forget_focus();
+        }
         self.selected = name;
         let target = self.selected.as_ref().zip(self.cluster.as_ref());
         let command = target.map_or(Command::CloseInspector, |(name, cluster)| {
@@ -451,9 +458,9 @@ impl Render for NodesScreen {
             noun: Noun::of(Page::Nodes),
             cluster: &self.cluster_name,
         };
-        let body: AnyElement = match empty_list(&shape, &self.filter, None, cx) {
-            Some(empty) => empty.into_any_element(),
-            None => Table::pane(&self.table, cx).into_any_element(),
+        let (body, listed): (AnyElement, bool) = match empty_list(&shape, &self.filter, None, cx) {
+            Some(empty) => (empty.into_any_element(), false),
+            None => (Table::pane(&self.table, cx).into_any_element(), true),
         };
         let footer = div()
             .debug_selector(|| "node-footer".to_owned())
@@ -464,6 +471,10 @@ impl Render for NodesScreen {
             .text_color(palette.mute)
             .child(footer_line(self.shown, self.nodes.items().len()));
         let current = self.selected_node().cloned();
+        let allocation = current
+            .as_ref()
+            .filter(|_| listed)
+            .map(|node| self.allocation.render(node, cx));
         let shown = current.as_ref().map(|node| (node, node.name.as_str()));
         let motion = self.presence.track(shown, presence, cx);
         let inspector = match current {
@@ -491,7 +502,8 @@ impl Render for NodesScreen {
                     .flex_col()
                     .child(self.filter.clone())
                     .child(div().flex_1().min_h_0().child(body))
-                    .child(footer),
+                    .child(footer)
+                    .children(allocation),
             )
             .children(inspector);
         div().size_full().flex().flex_col().child(main).child(dock)
