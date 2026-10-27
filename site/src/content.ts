@@ -83,6 +83,19 @@ export const FEATURES: Feature[] = [
     screen: "logs",
     alt: "Streaming pod logs parsed into fields",
   },
+  {
+    kicker: "Capacity",
+    accent: "primary",
+    title: "See what's using each node",
+    body: "Pick a node and see every pod on it as a treemap, sized by its CPU or memory requests or limits, with what is still free.",
+    points: [
+      "one tile per pod, one segment per container",
+      "requests against limits, sidecars marked",
+      "unrequested room left on the node",
+    ],
+    screen: "node",
+    alt: "The Nodes page with a treemap of the selected node's pods sized by CPU request",
+  },
 ];
 
 export const shotPath = (screen: string, appearance: Appearance) =>
