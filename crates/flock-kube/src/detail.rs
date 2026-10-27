@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+use flock_core::allocation::{ContainerShare, PodShare, Share};
 use flock_core::cluster::Namespace;
 use flock_core::events::{Event, warnings_first};
 use flock_core::nodes;
@@ -21,6 +22,7 @@ const CPU: &str = "cpu";
 const MEMORY: &str = "memory";
 const PODS: &str = "pods";
 const PHASE_PENDING: &str = "Pending";
+const RESTART_ALWAYS: &str = "Always";
 const INSTANCE_TYPE_LABELS: [&str; 2] = [
     "node.kubernetes.io/instance-type",
     "beta.kubernetes.io/instance-type",
@@ -80,6 +82,7 @@ pub struct PodIndex {
     per_node: HashMap<String, u32>,
     node_resources: HashMap<String, (Totals, Totals)>,
     node_pods: HashMap<String, Vec<nodes::NodePod>>,
+    node_shares: HashMap<String, Vec<PodShare>>,
     requests: Totals,
     limits: Totals,
 }
@@ -104,15 +107,66 @@ fn restart_count(pod: &Pod) -> u32 {
         .sum()
 }
 
+fn sidecars(pod: &Pod) -> impl Iterator<Item = &core::Container> {
+    pod.spec
+        .iter()
+        .flat_map(|spec| spec.init_containers.iter().flatten())
+        .filter(|c| c.restart_policy.as_deref() == Some(RESTART_ALWAYS))
+}
+
+fn running_containers(pod: &Pod) -> impl Iterator<Item = (&core::Container, bool)> {
+    let main = pod
+        .spec
+        .iter()
+        .flat_map(|spec| spec.containers.iter())
+        .map(|c| (c, false));
+    main.chain(sidecars(pod).map(|c| (c, true)))
+}
+
 fn pod_resources(pod: &Pod) -> (Totals, Totals) {
     let mut requests = Totals::default();
     let mut limits = Totals::default();
-    for container in pod.spec.iter().flat_map(|spec| spec.containers.iter()) {
+    for (container, _) in running_containers(pod) {
         let declared = container.resources.as_ref();
         requests.add(resources(declared.and_then(|r| r.requests.as_ref())));
         limits.add(resources(declared.and_then(|r| r.limits.as_ref())));
     }
     (requests, limits)
+}
+
+fn declared(map: Option<&BTreeMap<String, Quantity>>) -> (Option<f32>, Option<f32>) {
+    let get = |key: &str| map.and_then(|m| m.get(key)).map(|q| q.0.as_str());
+    let cpu = get(CPU).and_then(cpu_millicores).map(cores);
+    let memory = get(MEMORY).and_then(parse_quantity).map(gib);
+    (cpu, memory)
+}
+
+fn pod_share(pod: &Pod, namespace: &str) -> PodShare {
+    let containers = running_containers(pod)
+        .map(|(container, sidecar)| {
+            let resources = container.resources.as_ref();
+            let (cpu_request, memory_request) =
+                declared(resources.and_then(|r| r.requests.as_ref()));
+            let (cpu_limit, memory_limit) = declared(resources.and_then(|r| r.limits.as_ref()));
+            ContainerShare {
+                name: container.name.clone(),
+                sidecar,
+                cpu: Share {
+                    request: cpu_request.unwrap_or_default(),
+                    limit: cpu_limit,
+                },
+                memory: Share {
+                    request: memory_request.unwrap_or_default(),
+                    limit: memory_limit,
+                },
+            }
+        })
+        .collect();
+    PodShare {
+        namespace: namespace.to_owned(),
+        name: pod.metadata.name.clone().unwrap_or_default(),
+        containers,
+    }
 }
 
 impl PodIndex {
@@ -169,6 +223,11 @@ impl PodIndex {
                     .entry(name.clone())
                     .or_default()
                     .push(requested);
+                index
+                    .node_shares
+                    .entry(name.clone())
+                    .or_default()
+                    .push(pod_share(pod, namespace));
             }
             index.requests.add(requests);
             index.limits.add(limits);
@@ -339,6 +398,7 @@ pub fn node(
             .map(|(k, v)| format!("{k}={v}"))
             .collect(),
         top_pods: Vec::new(),
+        allocation: Arc::default(),
     }
 }
 
@@ -368,6 +428,10 @@ pub fn nodes(
             row.cpu_commitment = cpu;
             row.memory_commitment = memory;
             row.top_pods = index.top_pods(name);
+            row.allocation = index
+                .node_shares
+                .get(name)
+                .map_or_else(Arc::default, |shares| shares.as_slice().into());
             row
         })
         .collect();
@@ -683,6 +747,63 @@ mod tests {
         );
         assert_eq!(rows[0].top_pods[0].namespace, "web");
         assert!((rows[0].top_pods[0].memory - 1.).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn node_allocation_lists_each_container_and_native_sidecars() {
+        let pod: Arc<Pod> = parse(json!({
+            "metadata": { "name": "api-7f9c6d-m8vtn", "namespace": "payments" },
+            "spec": {
+                "nodeName": "w1",
+                "initContainers": [
+                    { "name": "migrate", "image": "i", "resources": { "requests": { "cpu": "4" } } },
+                    {
+                        "name": "envoy", "image": "i", "restartPolicy": "Always",
+                        "resources": { "requests": { "cpu": "100m", "memory": "128Mi" } }
+                    }
+                ],
+                "containers": [{
+                    "name": "api", "image": "i",
+                    "resources": {
+                        "requests": { "cpu": "400m", "memory": "512Mi" },
+                        "limits": { "cpu": "1" }
+                    }
+                }]
+            },
+            "status": { "phase": "Running", "conditions": [{ "type": "Ready", "status": "True" }] }
+        }));
+        let index = PodIndex::build(&[pod], now());
+        let rows = nodes(&[worker("w1")], &index, &[], &[], now());
+        let shares = &rows[0].allocation;
+        assert_eq!(shares.len(), 1);
+        assert_eq!(shares[0].path(), "payments/api-7f9c6d-m8vtn");
+        let containers: Vec<(&str, bool, f32, Option<f32>, f32)> = shares[0]
+            .containers
+            .iter()
+            .map(|c| {
+                (
+                    c.name.as_str(),
+                    c.sidecar,
+                    c.cpu.request,
+                    c.cpu.limit,
+                    c.memory.request,
+                )
+            })
+            .collect();
+        assert_eq!(
+            containers,
+            [
+                ("api", false, 0.4, Some(1.), 0.5),
+                ("envoy", true, 0.1, None, 0.125)
+            ]
+        );
+        assert_eq!(
+            rows[0].cpu_commitment,
+            Commitment {
+                requests: 0.125,
+                limits: 0.25
+            }
+        );
     }
 
     #[test]

@@ -240,6 +240,7 @@ mod tests {
             taints: Vec::new(),
             labels: Vec::new(),
             top_pods: Vec::new(),
+            allocation: Arc::default(),
         }
     }
 

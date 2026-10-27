@@ -1,5 +1,6 @@
 pub mod action;
 pub mod add_cluster;
+pub mod allocation;
 pub mod app_settings;
 pub mod changes;
 pub mod cluster;

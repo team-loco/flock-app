@@ -1570,7 +1570,8 @@ fn node_inspector_keeps_the_disk_row_when_the_kubelet_summary_is_unavailable() -
     let mut ui = Ui::open(Screen::Nodes)?;
     ui.click("nodes-row-0")?;
     let measured = ui.bounds("node-usage-Disk").map(|b| b.size);
-    ui.click("nodes-row-13")?;
+    ui.press("end")?;
+    assert!(ui.bounds("nodes-row-13").is_some());
     let unavailable = ui.bounds("node-usage-Disk").map(|b| b.size);
     assert!(measured.is_some());
     assert_eq!(measured, unavailable);
@@ -4295,6 +4296,36 @@ fn a_node_inspector_links_its_biggest_pods_by_request() -> anyhow::Result<()> {
     assert_eq!(location.resource.map(|target| target.name), biggest);
     ui.click("pane-0-back")?;
     assert_eq!(ui.state().location().page, Page::Nodes);
+    Ok(())
+}
+
+#[test]
+fn a_selected_node_draws_its_allocation_treemap_inside_the_map() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Nodes)?;
+    assert!(ui.bounds("node-allocation").is_none());
+    let mut ui = Ui::open(Screen::Node)?;
+    let map = ui
+        .bounds("node-allocation-map")
+        .context("a selected node shows its allocation")?;
+    let inside = gpui::point(gpui::px(1.), gpui::px(1.));
+    for (basis, resource) in [
+        ("node-allocation-basis-1", "node-allocation-resource-1"),
+        ("node-allocation-basis-0", "node-allocation-resource-0"),
+    ] {
+        ui.click(basis)?;
+        ui.click(resource)?;
+        let tile = ui
+            .bounds("node-allocation-tile-0")
+            .context("the biggest pod has a tile")?;
+        assert!(tile.size.width > Pixels::ZERO && tile.size.height > Pixels::ZERO);
+        assert!(map.contains(&tile.origin));
+        assert!(map.contains(&(tile.bottom_right() - inside)));
+    }
+    ui.hover("node-allocation-tile-1")?;
+    ui.click("node-allocation-tile-1")?;
+    assert!(ui.bounds("node-allocation-current").is_some());
+    ui.click("nodes-row-0")?;
+    assert!(ui.bounds("node-allocation-map").is_some());
     Ok(())
 }
 

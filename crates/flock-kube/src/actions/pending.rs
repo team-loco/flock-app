@@ -237,6 +237,7 @@ mod tests {
             taints: Vec::new(),
             labels: Vec::new(),
             top_pods: Vec::new(),
+            allocation: std::sync::Arc::default(),
         });
         detail.resources.insert(
             ResourceKind::Deployment,

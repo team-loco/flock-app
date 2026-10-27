@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use flock_core::Condition;
+use flock_core::allocation::{ContainerShare, PodShare, Share};
 use flock_core::cluster::Namespace;
 use flock_core::cluster_changes::{ChangeKind, ClusterChange};
 use flock_core::control_plane::{
@@ -35,6 +37,8 @@ const KUBELET: &str = "v1.31.2-eks-7f9249a";
 const GPU_KUBELET: &str = "v1.30.4-eks-a737599";
 const CPU_LIMIT_RATIO: f32 = 1.4;
 const MEMORY_LIMIT_RATIO: f32 = 1.2;
+const SIDECAR_WEIGHT: f32 = 0.15;
+const MIN_WEIGHT: f32 = 1.;
 const OS_IMAGE: &str = "Amazon Linux 2023.5.20240916";
 const EVENT_FIRST_AGE: Duration = Duration::from_secs(3600);
 const BAR_SEED: u64 = 11;
@@ -604,6 +608,60 @@ fn top_pods(on_node: &[&Pod]) -> Vec<NodePod> {
     top
 }
 
+fn container_shares(pod: &Pod, cpu: f32, memory: f32) -> Vec<ContainerShare> {
+    let weight = |ix: usize| if ix == 0 { 1. } else { SIDECAR_WEIGHT };
+    let total: f32 = (0..pod.containers.len()).map(weight).sum();
+    pod.containers
+        .iter()
+        .enumerate()
+        .map(|(ix, container)| {
+            let part = weight(ix) / total;
+            ContainerShare {
+                name: container.name.clone(),
+                sidecar: ix > 0,
+                cpu: Share {
+                    request: cpu * part,
+                    limit: Some(cpu * part * CPU_LIMIT_RATIO),
+                },
+                memory: Share {
+                    request: memory * part,
+                    limit: Some(memory * part * MEMORY_LIMIT_RATIO),
+                },
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn node_allocation(pods: &[Pod], node: &Node) -> Arc<[PodShare]> {
+    let on_node = node_pods(pods, &node.name);
+    let weights: Vec<(f32, f32)> = on_node
+        .iter()
+        .map(|pod| {
+            let usage = pod.usage.unwrap_or_default();
+            let cpu = scaled(usage.cpu_millis, 1.).max(MIN_WEIGHT);
+            let memory = scaled(usage.memory_mib, 1.).max(MIN_WEIGHT);
+            (cpu, memory)
+        })
+        .collect();
+    let cpu_weight: f32 = weights.iter().map(|w| w.0).sum();
+    let memory_weight: f32 = weights.iter().map(|w| w.1).sum();
+    let cpu_total = node.cpu.allocatable * node.cpu_commitment.requests;
+    let memory_total = node.memory.allocatable * node.memory_commitment.requests;
+    on_node
+        .iter()
+        .zip(weights)
+        .map(|(pod, (cpu, memory))| PodShare {
+            namespace: pod.namespace.clone(),
+            name: pod.name.clone(),
+            containers: container_shares(
+                pod,
+                cpu_total * cpu / cpu_weight,
+                memory_total * memory / memory_weight,
+            ),
+        })
+        .collect()
+}
+
 pub(crate) fn node_load(pods: &[Pod], name: &str) -> (u32, Vec<NodePod>) {
     let on_node = node_pods(pods, name);
     let count = u32::try_from(on_node.len()).unwrap_or(u32::MAX);
@@ -642,7 +700,7 @@ fn node(seed: &NodeSeed, pods: &[Pod]) -> Node {
         allocatable: NODE_DISK,
     });
     let internal_ip = seed.name.trim_start_matches("ip-").replace('-', ".");
-    Node {
+    let mut node = Node {
         uid: Uid::default(),
         name: seed.name.into(),
         status,
@@ -676,7 +734,10 @@ fn node(seed: &NodeSeed, pods: &[Pod]) -> Node {
             format!("eks.amazonaws.com/nodegroup={group}"),
         ],
         top_pods,
-    }
+        allocation: Arc::default(),
+    };
+    node.allocation = node_allocation(pods, &node);
+    node
 }
 
 fn conditions() -> Vec<Condition> {
@@ -1178,6 +1239,23 @@ mod tests {
         let cordoned = nodes.iter().find(|node| node.name == CORDONED);
         assert!(cordoned.is_some_and(|node| node.pods > 0 && !node.schedulable));
         assert!(cordoned.is_some_and(|node| !node.top_pods.is_empty()));
+    }
+
+    #[test]
+    fn node_allocation_spreads_the_node_requests_over_its_pods() {
+        let pods = crate::pods::pods();
+        for node in nodes(&pods) {
+            let requested: f32 = node
+                .allocation
+                .iter()
+                .map(|pod| pod.requested(flock_core::allocation::Resource::Cpu))
+                .sum();
+            let expected = node.cpu.allocatable * node.cpu_commitment.requests;
+            assert_eq!(node.allocation.len(), node.pods as usize, "{}", node.name);
+            if node.pods > 0 {
+                assert!((requested - expected).abs() < 1e-3, "{}", node.name);
+            }
+        }
     }
 
     #[test]
