@@ -21,6 +21,7 @@ use crate::theme::{
 };
 
 pub const FILTER_PLACEHOLDER: &str = "Filter";
+pub const GROUP_SLOT: &str = "filter-group";
 const CLEAR: &str = "Clear";
 const REMOVE_TOKEN: &str = "×";
 const EXCLUDE: &str = "−";
@@ -67,6 +68,7 @@ pub struct FilterBar {
     field: Entity<TextFieldState>,
     scope: Option<AnyView>,
     aside: Option<AnyView>,
+    group: Option<AnyView>,
     segments: Vec<SharedString>,
     chip_digits: usize,
     chip: usize,
@@ -97,6 +99,7 @@ impl FilterBar {
             field,
             scope: None,
             aside: None,
+            group: None,
             segments: Vec::new(),
             chip_digits: 0,
             chip: 0,
@@ -296,6 +299,19 @@ impl FilterBar {
     pub fn aside(mut self, view: impl Into<AnyView>) -> Self {
         self.aside = Some(view.into());
         self
+    }
+
+    pub fn group(mut self, picker: impl Into<AnyView>) -> Self {
+        self.group = Some(picker.into());
+        self
+    }
+
+    pub fn set_group(&mut self, picker: impl Into<AnyView>, cx: &mut Context<Self>) {
+        let picker = picker.into();
+        if self.group.as_ref().map(AnyView::entity_id) != Some(picker.entity_id()) {
+            self.group = Some(picker);
+            cx.notify();
+        }
     }
 
     pub fn set_scope(&mut self, picker: Option<AnyView>, cx: &mut Context<Self>) {
@@ -769,6 +785,12 @@ impl Render for FilterBar {
                     .whitespace_nowrap()
                     .children(note),
             )
+            .children(self.group.clone().map(|group| {
+                div()
+                    .debug_selector(|| GROUP_SLOT.to_owned())
+                    .flex_none()
+                    .child(group)
+            }))
     }
 }
 

@@ -12,8 +12,8 @@ use gpui::{
 
 use super::{ListShape, ScreenEvent, empty_list};
 use crate::kit::{
-    Column, FilterBar, FilterEvent, MenuItem, SnapshotRow, SnapshotRows, Table, TableEvent,
-    chip_label, reason_cell, reason_tooltip,
+    Column, FilterBar, FilterEvent, Grouping, MenuItem, SnapshotRow, SnapshotRows, Table,
+    TableEvent, chip_label, reason_cell, reason_tooltip,
 };
 use crate::screens::{edit_item, new_tab_item};
 use crate::theme::{REASON_MIN, REASON_WEIGHT};
@@ -50,8 +50,10 @@ impl FluxListScreen {
                 .row_actions(move |object: &FluxRow, _: &[&FluxRow]| row_items(object, &screen))
                 .row_key(|o: &FluxRow| format!("{}/{}", o.key.namespace, o.key.name).into())
                 .type_ahead(|o: &FluxRow| o.key.name.clone().into())
+                .grouped(Grouping::facets(|o: &FluxRow| o.status()), cx)
         });
-        let filter = cx.new(|cx| FilterBar::new("flux-filter", window, cx));
+        let group = table.read(cx).group_menu().clone();
+        let filter = cx.new(|cx| FilterBar::new("flux-filter", window, cx).group(group));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh_rows(cx);
         })

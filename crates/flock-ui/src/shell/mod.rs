@@ -342,6 +342,10 @@ impl Shell {
         self.focused_screens().pages.custom_empty_sentence(cx)
     }
 
+    pub fn pod_groups(&self, cx: &App) -> Vec<flock_core::grouping::Group> {
+        self.focused_screens().pods.read(cx).groups(cx)
+    }
+
     pub fn switcher_open(&self, cx: &App) -> bool {
         self.switcher.read(cx).is_open()
     }

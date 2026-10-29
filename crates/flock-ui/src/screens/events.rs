@@ -19,7 +19,7 @@ use super::{
     ALL_NAMESPACES, ListShape, ScreenEvent, chosen_namespace, empty_list, set_namespace_options,
 };
 use crate::kit::{
-    Column, FilterBar, FilterEvent, Presence, Select, SelectEvent, ShowAll, SnapshotRow,
+    Column, FilterBar, FilterEvent, Grouping, Presence, Select, SelectEvent, ShowAll, SnapshotRow,
     SnapshotRows, StatusGlyph, StatusText, Table, TableEvent, chip_label,
 };
 use crate::theme::{
@@ -100,6 +100,7 @@ impl EventsScreen {
                 .row_key(|event: &EventRow| event.key().into())
                 .click_opens()
                 .row_status(|e: &EventRow| (e.status == Status::Err).then_some(Status::Err))
+                .grouped(Grouping::facets(|e: &EventRow| e.status), cx)
         });
         cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
             if let TableEvent::Opened(ix) = event {
@@ -119,8 +120,12 @@ impl EventsScreen {
             this.choose_namespace(scope, cx);
         })
         .detach();
-        let filter =
-            cx.new(|cx| FilterBar::new("event-filter", window, cx).scope(namespaces.clone()));
+        let group = table.read(cx).group_menu().clone();
+        let filter = cx.new(|cx| {
+            FilterBar::new("event-filter", window, cx)
+                .scope(namespaces.clone())
+                .group(group)
+        });
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh_rows(cx);
         })

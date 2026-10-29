@@ -233,6 +233,10 @@ filter.update(cx, |bar, cx| {
 table.update(cx, |t, cx| t.set_highlight(query.words.clone(), cx));
 ```
 
+`.group(table.read(cx).group_menu().clone())` puts a table's group picker at the right end of the
+bar (debug selector `filter-group`); a page that swaps tables under one bar calls
+`set_group(menu, cx)` when it shows another table.
+
 Screens expose `filter_bar()` so the shell can focus it. On namespaced lists the scope picker
 is the namespace: read it with `preferences.namespace_selection(list)`, and on a pick call
 `preferences.select_namespace(list, selection)` and emit `Command::SetPreferences`. The rows hold
@@ -264,6 +268,10 @@ menu.update(cx, |m, cx| m.set_items(items, cx));
 ```
 
 `ActionMenu::new(id, cx).plain()` draws the ⋯ trigger without a border (for rows in the side panels).
+`.prefixed(icon, "group", "None")` draws a mono trigger with an icon, a muted prefix, the label and a
+chevron (the table group picker); `set_label(label, cx)` changes it. `.width(px)` sets the menu width
+(default `MENU_WIDTH`). An item whose shortcut hint is a single unmodified key runs when that key is
+pressed while the menu is open.
 `ActionMenu::context(id, cx)` has no trigger: `menu.show_at(position, items, window, cx)` opens it at a
 window point (the Table uses it for row menus).
 
@@ -362,6 +370,18 @@ to `theme::COLUMN_MIN` (or the flex minimum), double-click to fit the column to 
 cells without `fit_by` go back to their design width). Widths are stored per scope and table id in
 `flock_ui::prefs` (`view.json` in the Flock data dir, memory only in demo and tests); call
 `table.set_scope(cluster.as_str(), cx)` on cluster pages, flock pages use `prefs::FLOCK_SCOPE`.
+
+Grouping (decision 58): `.grouped(Grouping::facets(|row: &PodRow| row.status), cx)` offers None
+plus the namespace and facets of the row type's `Searchable` `FilterSpec` (rows that deref to it,
+such as `SnapshotRow<T>`); the closure gives each row's status for the ✕ / ▲ totals.
+`Grouping::new(status).by("team", |row| Some(row.team.as_str().into()))` builds options by hand.
+The table owns its picker, an `ActionMenu` with a `group <label>` trigger (`{table}-group`, items
+`{table}-group-item-{ix}`); pass `group_menu()` to the FilterBar. While grouped, the list holds a
+header row per group (`{table}-group-{ix}`, in group order) before its rows; clicking it or Enter
+on it collapses it, and ↑ / ↓ stop on headers. Bucketing, ordering, totals and collapsing are
+`flock_core::grouping::group`, run on every resort over the sorted rows. The choice and collapsed
+groups are stored per scope and table id like column widths. `group_by(Some(facet), cx)`,
+`toggle_group(value, cx)` and `groups()` drive and read it from code.
 
 ⌘-click and middle-click on a row emit `Opened` as well (the shell turns the resulting navigation
 into a new tab). Rows that open something put `screens::new_tab_item(command, emit)` ("Open in new

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -24,6 +24,14 @@ pub type ColumnWidths = BTreeMap<String, f32>;
 #[serde(default)]
 pub struct ScopePrefs {
     pub columns: BTreeMap<String, ColumnWidths>,
+    pub groups: BTreeMap<String, Grouping>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Grouping {
+    pub by: Option<String>,
+    pub collapsed: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -88,6 +96,29 @@ impl ViewPrefs {
         self.save()
     }
 
+    pub fn grouping(&self, scope: &str, table: &str) -> Grouping {
+        self.file
+            .scopes
+            .get(scope)
+            .and_then(|prefs| prefs.groups.get(table))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn set_grouping(
+        &mut self,
+        scope: &str,
+        table: &str,
+        grouping: Grouping,
+    ) -> Result<(), PrefsError> {
+        let prefs = self.file.scopes.entry(scope.to_owned()).or_default();
+        if prefs.groups.get(table) == Some(&grouping) {
+            return Ok(());
+        }
+        prefs.groups.insert(table.to_owned(), grouping);
+        self.save()
+    }
+
     fn save(&self) -> Result<(), PrefsError> {
         let Some(path) = &self.path else {
             return Ok(());
@@ -129,6 +160,21 @@ pub fn set_column_widths(scope: &str, table: &str, widths: ColumnWidths, cx: &mu
     }
 }
 
+pub fn grouping(scope: &str, table: &str, cx: &App) -> Grouping {
+    cx.try_global::<ViewPrefs>()
+        .map(|prefs| prefs.grouping(scope, table))
+        .unwrap_or_default()
+}
+
+pub fn set_grouping(scope: &str, table: &str, grouping: Grouping, cx: &mut App) {
+    let result = cx
+        .default_global::<ViewPrefs>()
+        .set_grouping(scope, table, grouping);
+    if let Err(error) = result {
+        tracing::warn!(%error, "could not save the table grouping");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,6 +189,33 @@ mod tests {
         assert_eq!(reopened.column_widths("prod", "pods"), widths);
         assert!(reopened.column_widths("staging", "pods").is_empty());
         assert!(reopened.column_widths("prod", "nodes").is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn groupings_survive_a_reopen_per_scope_and_table() -> Result<(), PrefsError> {
+        let dir = tempfile::tempdir()?;
+        let mut prefs = ViewPrefs::open(dir.path())?;
+        let grouping = Grouping {
+            by: Some("namespace".to_owned()),
+            collapsed: BTreeSet::from(["kube-system".to_owned()]),
+        };
+        prefs.set_grouping("prod", "pods", grouping.clone())?;
+        let reopened = ViewPrefs::open(dir.path())?;
+        assert_eq!(reopened.grouping("prod", "pods"), grouping);
+        assert_eq!(reopened.grouping("staging", "pods"), Grouping::default());
+        assert_eq!(reopened.grouping("prod", "nodes"), Grouping::default());
+        Ok(())
+    }
+
+    #[test]
+    fn files_written_before_grouping_still_load() -> Result<(), PrefsError> {
+        let dir = tempfile::tempdir()?;
+        let old = br#"{"scopes":{"prod":{"columns":{"pods":{"Name":320.0}}}}}"#;
+        fs::write(dir.path().join(FILE), old)?;
+        let prefs = ViewPrefs::open(dir.path())?;
+        assert_eq!(prefs.grouping("prod", "pods"), Grouping::default());
+        assert_eq!(prefs.column_widths("prod", "pods").len(), 1);
         Ok(())
     }
 

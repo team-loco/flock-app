@@ -245,6 +245,35 @@ impl<T, C> FilterSpec<T, C> {
         facets
     }
 
+    pub fn group_facets(&self) -> Vec<&'static str> {
+        let declared = self.facets.iter().map(|(name, _)| *name);
+        let namespace = self.namespace.then_some(NAMESPACE_FACET);
+        let mut names: Vec<&'static str> = Vec::new();
+        for name in namespace.into_iter().chain(declared) {
+            if name != LABEL_FACET && !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        names
+    }
+
+    pub fn group_value<'a>(
+        &self,
+        row: &'a T,
+        context: &'a C,
+        namespace: Option<&'a str>,
+        facet: &str,
+    ) -> Option<Cow<'a, str>> {
+        if facet == NAMESPACE_FACET {
+            return namespace.filter(|_| self.namespace).map(Cow::Borrowed);
+        }
+        let mut values = FieldValues::new();
+        for (_, field) in self.facets.iter().filter(|(name, _)| *name == facet) {
+            field(row, context, &mut values);
+        }
+        values.into_iter().find(|value| !value.is_empty())
+    }
+
     pub fn count_facets(
         &self,
         row: &T,
@@ -668,6 +697,25 @@ mod tests {
             facets.values(LABEL_FACET),
             [("team=core", 2), ("tier=db", 1)]
         );
+    }
+
+    #[test]
+    fn groups_offer_namespace_and_declared_facets_but_not_labels() {
+        let spec = FilterSpec::<Toy> {
+            namespace: true,
+            ..Toy::FILTER
+        };
+        assert_eq!(spec.group_facets(), [NAMESPACE_FACET, "owner"]);
+        assert_eq!(Toy::FILTER.group_facets(), ["owner"]);
+        let row = toy();
+        let value = |spec: &FilterSpec<Toy>, facet| {
+            spec.group_value(&row, &(), row.namespace(), facet)
+                .map(Cow::into_owned)
+        };
+        assert_eq!(value(&spec, NAMESPACE_FACET).as_deref(), Some("delta"));
+        assert_eq!(value(&Toy::FILTER, NAMESPACE_FACET), None);
+        assert_eq!(value(&spec, "owner").as_deref(), Some("beta"));
+        assert_eq!(value(&spec, LABEL_FACET), None);
     }
 
     #[test]

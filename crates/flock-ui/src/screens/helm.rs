@@ -15,7 +15,7 @@ use gpui::{
 use super::{ListShape, ScreenEvent, empty_list, new_tab_item};
 use crate::kit::scroll_viewport;
 use crate::kit::{
-    Button, CodeView, Column, EmptyState, FilterBar, FilterEvent, MenuItem, PageHeader,
+    Button, CodeView, Column, EmptyState, FilterBar, FilterEvent, Grouping, MenuItem, PageHeader,
     SectionHeader, Skeleton, SnapshotRow, SnapshotRows, StatusGlyph, Table, TableEvent, chip_label,
 };
 use crate::theme::{ActiveTheme, RULE, SPACE_3, SPACE_8};
@@ -70,13 +70,15 @@ impl EventEmitter<ScreenEvent> for HelmReleasesScreen {}
 
 impl HelmReleasesScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter = cx.new(|cx| FilterBar::new("helm-filter", window, cx));
         let table = cx.new(|cx| {
             Table::new("helm-releases", columns(), cx)
                 .click_opens()
                 .row_key(|r: &HelmRow| format!("{}/{}", r.key.namespace, r.key.name).into())
                 .row_status(|r: &HelmRow| (r.status != Status::Ok).then_some(r.status))
+                .grouped(Grouping::facets(|r: &HelmRow| r.status), cx)
         });
+        let group = table.read(cx).group_menu().clone();
+        let filter = cx.new(|cx| FilterBar::new("helm-filter", window, cx).group(group));
         let subscriptions = vec![
             cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
                 this.refresh(cx);

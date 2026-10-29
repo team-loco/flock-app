@@ -12,8 +12,8 @@ use gpui::{
 
 use super::events::reason_cell;
 use crate::kit::{
-    Column, EmptyState, FilterBar, FilterEvent, SnapshotRow, SnapshotRows, Table, TableEvent,
-    chip_label,
+    Column, EmptyState, FilterBar, FilterEvent, Grouping, SnapshotRow, SnapshotRows, Table,
+    TableEvent, chip_label,
 };
 use crate::theme::{
     EVENT_AGE_WIDTH, EVENT_COUNT_WIDTH, EVENT_MESSAGE_MIN, EVENT_MESSAGE_WEIGHT,
@@ -46,6 +46,7 @@ impl FluxEventsScreen {
                 .row_status(|e: &FluxEventRow| {
                     (e.event.status == Status::Err).then_some(Status::Err)
                 })
+                .grouped(Grouping::facets(|e: &FluxEventRow| e.event.status), cx)
         });
         cx.subscribe(&table, |_, table, event: &TableEvent, cx| {
             if let TableEvent::Opened(ix) = *event
@@ -55,7 +56,8 @@ impl FluxEventsScreen {
             }
         })
         .detach();
-        let filter = cx.new(|cx| FilterBar::new("flux-events-filter", window, cx));
+        let group = table.read(cx).group_menu().clone();
+        let filter = cx.new(|cx| FilterBar::new("flux-events-filter", window, cx).group(group));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh_rows(cx);
         })
