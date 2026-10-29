@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Logs v3</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.hv:hover{background:var(--hover)}
+.ib{height:24px;box-sizing:border-box;padding:0 8px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--fg2);font-family:'IBM Plex Mono',monospace;font-size:11.5px;display:flex;align-items:center;gap:6px;cursor:pointer}
+.ib:hover{background:var(--hover)}
+.m{background:var(--warnbg);color:var(--fg)!important;box-shadow:inset 0 -1px 0 var(--warn);border-radius:1px}
+.cur{background:var(--warn);color:#111317!important;border-radius:1px}
+</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);background:var(--editor);width:100%;height:900px;display:flex;flex-direction:column;overflow:hidden">
+  <div style="flex:1;min-height:0;display:flex;flex-wrap:wrap">
+    <div style="flex:0 0 auto;display:flex"><sc-if value="{{multi}}" hint-placeholder-val="{{ true }}"><dc-import name="Nav" theme="{{theme}}" mode="fleet" exp="{{ true }}" active="fl-deployments" hint-size="200px,874px"></dc-import></sc-if><sc-if value="{{single}}" hint-placeholder-val="{{ false }}"><dc-import name="Nav" theme="{{theme}}" mode="cluster" active="deployments" loco="{{ false }}" cluster-name="{{oneCluster}}" counts="{{navCounts}}" hint-size="200px,874px"></dc-import></sc-if></div>
+    <div style="flex:999 1 560px;min-width:0;height:874px;display:flex;flex-direction:column">
+      <dc-import name="PaneTabs" theme="{{theme}}" tabs="{{paneTabs}}" hint-size="100%,32px"></dc-import>
+
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line)">
+        <h1 style="margin:0;font-size:15px;font-weight:600">Logs</h1>
+        <div style="flex:10 1 0;min-width:260px;max-width:620px"><dc-import name="QueryBar" theme="{{theme}}" facets="{{facets}}" q="{{qq}}" on-q="{{onQ}}" hint-size="100%,26px"></dc-import></div>
+        <div style="display:flex;align-items:center;gap:2px;{{matchShow}}">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--fg2);white-space:nowrap">{{matchPos}}</span>
+          <button aria-label="Previous match" onClick="{{prevMatch}}" style="width:20px;height:18px;padding:0;border:0;border-radius:2px;background:transparent;color:var(--fg2);cursor:pointer;display:flex;align-items:center;justify-content:center"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 10 4-4 4 4"/></svg></button>
+          <button aria-label="Next match" onClick="{{nextMatch}}" style="width:20px;height:18px;padding:0;border:0;border-radius:2px;background:transparent;color:var(--fg2);cursor:pointer;display:flex;align-items:center;justify-content:center"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>
+        </div>
+        <span style="flex:1"></span>
+        <div role="group" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden"><sc-for list="{{ranges}}" as="r" hint-placeholder-count="4"><button aria-pressed="{{r.on}}" onClick="{{r.pick}}" style="height:22px;padding:0 8px;border:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;cursor:pointer;{{r.style}}">{{r.label}}<span style="color:{{r.nc}}">{{r.n}}</span></button></sc-for></div>
+        <div role="group" aria-label="View" style="display:flex;border:1px solid var(--line2);border-radius:3px;overflow:hidden"><sc-for list="{{opts}}" as="o" hint-placeholder-count="3"><button aria-pressed="{{o.on}}" onClick="{{o.pick}}" style="height:22px;padding:0 8px;border:0;font-family:'IBM Plex Mono',monospace;font-size:11.5px;cursor:pointer;{{o.style}}">{{o.label}}</button></sc-for></div>
+        <button class="ib"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8.5M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>Export</button>
+      </div>
+
+
+      <section style="padding:0 16px;border-bottom:1px solid var(--line)">
+        <div style="display:flex;align-items:center;gap:8px;height:30px"><button onClick="{{tg.hist}}" aria-expanded="{{op.hist}}" style="flex:1;min-width:0;height:100%;display:flex;align-items:center;gap:8px;padding:0;border:0;background:transparent;color:var(--fg);font-family:inherit;cursor:pointer;text-align:left"><span style="width:10px;flex:none;color:var(--mute);font-size:10px">{{ar.hist}}</span><span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Volume</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{histSum}}</span></button></div>
+        <sc-if value="{{op.hist}}" hint-placeholder-val="{{ true }}">
+          <div style="margin:0 0 8px 18px">
+            <div style="position:relative;height:52px;display:flex;align-items:flex-end;gap:2px">
+              <sc-for list="{{hist}}" as="b" hint-placeholder-count="60">
+                <div title="{{b.t}}" style="flex:1;min-width:0;height:{{b.h}}%;display:flex;flex-direction:column;gap:1px;opacity:{{b.o}}">
+                  <div style="flex:{{b.e}} 1 0;background:var(--err);border-radius:1px 1px 0 0"></div>
+                  <div style="flex:{{b.w}} 1 0;background:var(--warn)"></div>
+                  <div style="flex:{{b.i}} 1 0;background:var(--acc)"></div>
+                  <div style="flex:{{b.d}} 1 0;background:var(--sep)"></div>
+                </div>
+              </sc-for>
+              <div style="position:absolute;top:-2px;bottom:-2px;left:{{brush.l}}%;width:{{brush.w}}%;border:1px solid var(--acc);border-radius:2px;background:var(--accbg);pointer-events:none"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:3px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--mute)"><sc-for list="{{ticks}}" as="t" hint-placeholder-count="5"><span>{{t}}</span></sc-for></div>
+          </div>
+        </sc-if>
+      </section>
+
+      <div style="flex:1;min-height:0;display:flex">
+        <aside aria-label="Sources" style="flex:0 0 250px;min-width:0;overflow:auto;border-right:1px solid var(--line);background:var(--panel);font-size:12.5px">
+          <section style="padding:0 12px">
+            <div style="display:flex;align-items:center;gap:8px;height:30px"><button onClick="{{tg.src}}" aria-expanded="{{op.src}}" style="flex:1;min-width:0;height:100%;display:flex;align-items:center;gap:8px;padding:0;border:0;background:transparent;color:var(--fg);font-family:inherit;cursor:pointer;text-align:left"><span style="width:10px;flex:none;color:var(--mute);font-size:10px">{{ar.src}}</span><span style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">Sources</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--mute)">{{srcSum}}</span></button>
+              <div style="position:relative">
+                <button onClick="{{toggleGroup}}" aria-haspopup="listbox" aria-expanded="{{groupOpen}}" style="height:22px;display:flex;align-items:center;gap:5px;padding:0 6px;border:1px solid var(--line2);border-radius:3px;background:{{groupBg}};color:var(--fg);font-family:'IBM Plex Mono',monospace;font-size:11.5px;cursor:pointer"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--mute)" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4h11M5 8h8.5M7.5 12h6"/></svg>{{groupLabel}}<svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--mute)"><path d="m4 6 4 4 4-4"/></svg></button>
+                <sc-if value="{{groupOpen}}" hint-placeholder-val="{{ false }}">
+                  <div role="listbox" aria-label="Group by" style="position:absolute;right:0;top:26px;width:170px;z-index:20;background:var(--panel);border:1px solid var(--line2);border-radius:4px;box-shadow:0 12px 32px var(--shadow);padding:4px">
+                    <sc-for list="{{groupOpts}}" as="gq" hint-placeholder-count="4">
+                      <div onClick="{{gq.pick}}" role="option" aria-selected="{{gq.on}}" class="hv" style="display:flex;align-items:center;gap:8px;height:26px;padding:0 8px;border-radius:3px;cursor:pointer;font-size:13px"><span style="width:13px;height:13px;flex:none;box-sizing:border-box;border-radius:3px;display:flex;align-items:center;justify-content:center;{{gq.box}}"><svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="var(--onacc)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="{{gq.mark}}"><path d="M3.5 8.5l3 3 6-7"/></svg></span>{{gq.label}}<span style="flex:1"></span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{gq.ord}}</span></div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+              </div></div>
+            <sc-if value="{{op.src}}" hint-placeholder-val="{{ true }}">
+              <div style="margin:0 0 10px;display:flex;flex-direction:column;gap:10px">
+                <div style="display:flex;flex-direction:column;gap:2px">
+                <sc-for list="{{srcList}}" as="s" hint-placeholder-count="8">
+                  <sc-if value="{{s.isHead}}" hint-placeholder-val="{{ false }}"><div onClick="{{s.toggle}}" class="hv" style="display:flex;align-items:center;gap:6px;height:24px;padding:0 4px 0 {{s.pad}};border-radius:3px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:12px;margin-top:{{s.mt}}"><span style="width:10px;color:var(--mute);font-size:10px">{{s.arrow}}</span><span style="font-size:10.5px;color:var(--mute);{{s.keyShow}}">{{s.key}}</span><span style="font-weight:{{s.fw}};color:{{s.hc}};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{s.name}}</span><span style="flex:1"></span><span style="font-size:11px;color:var(--mute)">{{s.n}}</span></div></sc-if>
+                  <sc-if value="{{s.isSrc}}" hint-placeholder-val="{{ true }}">
+                      <button onClick="{{s.toggle}}" aria-pressed="{{s.on}}" class="hv" style="display:grid;grid-template-columns:14px minmax(0,1fr) auto;column-gap:6px;align-items:center;padding:3px 0 3px {{s.pad}};border:0;background:transparent;color:var(--fg);text-align:left;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:11.5px;opacity:{{s.op}}">
+                        <span style="width:10px;height:10px;border-radius:2px;box-sizing:border-box;{{s.sw}}"></span>
+                        <span style="display:flex;flex-direction:column;min-width:0"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--mute);{{s.wlShow}}">{{s.wl}} · </span>{{s.pod}} <span style="color:var(--mute)">·</span> {{s.ctr}}</span><span style="font-size:10.5px;color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;{{s.clShow}}">{{s.cluster}}</span><span style="font-size:10.5px;color:{{s.rc}};{{s.metaShow}}">{{s.meta}}</span></span>
+                        <span style="font-size:11px;color:var(--mute)">{{s.n}}</span>
+                      </button>
+                  </sc-if>
+                </sc-for>
+                </div>
+                <button class="hv" style="display:flex;align-items:center;gap:6px;padding:4px 0 4px 18px;border:0;background:transparent;color:var(--acc);font-family:inherit;font-size:12.5px;cursor:pointer;text-align:left"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>Add source</button>
+              </div>
+            </sc-if>
+          </section>
+        </aside>
+
+        <div role="log" style="flex:1;min-width:0;overflow:auto;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:20px;padding:4px 0">
+          <sc-for list="{{lines}}" as="l" hint-placeholder-count="20">
+            <div class="hv" style="display:grid;{{lineCols}}column-gap:10px;padding:0 16px 0 6px;{{l.bg}}">
+              <span style="color:var(--acc);display:flex;align-items:center;justify-content:center">{{l.mk}}</span>
+              <span style="color:var(--mute);{{l.tsStyle}}">{{l.ts}}</span>
+              <span style="color:{{l.lc}}">{{l.lv}}</span>
+              <span style="display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;white-space:nowrap"><span style="width:3px;height:14px;flex:none;border-radius:1px;background:{{l.sc}}"></span><span style="color:var(--fg2);overflow:hidden;text-overflow:ellipsis">{{l.wl}}</span><span style="color:var(--mute)">{{l.pod}}/{{l.ctr}}</span><span style="color:var(--mute);opacity:.75;{{clusterShow}}">{{l.cluster}}</span></span>
+              <span style="min-width:0;{{l.wrap}}"><sc-for list="{{l.parts}}" as="p" hint-placeholder-count="1"><span class="{{p.cls}}" style="color:{{p.c}}">{{p.t}}</span></sc-for></span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  <dc-import name="StatusBarMulti" theme="{{theme}}" sel="{{clusters}}" on-sel="{{onSel}}" hint-size="100%,26px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { clusters: ['prod-us-east', 'prod-eu-west'], sgroup: ['status'], groupOpen: false, closed: [], range: '1h', qq: [{ k: 'status', v: '200', neg: true }, { k: 'text', v: 'stripe', neg: false }], off: { s2: true, s5: true }, m: 2, wrap: false, time: true, raw: false, op: { hist: true, src: true } };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  seg(opts, isOn, pick) {
+    return opts.map((o) => { const on = isOn(o); return { label: o, pressed: on ? 'true' : 'false', style: on ? 'background:var(--sel);color:var(--selfg);' : 'background:transparent;color:var(--fg2);', pick: () => pick(o) }; });
+  }
+  __icons(o) {
+    const P = {"✕":["M8 1.6 14.4 8 8 14.4 1.6 8Z","currentColor","none","none"],"▲":["M8 2.2 14.3 13.25H1.7Z M8 6.5v3.1 M8 11.4v.1","none","currentColor","none"],"●":["M8 4.4a3.6 3.6 0 1 1 0 7.2a3.6 3.6 0 1 1 0-7.2Z","currentColor","none","none"],"◐":["M8 2a6 6 0 1 1-6 6","none","currentColor","none"],"‖":["M6 3.75v8.5M10 3.75v8.5","none","currentColor","none"],"○":["M8 2.25a5.75 5.75 0 1 1 0 11.5a5.75 5.75 0 1 1 0-11.5Z","none","currentColor","2.1 2.1"]};
+    const mk = (s) => { const c = s.charAt(0); if (!P[c]) return { d: '', f: 'none', s: 'none', da: 'none', w: '0', m: '0', t: s }; const r = s.slice(1).replace(/^\s+/, ''); const p = P[c]; return { d: p[0], f: p[1], s: p[2], da: p[3], w: '1em', m: r ? '.35em' : '0', t: r }; };
+    const seen = new Set();
+    const walk = (x) => { if (!x || typeof x !== 'object' || seen.has(x)) return; seen.add(x); if (Array.isArray(x)) { x.forEach(walk); return; } Object.keys(x).forEach((k) => { const v = x[k]; if (typeof v === 'string') { if (!k.endsWith('__i')) x[k + '__i'] = mk(v); } else walk(v); }); };
+    walk(o); return o;
+  }
+  renderVals() { return this.__icons(this.__rv()); }
+  __rv() {
+    const v = this.vars(), st = this.state;
+    const E = (n) => ({ t: '✕ ' + n, c: 'var(--err)' });
+    const W = (n) => ({ t: '▲ ' + n, c: 'var(--warn)' });
+    const SC = { s1: '#3987e5', s2: '#9085e9', s3: '#199e70', s4: '#d55181', s5: '#c98500', s6: '#d95926', s7: '#4fb3bf' };
+    const SRC = {
+      s1: { wl: 'checkout-api', pod: 'x2lqp', ctr: 'api', meta: '14 restarts · CrashLoopBackOff', rc: 'var(--err)', cluster: 'prod-us-east', node: 'ip-10-4-31-12', n: 412 },
+      s2: { wl: 'checkout-api', pod: 'x2lqp', ctr: 'envoy', meta: '0 restarts', rc: 'var(--mute)', cluster: 'prod-us-east', node: 'ip-10-4-31-12', n: 88 },
+      s3: { wl: 'checkout-api', pod: 'm8vtn', ctr: 'api', meta: '0 restarts', rc: 'var(--mute)', cluster: 'prod-us-east', node: 'ip-10-4-12-87', n: 301 },
+      s4: { wl: 'payments-worker', pod: '7hx2c', ctr: 'worker', meta: '0 restarts', rc: 'var(--mute)', cluster: 'prod-us-east', node: 'ip-10-4-14-201', n: 356 },
+      s5: { wl: 'payments-worker', pod: '7hx2c', ctr: 'envoy', meta: '0 restarts', rc: 'var(--mute)', cluster: 'prod-us-east', node: 'ip-10-4-14-201', n: 127 },
+      s6: { wl: 'checkout-api', pod: 'q4w8n', ctr: 'api', meta: '0 restarts', rc: 'var(--mute)', cluster: 'prod-eu-west', node: 'ip-10-8-3-41', n: 274 },
+      s7: { wl: 'payments-worker', pod: 'k2m9f', ctr: 'worker', meta: '0 restarts', rc: 'var(--mute)', cluster: 'prod-eu-west', node: 'ip-10-8-7-19', n: 198 }
+    };
+    const L = (ts, lv, s, msg, kv) => ({ ts, lv, s, msg, kv: kv || {} });
+    const all = [
+      L('21:12:18.004', 'INFO', 's3', 'POST /v1/charge', { route: '/v1/charge', status: '200', dur: '182ms', req: 'r_8f2c1' }),
+      L('21:12:18.240', 'INFO', 's6', 'POST /v1/charge', { route: '/v1/charge', status: '200', dur: '161ms', req: 'r_e41a2' }),
+      L('21:12:18.611', 'INFO', 's4', 'charge.create', { route: '/v1/charge', status: '200', amount: '4200', currency: 'usd' }),
+      L('21:12:19.870', 'INFO', 's1', 'starting checkout-api v2.14.0 (commit 9f3c1ab)', {}),
+      L('21:12:20.119', 'INFO', 's1', 'config: loading /etc/checkout/app.yaml', {}),
+      L('21:12:20.230', 'WARN', 's1', 'env STRIPE_WEBHOOK_SECRET is empty; falling back to /etc/checkout/stripe.env', {}),
+      L('21:12:20.231', 'ERROR', 's1', 'open /etc/checkout/stripe.env: no such file or directory', {}),
+      L('21:12:20.232', 'ERROR', 's1', 'stripe webhook secret not set; exiting', { code: '1' }),
+      L('21:12:20.240', 'WARN', 's2', 'upstream connect error or disconnect/reset before headers. reset reason: connection failure', { route: '/v1/charge', status: '503' }),
+      L('21:12:21.402', 'ERROR', 's3', 'POST /v1/charge', { route: '/v1/charge', status: '500', dur: '1.21s', err: 'stripe: webhook secret not configured', req: 'r_8f2d4' }),
+      L('21:12:21.405', 'WARN', 's4', 'charge.create retry 1/3', { route: '/v1/charge', status: '502', upstream: 'checkout-api.payments.svc:8080' }),
+      L('21:12:21.960', 'INFO', 's7', 'charge.create', { route: '/v1/charge', status: '200', amount: '1250', currency: 'eur' }),
+      L('21:12:22.090', 'DEBUG', 's4', 'stripe client: GET /v1/balance', { dur: '91ms' }),
+      L('21:12:22.913', 'ERROR', 's4', 'charge.create failed', { route: '/v1/charge', status: '500', err: 'upstream 503', attempts: '3' }),
+      L('21:12:23.017', 'INFO', 's3', 'POST /v1/charge', { route: '/v1/charge', status: '200', dur: '204ms', req: 'r_8f2e0' }),
+      L('21:12:24.556', 'ERROR', 's3', 'POST /v1/charge', { route: '/v1/charge', status: '500', dur: '1.18s', err: 'stripe: webhook secret not configured', req: 'r_8f2e9' }),
+      L('21:12:25.330', 'WARN', 's5', 'upstream request timeout', { route: '/v1/charge', status: '504' }),
+      L('21:12:25.871', 'WARN', 's6', 'POST /v1/charge', { route: '/v1/charge', status: '429', dur: '12ms', err: 'stripe: rate limited', req: 'r_e41b2' }),
+      L('21:12:26.112', 'INFO', 's6', 'POST /v1/charge', { route: '/v1/charge', status: '200', dur: '174ms', req: 'r_e41b7' }),
+      L('21:12:26.701', 'INFO', 's4', 'charge.create', { route: '/v1/charge', status: '200', amount: '1999', currency: 'usd' }),
+      L('21:12:28.118', 'ERROR', 's3', 'POST /v1/charge', { route: '/v1/charge', status: '500', dur: '1.24s', err: 'stripe: webhook secret not configured', req: 'r_8f2f3' }),
+      L('21:12:29.004', 'WARN', 's4', 'charge.create retry 1/3', { route: '/v1/charge', status: '502', upstream: 'checkout-api.payments.svc:8080' }),
+      L('21:12:30.871', 'INFO', 's1', 'starting checkout-api v2.14.0 (commit 9f3c1ab)', {}),
+      L('21:12:30.993', 'WARN', 's1', 'env STRIPE_WEBHOOK_SECRET is empty; falling back to /etc/checkout/stripe.env', {}),
+      L('21:12:30.994', 'ERROR', 's1', 'open /etc/checkout/stripe.env: no such file or directory', {}),
+      L('21:12:30.402', 'INFO', 's7', 'charge.create', { route: '/v1/charge', status: '200', amount: '3400', currency: 'eur' }),
+      L('21:12:31.210', 'INFO', 's3', 'POST /v1/charge', { route: '/v1/charge', status: '200', dur: '176ms', req: 'r_8f301' }),
+      L('21:12:32.447', 'ERROR', 's3', 'POST /v1/charge', { route: '/v1/charge', status: '500', dur: '1.19s', err: 'stripe: webhook secret not configured', req: 'r_8f30a' }),
+      L('21:12:33.020', 'INFO', 's4', 'charge.create', { route: '/v1/charge', status: '200', amount: '8650', currency: 'usd' })
+    ];
+    const CL = st.clusters, multi = CL.length > 1;
+    const inCl = (id) => CL.includes(SRC[id].cluster);
+    const FK = { level: (l) => l.lv, source: (l) => SRC[l.s].wl, pod: (l) => SRC[l.s].pod, container: (l) => SRC[l.s].ctr, cluster: (l) => SRC[l.s].cluster, status: (l) => l.kv.status, route: (l) => l.kv.route, err: (l) => l.kv.err };
+    const scope = all.filter((l) => inCl(l.s) && !st.off[l.s]);
+    const tok = st.qq.filter((t) => t.k !== 'text');
+    const txt = st.qq.filter((t) => t.k === 'text').map((t) => t.v.toLowerCase());
+    const hit = (l, t) => { const f = FK[t.k]; return f ? f(l) === t.v : true; };
+    const passTok = (l, skipLevel) => tok.every((t) => (skipLevel && t.k === 'level') || (t.neg ? !hit(l, t) : hit(l, t)));
+    const pre = scope.filter((l) => passTok(l, true));
+    const lvOn = (k) => tok.filter((t) => t.k === 'level').every((t) => t.neg ? t.v !== k : t.v === k);
+    const vis = pre.filter((l) => lvOn(l.lv));
+    const facets = {};
+    Object.keys(FK).filter((k) => k !== 'cluster' || multi).forEach((k) => { const c = {}; scope.forEach((l) => { const v = FK[k](l); if (v) c[v] = (c[v] || 0) + 1; }); facets[k] = Object.entries(c).sort((a, b) => k === 'level' ? ['ERROR', 'WARN', 'INFO', 'DEBUG'].indexOf(a[0]) - ['ERROR', 'WARN', 'INFO', 'DEBUG'].indexOf(b[0]) : b[1] - a[1]); });
+    const q = txt[0] || '';
+    const LC = { ERROR: 'var(--err)', WARN: 'var(--warn)', INFO: 'var(--acc)', DEBUG: 'var(--mute)' };
+    const kvs = (kv) => Object.entries(kv).map(([k, val]) => k + '=' + (/[\s:]/.test(val) ? '"' + val + '"' : val)).join(' ');
+    let mi = 0;
+    const matches = [];
+    if (q) vis.forEach((l, i) => { const tx = l.msg + '  ' + kvs(l.kv); if (tx.toLowerCase().indexOf(q) >= 0) matches.push(i); });
+    const cur = matches.length ? Math.min(st.m, matches.length - 1) : -1;
+    const BOOK = '21:12:20.232';
+    const lines = vis.map((l, i) => {
+      const s = SRC[l.s];
+      const msg = st.raw ? JSON.stringify(Object.assign({ ts: '2026-10-20T' + l.ts + 'Z', level: l.lv.toLowerCase(), msg: l.msg }, l.kv)) : l.msg;
+      const segs = [[msg, 'var(--fg)']].concat(!st.raw && Object.keys(l.kv).length ? [['  ' + kvs(l.kv), 'var(--mute)']] : []);
+      const parts = [];
+      let first = true;
+      segs.forEach(([text, c]) => { let rest = text, idx; while (q && (idx = rest.toLowerCase().indexOf(q)) >= 0) { if (idx) parts.push({ t: rest.slice(0, idx), cls: '', c }); parts.push({ t: rest.slice(idx, idx + q.length), cls: matches[cur] === i && first ? 'cur' : 'm', c }); first = false; rest = rest.slice(idx + q.length); } if (rest) parts.push({ t: rest, cls: '', c }); });
+      return {
+        ts: l.ts, lv: l.lv, lc: LC[l.lv], sc: SC[l.s], wl: s.wl, pod: s.pod, ctr: s.ctr, cluster: s.cluster,
+        parts,
+        mk: l.ts === BOOK ? '◆' : '',
+        bg: l.ts === BOOK ? 'background:var(--accbg);box-shadow:inset 2px 0 0 var(--acc);' : (l.lv === 'ERROR' ? 'background:var(--errbg);' : ''),
+        tsStyle: st.time ? '' : 'visibility:hidden;',
+        wrap: st.wrap ? 'white-space:pre-wrap;word-break:break-all;' : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+      };
+    });
+    const ranges = [['live', 'Live'], ['15m', '15m'], ['1h', '1h'], ['6h', '6h'], ['custom', '20:40 → 21:40']].map(([k, label]) => { const on = st.range === k; return { label, n: '', nc: '', on: on ? 'true' : 'false', style: on ? 'background:var(--sel);color:var(--selfg);' : 'background:transparent;color:var(--fg2);', pick: () => this.setState({ range: k }) }; });
+    const opts = [['wrap', 'wrap'], ['time', 'time'], ['raw', 'raw']].map(([k, label]) => { const on = !!st[k]; return { label, on: on ? 'true' : 'false', style: on ? 'background:var(--sel);color:var(--selfg);' : 'background:transparent;color:var(--fg2);', pick: () => this.setState({ [k]: !on }) }; });
+    // histogram: 60 buckets over 1h, crash loop every ~5m
+    let seed = 11; const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    const raw = [];
+    for (let i = 0; i < 60; i++) {
+      const crash = i >= 18 && (i - 18) % 5 === 0;
+      const e = (i >= 18 ? 2 + rnd() * 3 : rnd() < .2 ? 1 : 0) + (crash ? 6 : 0);
+      const w = (i >= 18 ? 2 + rnd() * 4 : rnd() * 2) + (crash ? 3 : 0);
+      const inf = 10 + rnd() * 8 - (i >= 18 ? 3 : 0);
+      const d = lvOn('DEBUG') ? 3 + rnd() * 3 : 0;
+      raw.push({ e, w, i: lvOn('INFO') ? inf : 0, d, ee: lvOn('ERROR') ? e : 0, ww: lvOn('WARN') ? w : 0 });
+    }
+    const mx = Math.max.apply(null, raw.map((r) => r.ee + r.ww + r.i + r.d));
+    const hist = raw.map((r, i) => { const t = r.ee + r.ww + r.i + r.d; return { h: (t / mx * 100).toFixed(1), e: r.ee.toFixed(2), w: r.ww.toFixed(2), i: r.i.toFixed(2), d: r.d.toFixed(2), o: i >= 48 && i <= 56 ? '1' : '.55', t: '20:' + String(40 + i).padStart(2, '0') }; });
+    const fix = (t) => t.replace('20:6', '21:0').replace('20:7', '21:1').replace('20:8', '21:2').replace('20:9', '21:3');
+    hist.forEach((b) => { b.t = fix(b.t); });
+    const ids = Object.keys(SRC).filter(inCl);
+    const keys = st.sgroup;
+    const STATE = (id) => /CrashLoopBackOff/.test(SRC[id].meta) ? 'CrashLoopBackOff' : 'Running';
+    const mkSrc = (id, depth) => { const s = SRC[id], on = !st.off[id];
+      return { isSrc: true, isHead: false, pod: s.pod, ctr: s.ctr, wl: s.wl, cluster: s.cluster, meta: keys.includes('status') ? s.meta.replace(' · CrashLoopBackOff', '') : s.meta, rc: s.rc, n: String(s.n), on: on ? 'true' : 'false', op: on ? '1' : '.5', sw: on ? 'background:' + SC[id] + ';' : 'border:1.5px solid ' + SC[id] + ';',
+        pad: (4 + depth * 14) + 'px',
+        wlShow: keys.includes('workload') ? 'display:none;' : '', clShow: multi && !keys.includes('cluster') ? '' : 'display:none;',
+        metaShow: keys.includes('status') && STATE(id) === 'Running' ? 'display:none;' : '',
+        toggle: () => this.setState({ off: Object.assign({}, st.off, { [id]: on }) }) }; };
+    const GKEY = { status: STATE, workload: (id) => SRC[id].wl, cluster: (id) => SRC[id].cluster, node: (id) => SRC[id].node };
+    const SORT = { status: ['CrashLoopBackOff', 'Running'] };
+    const srcList = [];
+    const build = (items, depth, path) => {
+      if (depth >= keys.length) { items.forEach((id) => srcList.push(mkSrc(id, depth))); return; }
+      const key = keys[depth], order = [], by = {};
+      items.forEach((id) => { const k = GKEY[key](id); if (!by[k]) { by[k] = []; order.push(k); } by[k].push(id); });
+      if (SORT[key]) order.sort((a, b) => SORT[key].indexOf(a) - SORT[key].indexOf(b));
+      order.forEach((k, i) => {
+        const m = by[k], pid = path + '/' + k, shut = st.closed.includes(pid);
+        srcList.push({ isHead: true, isSrc: false, key, keyShow: keys.length > 1 ? '' : 'display:none;', name: (key === 'workload' ? 'deploy/' : '') + k,
+          hc: key === 'status' && k !== 'Running' ? 'var(--err)' : 'var(--fg)', fw: depth ? '400' : '500', pad: (4 + depth * 14) + 'px', mt: depth === 0 && srcList.length ? '6px' : '0',
+          n: m.filter((id) => !st.off[id]).length + '/' + m.length, arrow: shut ? '▸' : '▾',
+          toggle: () => this.setState({ closed: shut ? this.state.closed.filter((x) => x !== pid) : this.state.closed.concat([pid]) }) });
+        if (!shut) build(m, depth + 1, pid);
+      });
+    };
+    build(ids, 0, '');
+    const GOPTS = [['status', 'Status'], ['workload', 'Workload'], ['cluster', 'Cluster'], ['node', 'Node']];
+    const onSrc = ids.filter((k) => !st.off[k]).length;
+    return {
+      theme: v.theme, vars: v.vars,
+      navCounts: { nodes: [W(1)], events: [E(109), W(41)], 'problems-cl': [E(109), W(41)], pods: [E(106)], deployments: [E(103)], statefulsets: [E(4)], jobs: [E(17)] },
+      paneTabs: [{ kind: '', label: 'Logs', ctx: CL.length === 6 ? 'All clusters' : CL[0] + (multi ? ' +' + (CL.length - 1) : ''), active: true }, { kind: '', label: 'checkout-api', ctx: 'prod-us-east' }],
+      ranges, opts, lines, hist, srcList, facets, qq: st.qq, onQ: (next) => this.setState({ qq: next, m: 0 }), matchShow: q ? '' : 'display:none;',
+      matchPos: matches.length ? (cur + 1) + '/' + matches.length : '0/0',
+      prevMatch: () => this.setState({ m: Math.max(0, cur - 1) }),
+      nextMatch: () => this.setState({ m: Math.min(matches.length - 1, cur + 1) }),
+      brush: { l: (48 / 60 * 100).toFixed(2), w: (9 / 60 * 100).toFixed(2) },
+      ticks: ['20:40', '20:55', '21:10', '21:25', '21:40'],
+      histSum: lines.length + ' of 1,284 lines · 20:40–21:40',
+      srcSum: onSrc + '/' + ids.length,
+      clusters: CL, onSel: (next) => this.setState({ clusters: next }), multi, single: !multi, oneCluster: CL[0],
+      clusterShow: multi ? '' : 'display:none;',
+      lineCols: multi ? 'grid-template-columns:14px 92px 42px 340px minmax(0,1fr);' : 'grid-template-columns:14px 92px 42px 236px minmax(0,1fr);',
+      groupLabel: keys.length ? keys.join(' › ') : 'none', groupOpen: st.groupOpen, groupBg: st.groupOpen ? 'var(--sel)' : 'transparent',
+      toggleGroup: () => this.setState({ groupOpen: !this.state.groupOpen }),
+      groupOpts: GOPTS.map(([k, label]) => { const i = keys.indexOf(k), on = i >= 0; return { label, on: on ? 'true' : 'false', ord: on && keys.length > 1 ? String(i + 1) : '', box: on ? 'background:var(--acc);border:1px solid var(--acc);' : 'border:1px solid var(--line2);', mark: on ? '' : 'display:none;', pick: () => this.setState({ sgroup: on ? keys.filter((x) => x !== k) : keys.concat([k]), closed: [] }) }; }),
+      op: st.op,
+      ar: Object.fromEntries(Object.entries(st.op).map(([k, o]) => [k, o ? '▾' : '▸'])),
+      tg: Object.fromEntries(Object.keys(st.op).map((k) => [k, () => this.setState({ op: Object.assign({}, st.op, { [k]: !st.op[k] }) })]))
+    };
+  }
+}
+</script>
+</body>
+</html>

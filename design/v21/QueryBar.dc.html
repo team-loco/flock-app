@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Query bar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>body{margin:0}.qh:hover{background:var(--hover)}.qx:hover{color:var(--fg)!important}.qn{opacity:0}.qh:hover .qn{opacity:1}.qn:hover{color:var(--err)!important;border-color:var(--err)!important}</style>
+</helmet>
+<div style="{{vars}}position:relative;width:100%;font-family:'IBM Plex Sans',sans-serif;font-size:13px;color:var(--fg)">
+  <div onClick="{{focus}}" style="min-height:26px;box-sizing:border-box;display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:2px 6px;border:1px solid {{bd}};border-radius:3px;background:var(--editor);cursor:text">
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--mute)" stroke-width="1.6" aria-hidden="true" style="flex:none;margin-right:2px"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+    <sc-for list="{{chips}}" as="t" hint-placeholder-count="2">
+      <span style="height:18px;display:inline-flex;align-items:center;gap:0;padding:0 2px 0 6px;border-radius:3px;background:{{t.bg}};border:1px solid {{t.bd}};font-family:'IBM Plex Mono',monospace;font-size:11.5px;white-space:nowrap"><span style="color:{{t.kc}}">{{t.key}}</span><span style="color:var(--fg)">{{t.val}}</span><button onClick="{{t.remove}}" aria-label="Remove {{t.key}}{{t.val}}" class="qx" style="width:16px;height:16px;margin-left:2px;padding:0;border:0;background:transparent;color:var(--mute);cursor:pointer;font-size:12px;line-height:1">×</button></span>
+    </sc-for>
+    <input aria-label="Filter" value="{{text}}" onInput="{{onInput}}" onKeyDown="{{onKey}}" onFocus="{{focus}}" placeholder="{{ph}}" style="flex:1;min-width:60px;height:20px;border:0;background:transparent;outline:none;color:var(--fg);font-family:'IBM Plex Mono',monospace;font-size:12px">
+    <sc-if value="{{hasAny}}" hint-placeholder-val="{{ false }}"><button onClick="{{clear}}" aria-label="Clear filter" class="qx" style="border:0;background:transparent;color:var(--mute);cursor:pointer;padding:0 2px;font-size:13px">×</button></sc-if>
+  </div>
+  <sc-if value="{{open}}" hint-placeholder-val="{{ false }}">
+    <div onMouseLeave="{{close}}" role="listbox" style="position:absolute;left:0;top:30px;width:{{menuW}};max-height:340px;overflow:auto;z-index:30;background:var(--panel);border:1px solid var(--line2);border-radius:4px;box-shadow:0 12px 32px var(--shadow);padding:4px">
+      <sc-for list="{{sugg}}" as="s" hint-placeholder-count="8">
+        <sc-if value="{{s.isHead}}" hint-placeholder-val="{{ false }}"><div style="padding:6px 8px 2px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--mute)">{{s.label}}</div></sc-if>
+        <sc-if value="{{s.isRow}}" hint-placeholder-val="{{ true }}">
+          <div class="qh" role="option" style="display:flex;align-items:center;gap:8px;height:26px;padding:0 6px 0 8px;border-radius:3px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:12px">
+            <span onClick="{{s.pick}}" style="flex:1;min-width:0;display:flex;align-items:center;gap:0;overflow:hidden;white-space:nowrap"><span style="color:var(--acc)">{{s.key}}</span><span style="overflow:hidden;text-overflow:ellipsis">{{s.val}}</span></span>
+            <span style="font-size:11px;color:var(--mute)">{{s.n}}</span>
+            <button onClick="{{s.neg}}" title="Exclude" aria-label="Exclude {{s.key}}{{s.val}}" class="qn" style="height:18px;padding:0 5px;border:1px solid var(--line2);border-radius:3px;background:transparent;color:var(--mute);font-family:'IBM Plex Mono',monospace;font-size:11px;cursor:pointer;{{s.negShow}}">−</button>
+          </div>
+        </sc-if>
+      </sc-for>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"facets":{"editor":null},"q":{"editor":null},"onQ":{"editor":null},"open":{"editor":"boolean","default":false},"seed":{"editor":"text","default":""},"$preview":{"width":520,"height":380}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { open: !!props.open, text: props.seed || '', q: props.q || [] };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  renderVals() {
+    const F = this.props.facets || { status: [['Failing', 1], ['Degraded', 2], ['Healthy', 11]], namespace: [['payments', 4], ['web', 2], ['search', 2], ['monitoring', 2]], cluster: [['prod-us-east', 7], ['prod-eu-west', 7]], image: [['checkout-api', 2], ['payments-worker', 2]] };
+    const q = this.props.q || this.state.q;
+    const setQ = (next) => { if (this.props.onQ) this.props.onQ(next); else this.setState({ q: next }); };
+    const text = this.state.text;
+    const add = (k, v, neg) => { setQ(q.filter((t) => !(t.k === k && t.v === v)).concat([{ k, v, neg: !!neg }])); this.setState({ text: '', open: true }); };
+    const keys = Object.keys(F);
+    const sugg = [];
+    const row = (k, v, n) => ({ isHead: false, isRow: true, key: '@' + k + ':', val: v, n: n == null ? '' : String(n), negShow: '', pick: () => add(k, v, false), neg: (e) => { if (e && e.stopPropagation) e.stopPropagation(); add(k, v, true); } });
+    const head = (label) => ({ isHead: true, isRow: false, label });
+    const m = text.match(/^-?@?([\w-]*)(?::(.*))?$/);
+    const neg0 = text.startsWith('-');
+    if (m && m[2] != null && F[m[1]]) {
+      const k = m[1], f = m[2].toLowerCase();
+      sugg.push(head('@' + k));
+      F[k].filter(([v]) => v.toLowerCase().includes(f)).forEach(([v, n]) => { const r = row(k, v, n); if (neg0) { r.key = '-@' + k + ':'; r.pick = () => add(k, v, true); } sugg.push(r); });
+    } else if (text.startsWith('@') || text.startsWith('-@')) {
+      const f = (m && m[1] || '').toLowerCase();
+      sugg.push(head('facets'));
+      keys.filter((k) => k.includes(f)).forEach((k) => sugg.push({ isHead: false, isRow: true, key: '@' + k + ':', val: '', n: String(F[k].length), negShow: 'display:none;', pick: () => this.setState({ text: (neg0 ? '-' : '') + '@' + k + ':', open: true }), neg: () => {} }));
+    } else {
+      const f = text.toLowerCase();
+      keys.forEach((k) => { const vs = F[k].filter(([v]) => !f || v.toLowerCase().includes(f)).filter(([v]) => !q.some((t) => t.k === k && t.v === v)).slice(0, f ? 6 : 4); if (vs.length) { sugg.push(head('@' + k)); vs.forEach(([v, n]) => sugg.push(row(k, v, n))); } });
+      if (f) sugg.unshift({ isHead: false, isRow: true, key: 'name:', val: '*' + text + '*', n: '', negShow: 'display:none;', pick: () => add('text', text, false), neg: () => {} });
+    }
+    const open = this.state.open;
+    const chips = q.map((t) => ({ key: t.k === 'text' ? '' : (t.neg ? '-@' : '@') + t.k + ':', val: t.v, kc: t.neg ? 'var(--err)' : 'var(--acc)', bg: t.neg ? 'var(--errbg)' : 'var(--accbg)', bd: t.neg ? 'transparent' : 'transparent', remove: (e) => { if (e && e.stopPropagation) e.stopPropagation(); setQ(q.filter((x) => x !== t)); } }));
+    return {
+      vars: this.vars().vars,
+      chips, text, sugg, open: open && sugg.length > 0, hasAny: q.length > 0 || !!text,
+      bd: open ? 'var(--acc)' : 'var(--line2)',
+      ph: q.length ? '' : 'Filter',
+      menuW: '320px',
+      focus: () => { if (!this.state.open) this.setState({ open: true }); },
+      close: () => this.setState({ open: false }),
+      clear: (e) => { if (e && e.stopPropagation) e.stopPropagation(); setQ([]); this.setState({ text: '' }); },
+      onInput: (e) => this.setState({ text: e.target.value, open: true }),
+      onKey: (e) => {
+        if (e.key === 'Escape') this.setState({ open: false });
+        if (e.key === 'Backspace' && !this.state.text && q.length) setQ(q.slice(0, -1));
+        if (e.key === 'Enter') { const mm = this.state.text.match(/^(-)?@?([\w-]+):(.+)$/); if (mm) add(mm[2], mm[3], !!mm[1]); else if (this.state.text) add('text', this.state.text, false); }
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

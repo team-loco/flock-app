@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sidebar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;color:var(--fg);height:874px;{{width}}display:flex;flex-direction:column;background:var(--panel);border-right:1px solid var(--line);box-sizing:border-box;overflow:hidden">
+  <div style="height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 0 10px;background:var(--chrome);border-bottom:1px solid var(--line)">
+    <sc-if value="{{windowed}}" hint-placeholder-val="{{ true }}">
+      <button aria-label="Close window" style="width:12px;height:12px;border-radius:50%;background:#FF5F57;border:0;padding:0"></button>
+      <button aria-label="Minimize window" style="width:12px;height:12px;border-radius:50%;background:#FEBC2E;border:0;padding:0"></button>
+      <button aria-label="Zoom window" style="width:12px;height:12px;border-radius:50%;background:#28C840;border:0;padding:0"></button>
+    </sc-if>
+    <sc-if value="{{fsOpen}}" hint-placeholder-val="{{ false }}">
+      <span style="flex:1;padding-left:6px;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{label}}</span>
+      <button onClick="{{toggle}}" aria-label="Collapse sidebar" title="Collapse  ⌘B" style="width:22px;height:22px;border:0;border-radius:3px;background:transparent;color:var(--mute);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10 3-5 5 5 5"/></svg></button>
+    </sc-if>
+  </div>
+
+  <sc-if value="{{open}}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <sc-if value="{{windowed}}" hint-placeholder-val="{{ true }}"><div style="display:flex;align-items:center;height:32px;padding:0 6px 0 16px;flex:none">
+        <span style="flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{label}}</span>
+        <button onClick="{{toggle}}" aria-label="Collapse sidebar" title="Collapse  ⌘B" style="width:22px;height:22px;border:0;border-radius:3px;background:transparent;color:var(--mute);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10 3-5 5 5 5"/></svg></button>
+      </div></sc-if>
+      <div style="flex:1;overflow-y:auto;padding:0 8px 6px">
+        <sc-for list="{{items}}" as="i" hint-placeholder-count="20">
+          <sc-if value="{{i.isHead}}" hint-placeholder-val="{{ false }}">
+            <div style="padding:12px 8px 4px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--mute)">{{i.label}}</div>
+          </sc-if>
+          <sc-if value="{{i.isItem}}" hint-placeholder-val="{{ true }}">
+            <a href="{{i.href}}" aria-current="{{i.current}}" style="{{i.style}}">
+              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{i.label}}</span>
+              <sc-for list="{{i.right}}" as="b" hint-placeholder-count="0"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:{{b.c}};margin-left:6px;flex:none;white-space:nowrap"><svg viewBox="0 0 16 16" aria-hidden="true" style="width:{{b.t__i.w}};margin-right:{{b.t__i.m}};height:1em;vertical-align:-.14em;overflow:visible;flex:none"><path d="{{b.t__i.d}}" fill="{{b.t__i.f}}" stroke="{{b.t__i.s}}" stroke-dasharray="{{b.t__i.da}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>{{b.t__i.t}}</span></sc-for>
+            </a>
+          </sc-if>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{closed}}" hint-placeholder-val="{{ false }}">
+    <button onClick="{{toggle}}" aria-label="Expand sidebar" title="Expand  ⌘B" style="flex:1;width:100%;border:0;background:var(--panel);color:var(--mute);display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px 0 0;cursor:pointer;font-family:inherit">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg>
+      <span style="writing-mode:vertical-rl;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase">{{label}}</span>
+    </button>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"mode":{"editor":"enum","options":["fleet","cluster"],"default":"fleet"},"exp":{"editor":"boolean","default":false},"active":{"editor":"enum","options":["overview","problems","gitops","changes","fl-deployments","fl-pods","fl-nodes","fl-helm","cl-overview","nodes","events","pods","deployments","kustomizations","helmreleases","loco-platform","loco-apps","loco-builds","loco-routes"],"default":"overview"},"loco":{"editor":"boolean","default":true},"clusterName":{"editor":"text","default":"prod-us-east"},"counts":{"editor":null},"resources":{"editor":"boolean","default":true},"fullscreen":{"editor":"boolean","default":false},"$preview":{"width":200,"height":874}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { res: props.resources ?? true };
+  }
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  __icons(o) {
+    const P = {"✕":["M8 1.6 14.4 8 8 14.4 1.6 8Z","currentColor","none","none"],"▲":["M8 2.2 14.3 13.25H1.7Z M8 6.5v3.1 M8 11.4v.1","none","currentColor","none"],"●":["M8 4.4a3.6 3.6 0 1 1 0 7.2a3.6 3.6 0 1 1 0-7.2Z","currentColor","none","none"],"◐":["M8 2a6 6 0 1 1-6 6","none","currentColor","none"],"‖":["M6 3.75v8.5M10 3.75v8.5","none","currentColor","none"],"○":["M8 2.25a5.75 5.75 0 1 1 0 11.5a5.75 5.75 0 1 1 0-11.5Z","none","currentColor","2.1 2.1"]};
+    const mk = (s) => { const c = s.charAt(0); if (!P[c]) return { d: '', f: 'none', s: 'none', da: 'none', w: '0', m: '0', t: s }; const r = s.slice(1).replace(/^\s+/, ''); const p = P[c]; return { d: p[0], f: p[1], s: p[2], da: p[3], w: '1em', m: r ? '.35em' : '0', t: r }; };
+    const seen = new Set();
+    const walk = (x) => { if (!x || typeof x !== 'object' || seen.has(x)) return; seen.add(x); if (Array.isArray(x)) { x.forEach(walk); return; } Object.keys(x).forEach((k) => { const v = x[k]; if (typeof v === 'string') { if (!k.endsWith('__i')) x[k + '__i'] = mk(v); } else walk(v); }); };
+    walk(o); return o;
+  }
+  renderVals() { return this.__icons(this.__rv()); }
+  __rv() {
+    const mode = this.props.mode ?? 'fleet';
+    const active = this.props.active ?? (mode === 'fleet' ? 'overview' : 'cl-overview');
+    const E = (n) => ({ t: '✕ ' + n, c: 'var(--err)' });
+    const W = (n) => ({ t: '▲ ' + n, c: 'var(--warn)' });
+    const S = (n) => ({ t: '‖ ' + n, c: 'var(--sus)' });
+    const N = (n) => ({ t: n, c: 'var(--mute)' });
+    const spec = mode === 'fleet' ? [
+      { key: 'overview', label: 'Overview', href: 'Fleet.dc.html' },
+      { key: 'problems', label: 'Problems', href: 'FleetProblems.dc.html', right: [E(3), W(6)] },
+      { key: 'gitops', label: 'GitOps', href: 'Flux.dc.html', right: [E(1), S(1)] },
+      { key: 'changes', label: 'Changes', href: 'Changes.dc.html' },
+      ...(this.props.exp ? [{ head: 'Resources' },
+      { key: 'fl-deployments', label: 'Deployments', href: 'FleetBrowse.dc.html', right: [E(1)] },
+      { key: 'fl-pods', label: 'Pods', right: [E(5)] },
+      { key: 'fl-nodes', label: 'Nodes', right: [W(1)] },
+      { key: 'fl-helm', label: 'Helm releases', right: [W(1)] }] : [])
+    ] : [
+      { key: 'cl-overview', label: 'Overview' },
+      { key: 'nodes', label: 'Nodes', href: 'NodeList.dc.html', right: [W(1), N('14')] },
+      { key: 'namespaces', label: 'Namespaces', right: [N('23')] },
+      { key: 'events', label: 'Events', right: [W(7)] },
+      { key: 'problems-cl', label: 'Problems', href: 'Problems.dc.html', right: [E(5)] },
+      ...(this.props.loco === false ? [] : [
+        { head: 'Loco' },
+        { key: 'loco-platform', label: 'Platform', href: 'LocoPlatform.dc.html', right: [W(1)] },
+        { key: 'loco-apps', label: 'Applications', href: 'LocoApps.dc.html', right: [E(1), N('214')] },
+        { key: 'loco-builds', label: 'Builds', href: 'LocoBuilds.dc.html', right: [E(1)] },
+        { key: 'loco-routes', label: 'Routes', href: 'LocoRoutes.dc.html', right: [W(2), N('44')] }
+      ]),
+      { head: 'Workloads' },
+      { key: 'pods', label: 'Pods', href: 'PodList.dc.html', right: [E(5), N('412')] },
+      { key: 'deployments', label: 'Deployments', href: 'Workload.dc.html', right: [E(1), N('48')] },
+      { key: 'statefulsets', label: 'StatefulSets', right: [N('12')] },
+      { key: 'daemonsets', label: 'DaemonSets', right: [N('9')] },
+      { key: 'jobs', label: 'Jobs', right: [N('31')] },
+      { key: 'cronjobs', label: 'CronJobs', right: [N('14')] },
+      { head: 'Flux' },
+      { key: 'kustomizations', label: 'Kustomizations', href: 'Kustomization.dc.html', right: [E(1), N('12')] },
+      { key: 'helmreleases', label: 'HelmReleases', right: [N('9')] },
+      { key: 'sources', label: 'Sources', right: [N('4')] },
+      { head: 'Network' },
+      { key: 'services', label: 'Services', right: [N('64')] },
+      { key: 'ingresses', label: 'Ingresses', right: [N('11')] },
+      { head: 'Config' },
+      { key: 'configmaps', label: 'ConfigMaps', right: [N('88')] },
+      { key: 'secrets', label: 'Secrets', right: [N('71')] },
+      { head: 'Storage' },
+      { key: 'pvcs', label: 'PVCs', right: [N('19')] }
+    ];
+    if (this.props.clusterName === 'kind-fleet-a') {
+      const K = { nodes: [N('1')], namespaces: [N('10')], events: [E(4), W(26)], pods: [E(2), N('21')], deployments: [E(2), N('11')], statefulsets: [N('0')], daemonsets: [N('2')], jobs: [N('0')], cronjobs: [N('0')], kustomizations: [E(1), N('2')], helmreleases: [W(1), S(1), N('3')], sources: [N('2')], services: [N('9')], ingresses: [N('0')], configmaps: [N('18')], secrets: [N('8')], pvcs: [N('0')] };
+      spec.forEach((x) => { if (x.key && K[x.key]) x.right = K[x.key]; });
+    }
+    if (this.props.counts) {
+      const cs = this.props.counts;
+      spec.forEach((x) => { if (x.key && cs[x.key]) x.right = cs[x.key]; });
+    }
+    const base = 'display:flex;align-items:center;height:26px;padding:0 8px;border-radius:3px;text-decoration:none;font-size:13px;color:var(--fg2);';
+    const items = spec.map((s) => s.head ? { isHead: true, isItem: false, label: s.head } : {
+      isHead: false, isItem: true, label: s.label, href: s.href || '#', right: (s.right || []).filter((b) => b.c !== 'var(--mute)'),
+      current: s.key === active ? 'page' : 'false',
+      style: base + (s.key === active ? 'background:var(--sel);color:var(--selfg);font-weight:500;' : '')
+    });
+    const res = this.state.res;
+    return {
+      vars: this.vars().vars,
+      items,
+      open: res, closed: !res,
+      windowed: !this.props.fullscreen, fsOpen: !!this.props.fullscreen && res,
+      width: res ? 'width:200px;' : 'width:76px;',
+      label: mode === 'fleet' ? 'All clusters' : (this.props.clusterName ?? 'prod-us-east'),
+      toggle: () => this.setState({ res: !res })
+    };
+  }
+}
+</script>
+</body>
+</html>

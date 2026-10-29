@@ -141,3 +141,13 @@ Spec column points at `design/`.
 | V5F | Design v5 inspectors: Namespace and Flux object restore inspector problem cards (no Needs attention table, no condition line), Labels open, Loco application card shows the raw message | claude | v5-f | done |
 | V5G | Design v5 Workload inspector: Conditions, Related and Events sections (counts only in summaries); Related moves from the page into the inspector; demo namespaces carry the kubernetes.io/metadata.name label | claude | v5-g | done |
 | ALLOC | Nodes Allocation treemap: per-pod, per-container requests or limits (CPU or memory) of the selected node, squarified, namespace colours, sidecars hatched, unrequested share, hover readout and legend; native sidecars count toward node requests | claude | node-allocation | pr |
+
+## Design v2.1 (experimental, `design/v21/`)
+
+| id | unit | owner | branch | status |
+|---|---|---|---|---|
+| V21Q | Query bar: `@facet:value` chips, `-` exclusion, facet and value suggestions with counts, on every list page | claude | v21-query-bar | todo |
+| V21S | Multi-cluster scope: a set of selected clusters per pane; status bar with problems left and the multi-select cluster menu right | claude | v21-multi-scope | todo |
+| V21G | Grouping on list views: group picker, collapsible group header rows with counts and ✕/▲ totals | claude | v21-grouping | todo |
+| V21L | Logs v3: Logs page with sources panel, levels, volume histogram, query bar with match navigation | claude | v21-logs | todo |
+| V21R | Flock Resources: Deployments, Pods, Nodes, Helm releases across the selected clusters, Cluster column, bulk selection, Other clusters inspector section | claude | v21-resources | todo |
