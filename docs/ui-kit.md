@@ -140,6 +140,7 @@ Segmented::new("severity").option("All").option("Errors").option("Warnings")
 Toggle::new("confirm", on).label("Confirm destructive actions")
     .on_toggle(cx.listener(|this, on: &bool, _, cx| ..))
 Checkbox::new("ctx", checked).label("prod-us-east").on_toggle(..)
+Checkbox::tristate("all", Check::Mixed)          // flock_core::scope::Check: Off, Mixed (dash), On
 ```
 
 Tooltips on any stateful element: `.tooltip(Tooltip::text("Copy commit"))`.
@@ -392,6 +393,25 @@ tab") first in their menu.
 `.multi_select()` lets ⇧-click add or remove rows from a marked set (drawn like the selection;
 a plain click clears it). `marked_rows()` reads it, `clear_marks(cx)` empties it, and
 `TableEvent::Marked` reports changes. It needs `row_key`.
+
+`.checkboxes()` (Flock resource lists, decision 60) draws the same marked set as a leading checkbox
+column: a tri-state header checkbox (`{table}-check-all`: none, mixed, all; clicking it marks every
+shown row when none are marked and clears the marks otherwise, `flock_core::across::header_check` /
+`selects_all`) and one per row (`{table}-check-{ix}`). Marked rows take the `accbg` fill, the
+focused row keeps the selection fill, and a plain click no longer clears the marks.
+`.default_group(facet)` is the grouping a table starts with before the user picks one.
+
+### BulkBar
+
+Shown over the bottom centre of a list while rows are marked: "N selected", a rule, one ghost
+button per action (`{id}-action-{ix}`) and × (`{id}-clear`). Put it last in a `relative` list
+container. Offer only actions the object already has singly, each behind a `ConfirmDialog` that
+lists the objects and sends one command per object with its UID (`Seen`).
+
+```rust
+BulkBar::new("resource-bulk", marked.len(), move |_, cx| clear(cx))
+    .action(BulkAction::new("Restart rollout", restart))
+```
 
 Row actions: `.row_actions(|row| Vec<MenuItem>)` / `set_row_actions(..)` adds a ⋯ button on the hovered
 row (`{table}-row-{ix}-more`) and a right-click menu (`{table}-row-menu-item-{ix}`), both with that

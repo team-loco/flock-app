@@ -107,6 +107,7 @@ pub(super) struct PaneScreens {
     pub(super) settings: Entity<SettingsScreen>,
     pub(super) app_settings: Entity<AppSettingsScreen>,
     pub(super) pods: Entity<PodsScreen>,
+    pub(super) flock_pods: Entity<PodsScreen>,
     pub(super) workload: Option<(Entity<WorkloadScreen>, Subscription)>,
     pub(super) detail: Option<(Entity<DetailScreen>, Subscription)>,
     pub(super) namespace: Option<(Entity<NamespaceScreen>, Subscription)>,
@@ -139,6 +140,7 @@ impl PaneScreens {
         let settings = cx.new(|cx| SettingsScreen::new(window, cx));
         let app_settings = cx.new(|cx| AppSettingsScreen::new(window, cx));
         let pods = cx.new(|cx| PodsScreen::new(window, cx));
+        let flock_pods = cx.new(|cx| PodsScreen::across(window, cx));
         let flux_object = cx.new(FluxObjectPage::new);
         let helm_release = cx.new(crate::screens::helm::HelmReleaseScreen::new);
         let navigation = cx.new(crate::kit::HeaderNavigation::new);
@@ -176,6 +178,7 @@ impl PaneScreens {
             forward(pane, &settings, cx),
             forward(pane, &app_settings, cx),
             forward(pane, &pods, cx),
+            forward(pane, &flock_pods, cx),
             forward(pane, &flux_object, cx),
             forward(pane, &helm_release, cx),
         ];
@@ -199,6 +202,7 @@ impl PaneScreens {
             settings,
             app_settings,
             pods,
+            flock_pods,
             workload: None,
             detail: None,
             namespace: None,
@@ -247,6 +251,8 @@ impl PaneScreens {
             .update(cx, |gitops, cx| gitops.set_snapshot(snapshot, cx));
         self.flux_events
             .update(cx, |screen, cx| screen.set_snapshot(snapshot, cx));
+        self.flock_pods
+            .update(cx, |screen, _| screen.set_snapshot(snapshot));
         self.flock_view = Some(shown);
     }
 

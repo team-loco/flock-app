@@ -350,6 +350,10 @@ impl Shell {
         self.focused_screens().pods.read(cx).groups(cx)
     }
 
+    pub fn flock_resource_groups(&self, cx: &App) -> Vec<flock_core::grouping::Group> {
+        self.focused_screens().pages.flock_resource_groups(cx)
+    }
+
     pub fn switcher_open(&self, cx: &App) -> bool {
         self.switcher.read(cx).is_open()
     }
@@ -748,6 +752,19 @@ impl Shell {
             .and_then(|c| snapshot.catalog.get(&c.id))
             .is_none_or(|settings| settings.preferences.confirm_destructive);
         let preferences = self.preferences_of(location);
+        if let Some(view) = screens
+            .scoped_snapshot()
+            .filter(|_| page.across().is_some())
+        {
+            screens.pages.sync_across(page, view, cx);
+        }
+        if page == Page::FlockPods {
+            let inspecting = location.inspecting.as_ref();
+            screens.flock_pods.update(cx, |pods, cx| {
+                pods.set_context(None, inspecting, &preferences, cx);
+                pods.sync_inspection(true, None, cx);
+            });
+        }
         screens.pages.sync(
             page,
             cluster,
@@ -870,6 +887,7 @@ impl Shell {
         }
         match location.page {
             Page::Pods => Some(screens.pods.read(cx).filter_bar().clone()),
+            Page::FlockPods => Some(screens.flock_pods.read(cx).filter_bar().clone()),
             Page::Problems => Some(screens.problems.read(cx).filter_bar().clone()),
             Page::Changes => Some(screens.changes.read(cx).filter_bar().clone()),
             Page::GitOps => Some(screens.gitops.read(cx).filter_bar().clone()),

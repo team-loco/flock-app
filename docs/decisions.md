@@ -620,3 +620,27 @@ Settled; change only with a new entry that says why.
     pod row menu gains "Logs in a new tab" for that pod; the pod and workload docks, their
     previous-container logs and the single-container `OpenLogs` tab stay as decision 55 has them.
     Pause is gone from the tab: logs follow at the bottom and "↓ Latest" resumes.
+60. **Flock Resources list objects across the selected clusters** (design v2.1 `FleetBrowse`, `Nav
+    mode=fleet exp`): Flock gains a Resources sidebar section with Deployments, Pods, Nodes and
+    Helm releases (`Page::FlockDeployments` and friends, Flock pages whose `across()` names the
+    cluster page they list). Badges are the err / warn of each cluster's own nav counts (helm
+    release statuses for Helm releases) summed over the pane's restricted snapshot, without
+    totals. The pages reuse the per-cluster screens in an across mode: rows come from every
+    selected cluster's background store (`SnapshotRows::across` clones them in cluster order and
+    remembers each row's cluster), a mono Cluster column follows Name, and the query bar adds a
+    `cluster` facet (Deployments also `status` as Failing / Degraded / Healthy and `image` by
+    image name) matched outside the row type's `FilterSpec` (`flock_core::across`). Grouping
+    offers cluster; Deployments start grouped by status as the board does, the others by cluster.
+    Flock Deployments show the board's columns (Name, Cluster, Namespace, Ready, Up-to-date,
+    Image, Age: Available and Reason are left out), a "N of M deployments · K clusters" footer,
+    checkbox selection with a bulk bar, and an inspector with an Open button, the cluster in the
+    subtitle and an Other clusters section listing the same kind, namespace and name on the other
+    selected clusters with status, ready and the image tag when it differs. Bulk actions are only
+    those that exist singly, confirmed and sent per object with its UID: Restart rollout and
+    Scale… for Deployments, Delete… for Pods, Cordon / Uncordon for Nodes; Helm releases have none,
+    so no checkboxes. Opening a row (double-click, Enter or Open) goes to the object in its own
+    cluster as Flock Problems does. The live backend assembles details and pod rows for every
+    connected cluster while a pane shows a Flock resource page and watches Helm storage on every
+    cluster on Helm releases. Not built: the board's Compare bulk action and the nested
+    `status › namespace` grouping; the Nodes and Helm releases pages have no inspector beyond
+    the per-cluster ones.

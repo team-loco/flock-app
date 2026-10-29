@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use flock_core::Status;
+use flock_core::across::{header_check, selects_all};
 use flock_core::filter::highlights;
 use flock_core::grouping::{Group, Grouped, Item, group};
 use flock_core::units::Amount;
@@ -18,7 +19,7 @@ use gpui::{
     ViewElement, Window, div, ease_in_out, prelude::FluentBuilder, uniform_list,
 };
 
-use super::button::IconButton;
+use super::button::{Checkbox, IconButton};
 use super::group::{GROUP_PREFIX, Grouping, Header as GroupHeader, UNGROUPED, option_label};
 use super::list_keys::{Nav, TypeAhead, find, typed};
 use super::menu::{ActionMenu, MenuItem};
@@ -29,7 +30,7 @@ use super::tooltip::Tooltip;
 use crate::assets::GROUP;
 use crate::prefs::{self, ColumnWidths, FLOCK_SCOPE};
 use crate::theme::{
-    ActiveTheme, COLUMN_DIVIDER, COLUMN_HANDLE, COLUMN_MIN, FLASH, FONT_MONO, FONT_SANS,
+    ActiveTheme, CHECKBOX, COLUMN_DIVIDER, COLUMN_HANDLE, COLUMN_MIN, FLASH, FONT_MONO, FONT_SANS,
     GLYPH_SLOT, GROUP_MENU_WIDTH, Palette, ROW_TABLE, ROW_TABLE_MIN, RULE, SPACE_4, SPACE_6,
     SPACE_8, TEXT_AXIS, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
 };
@@ -233,6 +234,10 @@ impl<R: 'static> Column<R> {
         text: impl Fn(&R) -> SharedString + 'static,
     ) -> Self {
         Self::text_cell(title, Rc::new(text), None, Some(Rc::new(status)))
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
     }
 
     pub fn highlight(mut self) -> Self {
@@ -460,6 +465,12 @@ struct Drag {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Marks {
+    Shift,
+    Checkboxes,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Header {
     Hidden,
     Sans,
@@ -474,6 +485,8 @@ pub struct Table<R: 'static> {
     sort: Option<(usize, SortDirection)>,
     selected: Option<usize>,
     marked: Option<Vec<usize>>,
+    marks: Marks,
+    default_group: Option<&'static str>,
     row_height: Pixels,
     column_gap: Pixels,
     inset: Pixels,
@@ -535,6 +548,8 @@ impl<R: 'static> Table<R> {
             sort: None,
             selected: None,
             marked: None,
+            marks: Marks::Shift,
+            default_group: None,
             row_height: ROW_TABLE,
             column_gap: SPACE_6,
             inset: SPACE_8,
@@ -571,6 +586,50 @@ impl<R: 'static> Table<R> {
             header_focus: None,
             group_menu,
         }
+    }
+
+    pub fn checkboxes(mut self) -> Self {
+        self.marks = Marks::Checkboxes;
+        self.marked = Some(Vec::new());
+        self
+    }
+
+    pub fn default_group(mut self, facet: &'static str) -> Self {
+        self.default_group = Some(facet);
+        self
+    }
+
+    pub fn clear_marks(&mut self, cx: &mut Context<Self>) {
+        if let Some(marked) = self.marked.as_mut().filter(|marked| !marked.is_empty()) {
+            marked.clear();
+            cx.emit(TableEvent::Marked);
+            cx.notify();
+        }
+    }
+
+    pub fn toggle_check(&mut self, row: usize, cx: &mut Context<Self>) {
+        let Some(marked) = self.marked.as_mut().filter(|_| row < self.rows.len()) else {
+            return;
+        };
+        match marked.iter().position(|&ix| ix == row) {
+            Some(at) => {
+                marked.remove(at);
+            }
+            None => marked.push(row),
+        }
+        self.order_marks();
+        cx.emit(TableEvent::Marked);
+        cx.notify();
+    }
+
+    pub fn toggle_all_checks(&mut self, cx: &mut Context<Self>) {
+        let marked = self.marked_rows().len();
+        let all = selects_all(marked).then(|| self.order.clone());
+        if let Some(marked) = self.marked.as_mut() {
+            *marked = all.unwrap_or_default();
+        }
+        cx.emit(TableEvent::Marked);
+        cx.notify();
     }
 
     pub fn grouped(mut self, grouping: Grouping<R>, cx: &mut Context<Self>) -> Self {
@@ -626,7 +685,11 @@ impl<R: 'static> Table<R> {
         if self.grouping.is_none() {
             return;
         }
-        let saved = prefs::grouping(&self.scope, &self.id, cx);
+        let saved = prefs::saved_grouping(&self.scope, &self.id, cx);
+        let saved = saved.unwrap_or_else(|| prefs::Grouping {
+            by: self.default_group.map(str::to_owned),
+            ..prefs::Grouping::default()
+        });
         self.group_by = saved.by.as_deref().and_then(|facet| self.option_of(facet));
         self.collapsed = saved.collapsed;
         self.header_focus = None;
@@ -1068,7 +1131,12 @@ impl<R: 'static> Table<R> {
 
     pub fn min_width(&self) -> Pixels {
         let widths = self.columns.iter().map(|c| self.width_of(c));
-        min_row_width(widths, self.column_gap, self.inset + TRAILING)
+        let check = self.has_checks().then_some(Width::Fixed(CHECKBOX));
+        min_row_width(
+            check.into_iter().chain(widths),
+            self.column_gap,
+            self.inset + TRAILING,
+        )
     }
 
     pub fn row(&self, index: usize) -> Option<&R> {
@@ -1242,7 +1310,12 @@ impl<R: 'static> Table<R> {
             cx.notify();
             return;
         }
-        if let Some(marked) = self.marked.as_mut().filter(|marked| !marked.is_empty()) {
+        let keeps_marks = self.has_checks();
+        if let Some(marked) = self
+            .marked
+            .as_mut()
+            .filter(|marked| !marked.is_empty() && !keeps_marks)
+        {
             marked.clear();
             cx.emit(TableEvent::Marked);
         }
@@ -1366,6 +1439,16 @@ impl<R: 'static> Table<R> {
             })
             .collect();
         let measured = self.measured.clone();
+        let checks = self.has_checks();
+        let check = self.has_checks().then(|| {
+            let shown = self.order.len();
+            let state = header_check(self.marked_rows().len(), shown);
+            let id = format!("{}-check-all", self.id);
+            check_cell(
+                Checkbox::tristate(ElementId::Name(id.into()), state)
+                    .on_toggle(cx.listener(|this, _: &bool, _, cx| this.toggle_all_checks(cx))),
+            )
+        });
         div()
             .flex()
             .flex_none()
@@ -1382,8 +1465,10 @@ impl<R: 'static> Table<R> {
                 header.font_family(FONT_MONO).text_size(TEXT_AXIS)
             })
             .on_children_prepainted(move |bounds, _, _| {
-                *measured.borrow_mut() = bounds.iter().map(|b| b.size.width).collect();
+                let widths = bounds.iter().map(|b| b.size.width);
+                *measured.borrow_mut() = widths.skip(usize::from(checks)).collect();
             })
+            .children(check)
             .children(cells)
             .into_any_element()
     }
@@ -1454,7 +1539,13 @@ impl<R: 'static> Table<R> {
                 .child(content)
                 .into_any_element();
         }
-        let selected = self.shows_selection(ix);
+        let checked = self.has_checks() && self.is_marked(ix);
+        let selected = if self.has_checks() {
+            self.selected == Some(ix) && self.header_focus.is_none()
+        } else {
+            self.shows_selection(ix)
+        };
+        let check = self.has_checks().then(|| self.row_check(ix, checked, cx));
         let status = self.status.as_ref().and_then(|status| status(row));
         let tint = status.and_then(|status| palette.tint(status));
         let hover = palette.hover;
@@ -1489,6 +1580,7 @@ impl<R: 'static> Table<R> {
             .text_color(palette.fg)
             .cursor_pointer()
             .when_some(tint, Styled::bg)
+            .when(checked, |row| row.bg(palette.accbg))
             .when(selected, |row| row.bg(palette.sel))
             .when(!selected, |row| row.hover(move |style| style.bg(hover)))
             .on_click(cx.listener(move |this, event, window, cx| {
@@ -1506,6 +1598,7 @@ impl<R: 'static> Table<R> {
                     this.open_menu(ix, event.position, window, cx);
                 }),
             )
+            .children(check)
             .children(cells)
             .children(more);
         let flash = self
@@ -1533,6 +1626,19 @@ impl<R: 'static> Table<R> {
 }
 
 impl<R: 'static> Table<R> {
+    fn has_checks(&self) -> bool {
+        self.marks == Marks::Checkboxes
+    }
+
+    fn row_check(&self, ix: usize, checked: bool, cx: &mut Context<Self>) -> Div {
+        let id = format!("{}-check-{ix}", self.id);
+        let toggle = cx.listener(move |this, _: &bool, _, cx| {
+            cx.stop_propagation();
+            this.toggle_check(ix, cx);
+        });
+        check_cell(Checkbox::new(ElementId::Name(id.into()), checked).on_toggle(toggle))
+    }
+
     fn row_more(&self, ix: usize, row: &R, cx: &mut Context<Self>) -> Option<AnyElement> {
         let actions = self.actions.as_ref()?;
         if actions(row, &self.marked_rows()).is_empty() {
@@ -1557,6 +1663,16 @@ impl<R: 'static> Table<R> {
                 .into_any_element(),
         )
     }
+}
+
+fn check_cell(checkbox: Checkbox) -> Div {
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .w(CHECKBOX)
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(checkbox)
 }
 
 fn stored_widths(scope: &str, table: &str, cx: &App) -> HashMap<SharedString, Pixels> {

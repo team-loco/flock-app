@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use flock_core::scope::Check;
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement, IntoElement,
     MouseButton, ParentElement, Pixels, RenderOnce, SharedString, StatefulInteractiveElement,
@@ -576,16 +577,21 @@ impl RenderOnce for Toggle {
 #[derive(IntoElement)]
 pub struct Checkbox {
     id: ElementId,
-    checked: bool,
+    check: Check,
     label: Option<SharedString>,
     handler: Option<ToggleHandler>,
 }
 
 impl Checkbox {
     pub fn new(id: impl Into<ElementId>, checked: bool) -> Self {
+        let check = if checked { Check::On } else { Check::Off };
+        Self::tristate(id, check)
+    }
+
+    pub fn tristate(id: impl Into<ElementId>, check: Check) -> Self {
         Self {
             id: id.into(),
-            checked,
+            check,
             label: None,
             handler: None,
         }
@@ -613,22 +619,26 @@ impl RenderOnce for Checkbox {
             .size(CHECKBOX)
             .rounded(RADIUS_SMALL)
             .border(RULE)
-            .text_size(TEXT_GLYPH)
-            .when(self.checked, |b| {
-                b.bg(palette.acc)
-                    .border_color(palette.acc)
-                    .text_color(palette.onacc)
-                    .child(
-                        svg()
-                            .path(assets::CHECK)
-                            .size(CHECKBOX_TICK)
-                            .text_color(palette.onacc),
-                    )
-            })
-            .when(!self.checked, |b| {
-                b.bg(palette.editor).border_color(palette.line2)
-            });
-        let checked = self.checked;
+            .text_size(TEXT_GLYPH);
+        let mark = match self.check {
+            Check::On => Some(assets::CHECK),
+            Check::Mixed => Some(assets::DASH),
+            Check::Off => None,
+        };
+        let box_ = match mark {
+            Some(path) => box_
+                .bg(palette.acc)
+                .border_color(palette.acc)
+                .text_color(palette.onacc)
+                .child(
+                    svg()
+                        .path(path)
+                        .size(CHECKBOX_TICK)
+                        .text_color(palette.onacc),
+                ),
+            None => box_.bg(palette.editor).border_color(palette.line2),
+        };
+        let checked = self.check == Check::On;
         div()
             .debug_selector(|| self.id.to_string())
             .id(self.id)

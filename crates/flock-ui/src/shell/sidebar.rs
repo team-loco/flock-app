@@ -284,7 +284,9 @@ impl Shell {
         let Some(cluster) = self.selected_cluster() else {
             let shown = self.focused_screens().scoped_snapshot();
             let snapshot = shown.unwrap_or(&self.state.snapshot);
-            return snapshot.flock_nav.clone();
+            let mut counts = snapshot.flock_nav.clone();
+            counts.extend(flock_core::across::badges(snapshot));
+            return counts;
         };
         let mut counts = cluster.nav.clone();
         let definitions = self.state.snapshot.crds(&cluster.id).len();

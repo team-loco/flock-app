@@ -7,6 +7,10 @@ pub enum Page {
     GitOps,
     Changes,
     FluxEvents,
+    FlockDeployments,
+    FlockPods,
+    FlockNodes,
+    FlockReleases,
     ClusterSettings,
     Settings,
     ClusterOverview,
@@ -52,6 +56,10 @@ impl Page {
             Self::GitOps => "GitOps",
             Self::Changes => "Changes",
             Self::FluxEvents => "Flux events",
+            Self::FlockDeployments => "Deployments",
+            Self::FlockPods => "Pods",
+            Self::FlockNodes => "Nodes",
+            Self::FlockReleases => "Helm releases",
             Self::ClusterSettings => "Clusters",
             Self::Settings => "Settings",
             Self::ClusterOverview => "Overview",
@@ -92,6 +100,10 @@ impl Page {
 
     pub const fn singular(self) -> &'static str {
         match self {
+            Self::FlockDeployments => Self::Deployments.singular(),
+            Self::FlockPods => Self::Pods.singular(),
+            Self::FlockNodes => Self::Nodes.singular(),
+            Self::FlockReleases => Self::Releases.singular(),
             Self::Nodes => "Node",
             Self::Namespaces => "Namespace",
             Self::Events => "Event",
@@ -138,9 +150,23 @@ impl Page {
                 | Self::GitOps
                 | Self::Changes
                 | Self::FluxEvents
+                | Self::FlockDeployments
+                | Self::FlockPods
+                | Self::FlockNodes
+                | Self::FlockReleases
                 | Self::ClusterSettings
                 | Self::Settings
         )
+    }
+
+    pub const fn across(self) -> Option<Self> {
+        match self {
+            Self::FlockDeployments => Some(Self::Deployments),
+            Self::FlockPods => Some(Self::Pods),
+            Self::FlockNodes => Some(Self::Nodes),
+            Self::FlockReleases => Some(Self::Releases),
+            _ => None,
+        }
     }
 
     pub fn section(self) -> Option<&'static str> {
@@ -172,16 +198,27 @@ impl NavSection {
     }
 }
 
-pub const FLOCK_NAV: &[NavSection] = &[NavSection {
-    label: None,
-    pages: &[
-        Page::Overview,
-        Page::Problems,
-        Page::GitOps,
-        Page::Changes,
-        Page::FluxEvents,
-    ],
-}];
+pub const FLOCK_NAV: &[NavSection] = &[
+    NavSection {
+        label: None,
+        pages: &[
+            Page::Overview,
+            Page::Problems,
+            Page::GitOps,
+            Page::Changes,
+            Page::FluxEvents,
+        ],
+    },
+    NavSection {
+        label: Some("Resources"),
+        pages: &[
+            Page::FlockDeployments,
+            Page::FlockPods,
+            Page::FlockNodes,
+            Page::FlockReleases,
+        ],
+    },
+];
 
 pub const CLUSTER_NAV: &[NavSection] = &[
     NavSection {
@@ -256,6 +293,25 @@ mod tests {
         assert!(flock_pages.copied().all(Page::is_flock));
         let cluster_pages = CLUSTER_NAV.iter().flat_map(|s| s.pages.iter());
         assert!(!cluster_pages.copied().any(Page::is_flock));
+    }
+
+    #[test]
+    fn flock_resource_pages_list_a_cluster_page_across_clusters() {
+        let resources = FLOCK_NAV.iter().find(|s| s.label == Some("Resources"));
+        let pages = resources.map(|s| s.pages).unwrap_or_default();
+        let across: Vec<Option<Page>> = pages.iter().map(|p| p.across()).collect();
+        assert_eq!(
+            across,
+            [
+                Some(Page::Deployments),
+                Some(Page::Pods),
+                Some(Page::Nodes),
+                Some(Page::Releases)
+            ]
+        );
+        assert_eq!(Page::FlockReleases.label(), "Helm releases");
+        assert_eq!(Page::FlockPods.singular(), "Pod");
+        assert_eq!(Page::Deployments.across(), None);
     }
 
     #[test]

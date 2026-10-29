@@ -235,8 +235,8 @@ fn page_hits(snapshot: &Snapshot, current: Option<&ClusterId>, text: &str) -> Ve
                     .flat_map(|section| section.pages.iter())
                     .map(move |page| (*page, name.clone()))
             });
-    let mut scored: Vec<(i64, Hit)> = flock_pages
-        .chain(cluster_pages)
+    let mut scored: Vec<(i64, Hit)> = cluster_pages
+        .chain(flock_pages)
         .filter_map(|(page, scope)| {
             let (score, highlights) = matched(page.label(), text)?;
             let hit = Hit {

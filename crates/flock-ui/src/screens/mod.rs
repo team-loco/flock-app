@@ -167,12 +167,15 @@ pub enum ScreenEvent {
 pub struct ClusterPages {
     overview: Entity<OverviewScreen>,
     nodes: Entity<NodesScreen>,
+    flock_nodes: Entity<NodesScreen>,
     namespaces: Entity<NamespacesScreen>,
     events: Entity<EventsScreen>,
     problems: Entity<ClusterProblemsScreen>,
     resources: Entity<ResourcesScreen>,
+    flock_resources: Entity<ResourcesScreen>,
     custom: Entity<CustomResourcesScreen>,
     helm: Entity<helm::HelmReleasesScreen>,
+    flock_helm: Entity<helm::HelmReleasesScreen>,
     flux: Entity<FluxListScreen>,
     graph: Entity<FluxGraphScreen>,
     _subscriptions: Vec<Subscription>,
@@ -186,12 +189,15 @@ impl ClusterPages {
     ) -> Self {
         let overview = cx.new(OverviewScreen::new);
         let nodes = cx.new(|cx| NodesScreen::new(window, cx));
+        let flock_nodes = cx.new(|cx| NodesScreen::across(window, cx));
         let namespaces = cx.new(|cx| NamespacesScreen::new(window, cx));
         let events = cx.new(|cx| EventsScreen::new(window, cx));
         let problems = cx.new(|cx| ClusterProblemsScreen::new(window, cx));
         let resources = cx.new(|cx| ResourcesScreen::new(window, cx));
+        let flock_resources = cx.new(|cx| ResourcesScreen::across(window, cx));
         let custom = cx.new(|cx| CustomResourcesScreen::new(window, cx));
         let helm = cx.new(|cx| helm::HelmReleasesScreen::new(window, cx));
+        let flock_helm = cx.new(|cx| helm::HelmReleasesScreen::across(window, cx));
         let flux = cx.new(|cx| FluxListScreen::new(window, cx));
         let graph = cx.new(FluxGraphScreen::new);
         let subscriptions = vec![
@@ -204,17 +210,23 @@ impl ClusterPages {
             subscribe(&problems, on_event.clone(), window, cx),
             subscribe(&custom, on_event.clone(), window, cx),
             subscribe(&helm, on_event.clone(), window, cx),
+            subscribe(&flock_resources, on_event.clone(), window, cx),
+            subscribe(&flock_nodes, on_event.clone(), window, cx),
+            subscribe(&flock_helm, on_event.clone(), window, cx),
             subscribe(&resources, on_event, window, cx),
         ];
         Self {
             overview,
             nodes,
+            flock_nodes,
             namespaces,
             events,
             problems,
             resources,
+            flock_resources,
             custom,
             helm,
+            flock_helm,
             flux,
             graph,
             _subscriptions: subscriptions,
@@ -293,6 +305,21 @@ impl ClusterPages {
         }
     }
 
+    pub fn sync_across(&self, page: Page, view: &Arc<Snapshot>, cx: &mut App) {
+        match page {
+            Page::FlockDeployments => self.flock_resources.update(cx, |screen, cx| {
+                screen.set_across(ResourceKind::Deployment, view, cx);
+            }),
+            Page::FlockNodes => self
+                .flock_nodes
+                .update(cx, |screen, cx| screen.set_across(view, cx)),
+            Page::FlockReleases => self
+                .flock_helm
+                .update(cx, |screen, cx| screen.set_across(view, cx)),
+            _ => {}
+        }
+    }
+
     pub fn sync_custom(
         &self,
         cluster: Option<&ClusterSummary>,
@@ -345,6 +372,15 @@ impl ClusterPages {
     }
 
     pub fn render(&self, page: Page, has_detail: bool) -> Option<AnyElement> {
+        if page == Page::FlockDeployments {
+            return Some(self.flock_resources.clone().into_any_element());
+        }
+        if page == Page::FlockNodes {
+            return Some(self.flock_nodes.clone().into_any_element());
+        }
+        if page == Page::FlockReleases {
+            return Some(self.flock_helm.clone().into_any_element());
+        }
         if page == Page::FluxGraph {
             return Some(self.graph.clone().into_any_element());
         }
@@ -381,6 +417,9 @@ impl ClusterPages {
             return Some(self.custom.read(cx).filter_bar(cx));
         }
         let bar = match page {
+            Page::FlockDeployments => self.flock_resources.read(cx).filter_bar(),
+            Page::FlockNodes => self.flock_nodes.read(cx).filter_bar(),
+            Page::FlockReleases => self.flock_helm.read(cx).filter_bar(),
             Page::Nodes => self.nodes.read(cx).filter_bar(),
             Page::Namespaces => self.namespaces.read(cx).filter_bar(),
             Page::Events => self.events.read(cx).filter_bar(),
@@ -395,12 +434,18 @@ impl ClusterPages {
         Some(bar.clone())
     }
 
+    pub fn flock_resource_groups(&self, cx: &App) -> Vec<flock_core::grouping::Group> {
+        self.flock_resources.read(cx).groups(cx)
+    }
+
     pub fn custom_empty_sentence(&self, cx: &App) -> Option<String> {
         self.custom.read(cx).empty_sentence(cx)
     }
 
     pub fn inspecting(&self, page: Page, cx: &App) -> bool {
         match page {
+            Page::FlockDeployments => self.flock_resources.read(cx).inspecting(),
+            Page::FlockNodes => self.flock_nodes.read(cx).inspecting(),
             Page::Nodes => self.nodes.read(cx).inspecting(),
             Page::Events => self.events.read(cx).inspecting(),
             Page::CustomResources => self.custom.read(cx).inspecting(),
@@ -414,6 +459,10 @@ impl ClusterPages {
 
     pub fn close_inspector(&self, page: Page, cx: &mut App) -> bool {
         match page {
+            Page::FlockDeployments => self
+                .flock_resources
+                .update(cx, ResourcesScreen::close_inspector),
+            Page::FlockNodes => self.flock_nodes.update(cx, NodesScreen::close_inspector),
             Page::Nodes => self.nodes.update(cx, NodesScreen::close_inspector),
             Page::Events => self.events.update(cx, EventsScreen::close_inspector),
             Page::CustomResources => self
@@ -444,6 +493,11 @@ impl ClusterPages {
 
     pub fn list_focus(&self, page: Page, cx: &mut App) -> Option<FocusHandle> {
         match page {
+            Page::FlockDeployments => {
+                Some(self.flock_resources.update(cx, ResourcesScreen::list_focus))
+            }
+            Page::FlockNodes => Some(self.flock_nodes.read(cx).list_focus(cx)),
+            Page::FlockReleases => Some(self.flock_helm.read(cx).list_focus(cx)),
             Page::Nodes => Some(self.nodes.read(cx).list_focus(cx)),
             Page::Namespaces => Some(self.namespaces.read(cx).list_focus(cx)),
             Page::Events => Some(self.events.read(cx).list_focus(cx)),

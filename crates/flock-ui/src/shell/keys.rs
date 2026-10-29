@@ -168,6 +168,9 @@ impl Shell {
         if self.state.location().page == Page::Pods {
             return screens.pods.update(cx, PodsScreen::close_inspector);
         }
+        if self.state.location().page == Page::FlockPods {
+            return screens.flock_pods.update(cx, PodsScreen::close_inspector);
+        }
         screens
             .pages
             .close_inspector(self.state.location().page, cx)
@@ -183,6 +186,9 @@ impl Shell {
             return Some(screen.read(cx).dock().clone());
         }
         let location = self.state.location();
+        if location.page == Page::FlockPods {
+            return Some(screens.flock_pods.read(cx).dock().clone());
+        }
         let pods = location.page == Page::Pods && self.has_detail(location);
         pods.then(|| screens.pods.read(cx).dock().clone())
     }
@@ -209,6 +215,7 @@ impl Shell {
             Page::FluxEvents => Some(screens.flux_events.read(cx).list_focus(cx)),
             Page::ClusterSettings => Some(screens.settings.read(cx).list_focus(cx)),
             Page::Pods => Some(screens.pods.read(cx).list_focus(cx)),
+            Page::FlockPods => Some(screens.flock_pods.read(cx).list_focus(cx)),
             page => screens.pages.list_focus(page, cx),
         }
     }

@@ -173,6 +173,10 @@ pub const CHECKBOX: Pixels = px(14.);
 pub const SWATCH: Pixels = px(20.);
 pub const HEX_FIELD: Pixels = px(96.);
 pub const CHECKBOX_TICK: Pixels = px(10.);
+pub const BULK_BAR: Pixels = px(34.);
+pub const BULK_BAR_OFFSET: Pixels = px(16.);
+pub const BULK_RULE: Pixels = px(18.);
+pub const RADIUS_BULK: Pixels = px(5.);
 
 pub const KV_LABEL: Pixels = px(72.);
 pub const FIELD_LABEL: Pixels = px(150.);

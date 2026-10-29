@@ -113,6 +113,12 @@ impl Shell {
                 .min_h_0()
                 .child(self.screens(ix).pods.clone())
                 .into_any_element()
+        } else if location.page == Page::FlockPods {
+            div()
+                .flex_1()
+                .min_h_0()
+                .child(self.screens(ix).flock_pods.clone())
+                .into_any_element()
         } else {
             scroll_viewport(PAGE_CONTENT, self.content(ix, &location, &palette, cx))
                 .flex_1()

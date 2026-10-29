@@ -2,6 +2,7 @@ use clap::ValueEnum;
 use flock_core::crd::CrdKey;
 use flock_core::helm::HelmKey;
 use flock_core::history::Location;
+use flock_core::scope::Scope;
 use flock_core::tabs::{SavedPane, SavedWindow};
 use flock_core::{
     AddClusterStep, ClusterId, Command, FluxKey, FluxKind, LogTarget, Page, ResourceKind,
@@ -41,6 +42,7 @@ const SAMPLE_CRD_OBJECT: &str = "web-frontend-tls";
 const SAMPLE_HELM_NAMESPACE: &str = "monitoring";
 const SAMPLE_HELM_RELEASE: &str = "kube-prometheus-stack";
 const FLUX_NAMESPACE: &str = "flux-system";
+const SAMPLE_SOURCE: &str = "fleet-infra";
 
 pub const APP_ID: &str = "dev.flock.app";
 pub const APP_NAME: &str = "Flock";
@@ -156,6 +158,10 @@ impl Preset {
 pub enum Screen {
     Flock,
     FleetProblems,
+    FlockDeployments,
+    FlockPods,
+    FlockNodes,
+    FlockReleases,
     Cluster,
     Collapsed,
     Switcher,
@@ -217,6 +223,10 @@ impl Screen {
         match self {
             Self::Flock => vec![Command::SelectPage(Page::Overview)],
             Self::FleetProblems => vec![Command::SelectPage(Page::Problems)],
+            Self::FlockDeployments => vec![Command::SelectPage(Page::FlockDeployments)],
+            Self::FlockPods => vec![Command::SelectPage(Page::FlockPods)],
+            Self::FlockNodes => vec![Command::SelectPage(Page::FlockNodes)],
+            Self::FlockReleases => vec![Command::SelectPage(Page::FlockReleases)],
             Self::Cluster => vec![sample],
             Self::Collapsed => vec![sample, Command::ToggleSidebar],
             Self::Switcher => vec![sample, Command::OpenResource(preset.deployment())],
@@ -285,24 +295,9 @@ impl Screen {
             Self::PodsShell => vec![sample, Command::SelectPage(Page::Pods)],
             Self::NodesShell => inspect_node(preset, sample),
             Self::Logs => vec![sample, follow_logs(preset)],
-            Self::Kustomization => flux_screen(preset.flux(
-                SAMPLE_CLUSTER,
-                FluxKind::Kustomization,
-                "flux-system",
-                "apps-payments",
-            )),
-            Self::Helmrelease => flux_screen(preset.flux(
-                SAMPLE_RELEASE_CLUSTER,
-                FluxKind::HelmRelease,
-                "monitoring",
-                "kube-prometheus-stack",
-            )),
-            Self::Source => flux_screen(preset.flux(
-                SAMPLE_CLUSTER,
-                FluxKind::GitRepository,
-                "flux-system",
-                "fleet-infra",
-            )),
+            Self::Kustomization => flux_screen(flux_sample(preset, FluxKind::Kustomization)),
+            Self::Helmrelease => flux_screen(flux_sample(preset, FluxKind::HelmRelease)),
+            Self::Source => flux_screen(flux_sample(preset, FluxKind::GitRepository)),
             #[cfg(feature = "loco")]
             Self::LocoPlatform => vec![sample, Command::SelectPage(Page::LocoPlatform)],
             #[cfg(feature = "loco")]
@@ -341,6 +336,7 @@ fn inspect_certificate(cluster: &ClusterId) -> Command {
 impl Screen {
     pub fn tabs(self, preset: &Preset) -> Option<SavedWindow> {
         let cluster = preset.cluster_or(SAMPLE_CLUSTER);
+        let pair = Scope::Several(vec![cluster.clone(), ClusterId::new(SAMPLE_OTHER_CLUSTER)]);
         let deployment = preset.deployment();
         let workload = Location {
             resource: Some(deployment.clone()),
@@ -384,7 +380,12 @@ impl Screen {
             container: Some(SAMPLE_CONTAINER.into()),
             ..Location::page_on(cluster, Page::Logs)
         };
+        let across = |page: Page| (vec![Location::flock_in(page, &pair)], 0);
         let (tabs, active) = match self {
+            Self::FlockDeployments => across(Page::FlockDeployments),
+            Self::FlockPods => across(Page::FlockPods),
+            Self::FlockNodes => across(Page::FlockNodes),
+            Self::FlockReleases => across(Page::FlockReleases),
             Self::Flock => (
                 vec![
                     Location::flock(Page::Overview),
@@ -417,6 +418,21 @@ impl Screen {
             focused: 0,
             ..SavedWindow::default()
         })
+    }
+}
+
+fn flux_sample(preset: &Preset, kind: FluxKind) -> FluxKey {
+    match kind {
+        FluxKind::HelmRelease => preset.flux(
+            SAMPLE_RELEASE_CLUSTER,
+            kind,
+            SAMPLE_HELM_NAMESPACE,
+            SAMPLE_HELM_RELEASE,
+        ),
+        FluxKind::Kustomization => {
+            preset.flux(SAMPLE_CLUSTER, kind, FLUX_NAMESPACE, SAMPLE_KUSTOMIZATION)
+        }
+        _ => preset.flux(SAMPLE_CLUSTER, kind, FLUX_NAMESPACE, SAMPLE_SOURCE),
     }
 }
 
@@ -458,6 +474,10 @@ pub fn root_view(
             .into(),
         Screen::Flock => shell_view(store, screen, preset, window, cx),
         Screen::FleetProblems => shell_view(store, screen, preset, window, cx),
+        Screen::FlockDeployments => shell_view(store, screen, preset, window, cx),
+        Screen::FlockPods => shell_view(store, screen, preset, window, cx),
+        Screen::FlockNodes => shell_view(store, screen, preset, window, cx),
+        Screen::FlockReleases => shell_view(store, screen, preset, window, cx),
         Screen::Cluster => shell_view(store, screen, preset, window, cx),
         Screen::Collapsed => shell_view(store, screen, preset, window, cx),
         Screen::Switcher => shell_view(store, screen, preset, window, cx),
