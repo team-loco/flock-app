@@ -1,7 +1,9 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use flock_core::across::{CLUSTER_FACET, keeps, split_query};
 use flock_core::emptiness::Noun;
 use flock_core::filter::facets;
 use flock_core::grouping::Group;
@@ -18,8 +20,8 @@ use flock_core::{
     ClusterId, Command, LogInstance, LogTarget, Page, Preferences, ResourceRef, Seen, Snapshot,
 };
 use gpui::{
-    AnyElement, AppContext as _, Context, Entity, EventEmitter, IntoElement, ParentElement, Pixels,
-    Render, SharedString, Styled, Subscription, WeakEntity, Window, div, px,
+    AnyElement, AppContext as _, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
+    ParentElement, Pixels, Render, SharedString, Styled, Subscription, WeakEntity, Window, div, px,
 };
 
 mod inspector;
@@ -31,19 +33,23 @@ use inspector::{PodContent, PodInspector};
 use streams::{LogSession, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
-    ActionMenu, Column, ConfirmDialog, DockState, FILTER_PLACEHOLDER, FilterBar, FilterEvent,
-    Grouping, InputEvent, InspectorPane, Link, LogView, MenuItem, Select, SelectEvent, ShowAll,
-    SnapshotRow, SnapshotRows, StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label,
-    confirm, pane,
+    ActionMenu, BulkAction, BulkBar, Column, ConfirmDialog, DockState, FILTER_PLACEHOLDER,
+    FilterBar, FilterEvent, Grouping, InputEvent, InspectorPane, Link, LogView, MenuItem, Select,
+    SelectEvent, ShowAll, SnapshotRow, SnapshotRows, StatusText, Table, TableEvent, Terminal,
+    TextFieldState, chip_label, confirm, pane,
 };
 use crate::screens::{
     ALL_NAMESPACES, ListShape, chosen_namespace, edit_item, empty_list, new_tab_item,
     set_namespace_options,
 };
-use crate::theme::{ActiveTheme, INSPECTOR_POD, Palette, SPACE_6, TEXT_SMALL};
+use crate::theme::{
+    ActiveTheme, FONT_MONO, INSPECTOR_POD, Palette, SPACE_3, SPACE_4, SPACE_6, SPACE_8, TEXT_SMALL,
+};
 
 pub(super) const INSPECTOR_ID: &str = "pod-inspector";
 const FAILING_ELSEWHERE: &str = "pod-failing-elsewhere";
+const FAILING_ELSEWHERE_PLACE: &str = "pod-failing-elsewhere-place";
+const FAILING_ELSEWHERE_SLOT: &str = "pod-failing-elsewhere-slot";
 const NAME_MIN: Pixels = px(138.);
 const NAME_WEIGHT: f32 = 2.;
 const OWNER_MIN: Pixels = px(76.);
@@ -69,7 +75,15 @@ const SELECTED_PODS: &str = "selected pods";
 const MARKED_LOGS_DESCRIPTION: &str = "Merge the output of every ⇧-clicked pod in one tab.";
 const SELECTOR_LOGS_DESCRIPTION: &str =
     "Follows every pod that matches the label filter, including new ones";
+const DELETE_PODS: &str = "Delete…";
+const DELETE_PODS_TITLE: &str = "Delete pods";
+const DELETE_PODS_BODY: &str = "The pods are deleted now. Controllers create replacements within seconds; logs from their containers are lost.";
+const BULK_ID: &str = "pod-bulk";
+const BULK_SEPARATOR: &str = ", ";
+const CLUSTER_WIDTH: Pixels = px(104.);
+
 pub struct PodsScreen {
+    across: bool,
     snapshot: Arc<Snapshot>,
     cluster: Option<ClusterId>,
     names: Vec<(ClusterId, String)>,
@@ -115,14 +129,15 @@ impl PodsScreen {
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let table = cx.new(|cx| {
-            Table::new("pods", columns(), cx)
-                .row_key(|pod: &PodRow| format!("{}/{}", pod.namespace, pod.name).into())
-                .multi_select()
-                .click_opens()
-                .column_gap(SPACE_6)
-                .grouped(Grouping::facets(|pod: &PodRow| pod.status), cx)
-        });
+        Self::build(false, window, cx)
+    }
+
+    pub fn across(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(true, window, cx)
+    }
+
+    fn build(across: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let table = cx.new(|cx| pod_table(across, cx));
         let search = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
         let namespace = cx.new(|cx| {
             Select::new("pod-namespace", vec![ALL_NAMESPACES.into()], cx)
@@ -130,7 +145,7 @@ impl PodsScreen {
                 .width(NAMESPACE_SELECT)
         });
         let group = table.read(cx).group_menu().clone();
-        let (filter, elsewhere) = filter_bar(&namespace, group, window, cx);
+        let (filter, elsewhere) = filter_bar(&namespace, group, across, window, cx);
         let containers = cx.new(|cx| {
             Select::new("pod-container", Vec::new(), cx)
                 .mono()
@@ -178,6 +193,7 @@ impl PodsScreen {
         let screen = cx.weak_entity();
         let inspector = cx.new(|_| PodInspector::new(screen));
         Self {
+            across,
             snapshot: Arc::default(),
             cluster: None,
             names: Vec::new(),
@@ -249,6 +265,7 @@ impl PodsScreen {
         self.query.namespace = preferences
             .namespace_selection(POD_LIST)
             .namespace()
+            .filter(|_| !self.across)
             .map(str::to_owned);
         let wanted = resource.filter(|r| self.snapshot.pods.iter().any(|pod| pod.is(r)));
         if let Some(pod) = wanted {
@@ -334,11 +351,31 @@ impl PodsScreen {
     }
 
     fn base(&self) -> Vec<usize> {
-        let Some(cluster) = &self.cluster else {
-            return Vec::new();
-        };
-        let matched = self.pods.matching(&self.query.text);
-        self.query.base(self.pods.items(), &matched, cluster)
+        if !self.across {
+            let Some(cluster) = &self.cluster else {
+                return Vec::new();
+            };
+            let matched = self.pods.matching(&self.query.text);
+            return self.query.base(self.pods.items(), &matched, Some(cluster));
+        }
+        let (kept, extra) = split_query(&self.query.text, &[CLUSTER_FACET]);
+        let matched = self.pods.matching(&kept);
+        let pods = self.pods.items();
+        let base = self.query.base(pods, &matched, None);
+        base.into_iter()
+            .filter(|&ix| {
+                pods.get(ix).is_some_and(|pod| {
+                    let name = self.cluster_label(&pod.cluster);
+                    keeps(&extra, &[(CLUSTER_FACET, Some(Cow::Borrowed(name)))])
+                })
+            })
+            .collect()
+    }
+
+    fn cluster_label<'a>(&'a self, id: &'a ClusterId) -> &'a str {
+        self.snapshot
+            .cluster(id)
+            .map_or(id.as_str(), |cluster| cluster.name.as_str())
     }
 
     fn namespace_counts(&self) -> Vec<NamespaceCount> {
@@ -373,13 +410,20 @@ impl PodsScreen {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let namespace = self.query.namespace.as_ref();
-        let facets = facets(
-            self.snapshot
-                .pods
-                .iter()
-                .filter(|pod| self.cluster.as_ref() == Some(&pod.cluster))
-                .filter(|pod| namespace.is_none_or(|namespace| &pod.namespace == namespace)),
-        );
+        let facets = if self.across {
+            flock_core::across::facets(self.snapshot.pods.iter().map(|pod| {
+                let name = Cow::Borrowed(self.cluster_label(&pod.cluster));
+                (pod, vec![(CLUSTER_FACET, Some(name))])
+            }))
+        } else {
+            facets(
+                self.snapshot
+                    .pods
+                    .iter()
+                    .filter(|pod| self.cluster.as_ref() == Some(&pod.cluster))
+                    .filter(|pod| namespace.is_none_or(|namespace| &pod.namespace == namespace)),
+            )
+        };
         self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         let counts = self.namespace_counts();
         let total = self.cluster_total();
@@ -467,6 +511,9 @@ impl PodsScreen {
     }
 
     fn cluster_total(&self) -> usize {
+        if self.across {
+            return self.snapshot.pods.len();
+        }
         self.cluster.as_ref().map_or(0, |cluster| {
             self.snapshot
                 .pods
@@ -507,6 +554,10 @@ impl PodsScreen {
         };
         let pod = table.read(cx).row(ix).map(|row| row.resource());
         if let Some(pod) = pod {
+            if self.across && matches!(event, TableEvent::Opened(_)) {
+                cx.emit(Command::OpenResource(pod));
+                return;
+            }
             self.select(Some(pod), cx);
         }
         if matches!(event, TableEvent::Opened(_)) {
@@ -726,13 +777,60 @@ fn usage(pod: &Pod, label: fn(Usage) -> Amount) -> Amount {
     pod.usage.map_or_else(Amount::missing, label)
 }
 
-fn columns() -> Vec<Column<PodRow>> {
+fn pod_table(across: bool, cx: &mut Context<Table<PodRow>>) -> Table<PodRow> {
+    if across {
+        let grouping = Grouping::facets(|pod: &PodRow| pod.status)
+            .by(CLUSTER_FACET, |pod: &PodRow| {
+                Some(Cow::Borrowed(cluster_name(pod)))
+            });
+        return Table::new("flock-pods", columns(true), cx)
+            .row_key(|pod: &PodRow| {
+                format!("{}/{}/{}", pod.cluster, pod.namespace, pod.name).into()
+            })
+            .checkboxes()
+            .column_gap(SPACE_6)
+            .default_group(CLUSTER_FACET)
+            .grouped(grouping, cx);
+    }
+    Table::new("pods", columns(false), cx)
+        .row_key(|pod: &PodRow| format!("{}/{}", pod.namespace, pod.name).into())
+        .multi_select()
+        .click_opens()
+        .column_gap(SPACE_6)
+        .grouped(Grouping::facets(|pod: &PodRow| pod.status), cx)
+}
+
+fn cluster_name(pod: &PodRow) -> &str {
+    pod.snapshot()
+        .cluster(&pod.cluster)
+        .map_or(pod.cluster.as_str(), |cluster| cluster.name.as_str())
+}
+
+fn columns(across: bool) -> Vec<Column<PodRow>> {
+    let name = Column::text("Name", |p: &PodRow| p.name.clone().into())
+        .highlight()
+        .mono()
+        .flex(NAME_WEIGHT, NAME_MIN)
+        .sort_by_key(|p: &PodRow| p.name.clone());
+    let cluster = across.then(|| {
+        Column::colored_text(
+            "Cluster",
+            |p: &PodRow| cluster_name(p).to_owned().into(),
+            |_, palette| palette.fg2,
+        )
+        .highlight()
+        .mono()
+        .fixed(CLUSTER_WIDTH)
+        .sort_by_key(|p: &PodRow| cluster_name(p).to_owned())
+    });
+    std::iter::once(name)
+        .chain(cluster)
+        .chain(details())
+        .collect()
+}
+
+fn details() -> Vec<Column<PodRow>> {
     vec![
-        Column::text("Name", |p: &PodRow| p.name.clone().into())
-            .highlight()
-            .mono()
-            .flex(NAME_WEIGHT, NAME_MIN)
-            .sort_by_key(|p: &PodRow| p.name.clone()),
         Column::colored_text(
             "Owner",
             |p: &PodRow| p.owner_label().unwrap_or_else(|| MISSING.into()).into(),
@@ -796,6 +894,7 @@ fn columns() -> Vec<Column<PodRow>> {
 fn filter_bar(
     namespace: &Entity<Select>,
     group: Entity<ActionMenu>,
+    across: bool,
     window: &mut Window,
     cx: &mut Context<PodsScreen>,
 ) -> (Entity<FilterBar>, Entity<ElsewhereLink>) {
@@ -805,10 +904,13 @@ fn filter_bar(
         screen,
     });
     let filter = cx.new(|cx| {
-        FilterBar::new("pod-filter", window, cx)
-            .scope(namespace.clone())
-            .aside(elsewhere.clone())
-            .group(group)
+        let bar = FilterBar::new("pod-filter", window, cx);
+        let bar = if across {
+            bar
+        } else {
+            bar.scope(namespace.clone())
+        };
+        bar.aside(elsewhere.clone()).group(group)
     });
     (filter, elsewhere)
 }
@@ -822,19 +924,97 @@ impl Render for ElsewhereLink {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
         let link = self.elsewhere.as_ref().map(|elsewhere| {
-            let screen = self.screen.clone();
-            Link::new(FAILING_ELSEWHERE, elsewhere.label())
+            let count_screen = self.screen.clone();
+            let place_screen = self.screen.clone();
+            let count = Link::new(FAILING_ELSEWHERE, elsewhere.count_label())
                 .mono()
                 .color(palette.err)
                 .on_click(move |_, _, cx| {
-                    let _ = screen.update(cx, PodsScreen::go_elsewhere);
-                })
+                    let _ = count_screen.update(cx, PodsScreen::go_elsewhere);
+                });
+            let place = Link::new(FAILING_ELSEWHERE_PLACE, elsewhere.place_label())
+                .mono()
+                .color(palette.err)
+                .on_click(move |_, _, cx| {
+                    let _ = place_screen.update(cx, PodsScreen::go_elsewhere);
+                });
+            let place = div().flex_1().w(Pixels::ZERO).truncate().child(place);
+            [div().flex_none().child(count), place]
         });
         div()
-            .min_w_0()
-            .truncate()
+            .debug_selector(|| FAILING_ELSEWHERE_SLOT.to_owned())
+            .flex()
+            .flex_1()
+            .items_center()
+            .gap(SPACE_3)
             .text_size(TEXT_SMALL)
-            .children(link)
+            .children(link.into_iter().flatten())
+    }
+}
+
+impl PodsScreen {
+    fn footer(&self, cx: &mut Context<Self>) -> AnyElement {
+        let palette = *cx.palette();
+        let clusters =
+            flock_core::overview::plural(self.snapshot.clusters.len(), "cluster", "clusters");
+        let text = format!(
+            "{} of {} pods · {clusters}",
+            self.shown,
+            self.cluster_total()
+        );
+        div()
+            .debug_selector(|| "pod-footer".to_owned())
+            .flex_none()
+            .px(SPACE_8)
+            .py(SPACE_4)
+            .font_family(FONT_MONO)
+            .text_size(TEXT_SMALL)
+            .text_color(palette.mute)
+            .child(text)
+            .into_any_element()
+    }
+
+    fn bulk_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.across {
+            return None;
+        }
+        let seen: Vec<Seen> = self
+            .table
+            .read(cx)
+            .marked_rows()
+            .into_iter()
+            .map(|pod| Seen::new(pod.resource(), pod.uid.clone()))
+            .collect();
+        if seen.is_empty() {
+            return None;
+        }
+        let table = self.table.clone();
+        let screen = cx.weak_entity();
+        let count = seen.len();
+        let delete = move |window: &mut Window, cx: &mut gpui::App| {
+            let screen = screen.clone();
+            let targets = seen.clone();
+            let detail: Vec<String> = seen
+                .iter()
+                .map(|seen| format!("{} · {}", seen.target.cluster, seen.target))
+                .collect();
+            let title = format!("{DELETE_PODS_TITLE} · {}", targets.len());
+            let dialog =
+                ConfirmDialog::new(title, DELETE_PODS_BODY, DELETE_PODS_TITLE, move |_, cx| {
+                    let _ = screen.update(cx, |_, cx| {
+                        for target in &targets {
+                            cx.emit(Command::Delete(target.clone()));
+                        }
+                    });
+                })
+                .detail(detail.join(BULK_SEPARATOR));
+            confirm(dialog, window, cx);
+        };
+        let bar = BulkBar::new(BULK_ID, count, move |_, cx| {
+            table.update(cx, Table::clear_marks);
+        })
+        .action(BulkAction::new(DELETE_PODS, delete));
+        Some(bar.into_any_element())
     }
 }
 
@@ -867,7 +1047,18 @@ impl Render for PodsScreen {
             Some(empty) => empty.into_any_element(),
             None => Table::pane(&self.table, cx).into_any_element(),
         };
-        let table = div().flex_1().min_w_0().h_full().child(list);
+        let footer = self.across.then(|| self.footer(cx));
+        let bulk = self.bulk_bar(cx);
+        let table = div()
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .flex_col()
+            .child(div().flex_1().min_h_0().child(list))
+            .children(footer)
+            .children(bulk);
         div()
             .size_full()
             .flex()

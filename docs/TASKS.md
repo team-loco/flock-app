@@ -150,4 +150,4 @@ Spec column points at `design/`.
 | V21S | Multi-cluster scope: a set of selected clusters per pane; status bar with problems left and the multi-select cluster menu right | claude | v21-multi-scope | pr |
 | V21G | Grouping on list views: group picker, collapsible group header rows with counts and ✕/▲ totals | claude | v21-grouping | pr |
 | V21L | Logs v3: Logs page with sources panel, levels, volume histogram, query bar with match navigation | claude | v21-logs | pr |
-| V21R | Flock Resources: Deployments, Pods, Nodes, Helm releases across the selected clusters, Cluster column, bulk selection, Other clusters inspector section | claude | v21-resources | todo |
+| V21R | Flock Resources: Deployments, Pods, Nodes, Helm releases across the selected clusters, Cluster column, bulk selection, Other clusters inspector section | claude | v21-resources | pr |

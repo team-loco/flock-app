@@ -2,14 +2,20 @@ use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use flock_core::Snapshot;
 use flock_core::filter::{Search, Searchable, TextFilter};
+use flock_core::{ClusterId, Snapshot};
 
 type Items<T> = Box<dyn Fn(&Snapshot) -> &[T]>;
 
+enum Source<T: 'static> {
+    Shared(Items<T>),
+    Merged(Vec<T>),
+}
+
 pub struct SnapshotRows<T: 'static> {
     snapshot: Arc<Snapshot>,
-    items: Items<T>,
+    source: Source<T>,
+    clusters: Vec<ClusterId>,
     search: Search<T>,
 }
 
@@ -17,9 +23,42 @@ impl<T: 'static> SnapshotRows<T> {
     pub fn new(snapshot: &Arc<Snapshot>, items: impl Fn(&Snapshot) -> &[T] + 'static) -> Rc<Self> {
         Rc::new(Self {
             snapshot: Arc::clone(snapshot),
-            items: Box::new(items),
+            source: Source::Shared(Box::new(items)),
+            clusters: Vec::new(),
             search: Search::default(),
         })
+    }
+
+    pub fn across<'a>(
+        snapshot: &'a Arc<Snapshot>,
+        items: impl Fn(&'a Snapshot, &ClusterId) -> &'a [T],
+    ) -> Rc<Self>
+    where
+        T: Clone,
+    {
+        let mut merged = Vec::new();
+        let mut clusters = Vec::new();
+        for cluster in &snapshot.clusters {
+            let rows = items(snapshot, &cluster.id);
+            merged.extend_from_slice(rows);
+            clusters.extend(std::iter::repeat_n(cluster.id.clone(), rows.len()));
+        }
+        Rc::new(Self {
+            snapshot: Arc::clone(snapshot),
+            source: Source::Merged(merged),
+            clusters,
+            search: Search::default(),
+        })
+    }
+
+    pub fn cluster(&self, ix: usize) -> Option<&ClusterId> {
+        self.clusters.get(ix)
+    }
+
+    pub fn cluster_name(&self, ix: usize) -> &str {
+        let id = self.cluster(ix);
+        let summary = id.and_then(|id| self.snapshot.cluster(id));
+        summary.map_or_else(|| id.map_or("", ClusterId::as_str), |c| c.name.as_str())
     }
 
     pub fn empty() -> Rc<Self> {
@@ -27,7 +66,10 @@ impl<T: 'static> SnapshotRows<T> {
     }
 
     pub fn items(&self) -> &[T] {
-        (self.items)(&self.snapshot)
+        match &self.source {
+            Source::Shared(items) => items(&self.snapshot),
+            Source::Merged(items) => items,
+        }
     }
 
     pub fn snapshot(&self) -> &Arc<Snapshot> {
@@ -85,6 +127,14 @@ impl<T: 'static> SnapshotRow<T> {
 
     pub fn snapshot(&self) -> &Arc<Snapshot> {
         self.rows.snapshot()
+    }
+
+    pub fn cluster(&self) -> Option<&ClusterId> {
+        self.rows.cluster(self.ix)
+    }
+
+    pub fn cluster_name(&self) -> &str {
+        self.rows.cluster_name(self.ix)
     }
 }
 
@@ -169,6 +219,51 @@ pub(crate) mod tests {
             .map(|(ix, event)| (*ix, event.reason.as_str()))
             .collect();
         assert_eq!(found, [(0, "first")]);
+    }
+
+    #[test]
+    fn rows_across_clusters_merge_in_cluster_order_and_remember_their_cluster() {
+        let a = ClusterId::new("a");
+        let b = ClusterId::new("b");
+        let detail = |reasons: &[&str]| ClusterDetail {
+            events: reasons.iter().map(|r| event(r, Status::Ok)).collect(),
+            ..ClusterDetail::default()
+        };
+        let summary = |id: &ClusterId, name: &str| flock_core::ClusterSummary {
+            id: id.clone(),
+            name: name.into(),
+            status: Status::Ok,
+            state: String::new(),
+            distro: String::new(),
+            region: String::new(),
+            version: None,
+            nodes: None,
+            problems: flock_core::Counts::default(),
+            nav: BTreeMap::new(),
+            metrics: None,
+        };
+        let snapshot = Arc::new(Snapshot {
+            clusters: vec![summary(&b, "bee"), summary(&a, "ay")],
+            details: BTreeMap::from([
+                (a.clone(), detail(&["a1", "a2"])),
+                (b.clone(), detail(&["b1"])),
+            ]),
+            ..Snapshot::default()
+        });
+        let source = SnapshotRows::across(&snapshot, |snapshot, id| {
+            snapshot
+                .detail(id)
+                .map_or(&[][..], |detail| detail.events.as_slice())
+        });
+        let rows = source.all();
+        let shown: Vec<(&str, &str)> = rows
+            .iter()
+            .map(|row| (row.reason.as_str(), row.cluster_name()))
+            .collect();
+        assert_eq!(shown, [("b1", "bee"), ("a1", "ay"), ("a2", "ay")]);
+        assert_eq!(rows.get(1).and_then(SnapshotRow::cluster), Some(&a));
+        assert!(source.from(&snapshot));
+        assert_eq!(SnapshotRows::<Event>::empty().cluster(0), None);
     }
 
     #[test]

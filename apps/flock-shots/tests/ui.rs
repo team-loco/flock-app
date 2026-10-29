@@ -5649,3 +5649,128 @@ fn the_flux_inspector_yaml_row_shows_the_yaml_like_command_y() -> anyhow::Result
     assert!(ui.bounds("flux-edit-yaml").is_some());
     Ok(())
 }
+
+const FLOCK_DEPLOYMENTS: &str = "flock-resources-Deployment";
+
+fn flock_group_values(ui: &Ui) -> Vec<String> {
+    let groups = ui.read(Shell::flock_resource_groups);
+    groups.into_iter().map(|group| group.value).collect()
+}
+
+fn filter_matches(ui: &Ui) -> anyhow::Result<(usize, usize)> {
+    ui.read(|shell, cx| shell.filter_bar(cx)?.read(cx).matches())
+        .context("filter matches")
+}
+
+#[test]
+fn flock_deployments_list_the_selected_clusters_grouped_by_status() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::FlockDeployments)?;
+    let state = ui.state();
+    let pair = Scope::Several(vec![
+        ClusterId::new("prod-us-east"),
+        ClusterId::new("prod-eu-west"),
+    ]);
+    assert_eq!(state.location().page, Page::FlockDeployments);
+    assert_eq!(state.location().scope(), pair);
+    let values = flock_group_values(&ui);
+    assert_eq!(values.first().map(String::as_str), Some("Failing"));
+    let (shown, total) = filter_matches(&ui)?;
+    assert_eq!(shown, total);
+    let listed: usize = ["prod-us-east", "prod-eu-west"]
+        .iter()
+        .filter_map(|id| state.snapshot.detail(&ClusterId::new(*id)))
+        .map(|detail| detail.resources(flock_core::ResourceKind::Deployment).len())
+        .sum();
+    assert_eq!(total, listed);
+    assert!(ui.bounds("resource-footer").is_some());
+    Ok(())
+}
+
+#[test]
+fn flock_deployments_filter_by_cluster_group_by_cluster_and_select_in_bulk() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::FlockDeployments)?;
+    ui.click(selector(format!("{FLOCK_DEPLOYMENTS}-group")))?;
+    ui.click(selector(format!("{FLOCK_DEPLOYMENTS}-group-item-3")))?;
+    let mut clusters = flock_group_values(&ui);
+    clusters.sort();
+    assert_eq!(clusters, ["prod-eu-west", "prod-us-east"]);
+    let (_, total) = filter_matches(&ui)?;
+    ui.press("/")?;
+    ui.type_text("@cluster:prod-eu-west ")?;
+    let (shown, _) = filter_matches(&ui)?;
+    assert!(shown > 0 && shown < total, "{shown} of {total}");
+    assert_eq!(flock_group_values(&ui), ["prod-eu-west"]);
+    ui.press("escape")?;
+    assert!(ui.bounds("resource-bulk").is_none());
+    ui.click(selector(format!("{FLOCK_DEPLOYMENTS}-check-0")))?;
+    ui.click(selector(format!("{FLOCK_DEPLOYMENTS}-check-1")))?;
+    assert!(ui.bounds("resource-bulk").is_some());
+    assert!(ui.bounds("resource-bulk-action-0").is_some());
+    assert!(ui.bounds("resource-bulk-action-1").is_some());
+    ui.click("resource-bulk-clear")?;
+    assert!(ui.bounds("resource-bulk").is_none());
+    ui.click(selector(format!("{FLOCK_DEPLOYMENTS}-check-all")))?;
+    assert!(ui.bounds("resource-bulk").is_some());
+    ui.click(selector(format!("{FLOCK_DEPLOYMENTS}-check-all")))?;
+    assert!(ui.bounds("resource-bulk").is_none());
+    Ok(())
+}
+
+#[test]
+fn a_flock_deployment_shows_other_clusters_and_opens_in_its_own_cluster() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::FlockDeployments)?;
+    ui.press("/")?;
+    ui.type_text("@cluster:prod-us-east checkout-api")?;
+    ui.press("escape")?;
+    ui.click(selector(format!("{FLOCK_DEPLOYMENTS}-group")))?;
+    ui.click(selector(format!("{FLOCK_DEPLOYMENTS}-group-item-0")))?;
+    let row = (0..200)
+        .map(|ix| selector(format!("{FLOCK_DEPLOYMENTS}-row-{ix}")))
+        .find(|row| ui.bounds(row).is_some())
+        .context("a checkout-api row")?;
+    ui.click(row)?;
+    assert!(ui.bounds("resource-other-clusters").is_some());
+    ui.click("open-resource")?;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, Page::Deployments);
+    assert_eq!(location.cluster, Some(ClusterId::new("prod-us-east")));
+    let opened = location.resource.map(|target| target.name);
+    assert_eq!(opened.as_deref(), Some("checkout-api"));
+    Ok(())
+}
+
+#[test]
+fn flock_pods_nodes_and_helm_releases_list_a_cluster_column() -> anyhow::Result<()> {
+    for (screen, page, footer) in [
+        (Screen::FlockPods, Page::FlockPods, Some("pod-footer")),
+        (Screen::FlockNodes, Page::FlockNodes, Some("node-footer")),
+        (Screen::FlockReleases, Page::FlockReleases, None),
+    ] {
+        let mut ui = Ui::open(screen)?;
+        assert_eq!(ui.state().location().page, page);
+        let (shown, total) = filter_matches(&ui)?;
+        assert!(
+            shown > 0 && shown == total,
+            "{screen:?}: {shown} of {total}"
+        );
+        if let Some(footer) = footer {
+            assert!(ui.bounds(footer).is_some(), "{screen:?}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn the_failing_elsewhere_count_stays_readable_beside_the_pod_inspector() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    assert!(ui.read(Shell::dock_open).is_some());
+    let slot = bounds_of(&mut ui, "pod-failing-elsewhere-slot")?;
+    let count = bounds_of(&mut ui, "pod-failing-elsewhere")?;
+    assert!(
+        slot.size.width >= count.size.width,
+        "{:?} < {:?}",
+        slot.size.width,
+        count.size.width
+    );
+    Ok(())
+}

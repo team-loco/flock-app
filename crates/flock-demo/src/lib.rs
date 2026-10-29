@@ -36,6 +36,7 @@ use flock_core::{
 };
 
 const PROD_US_EAST: &str = "prod-us-east";
+const PROD_EU_WEST: &str = "prod-eu-west";
 const OCTET_BASE: usize = 4;
 
 pub struct DemoBackend;
@@ -169,7 +170,7 @@ pub fn snapshot() -> Snapshot {
         clusters: vec![
             prod_us_east(),
             cluster(ClusterSeed {
-                name: "prod-eu-west",
+                name: PROD_EU_WEST,
                 status: Status::Ok,
                 state: "Healthy",
                 distro: "EKS",
@@ -230,7 +231,10 @@ pub fn snapshot() -> Snapshot {
         forwards: Vec::new(),
         crds: BTreeMap::from([(ClusterId::new(PROD_US_EAST), crds::definitions())]),
         custom: crds::objects(&ClusterId::new(PROD_US_EAST)),
-        helm: helm::releases(&ClusterId::new(PROD_US_EAST)),
+        helm: helm::releases(&ClusterId::new(PROD_US_EAST))
+            .into_iter()
+            .chain(helm::unmanaged(&ClusterId::new(PROD_EU_WEST)))
+            .collect(),
         helm_details: helm::details(&ClusterId::new(PROD_US_EAST)),
     };
     simulate::recount_pods(&mut snapshot, &ClusterId::new(PROD_US_EAST));

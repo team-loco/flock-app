@@ -412,9 +412,13 @@ pub struct FailingElsewhere {
 }
 
 impl FailingElsewhere {
-    pub fn label(&self) -> String {
+    pub fn count_label(&self) -> String {
         let count = self.count;
-        format!("{FAILING_GLYPH} {count} failing in other namespaces {LINK_ARROW}")
+        format!("{FAILING_GLYPH} {count}")
+    }
+
+    pub fn place_label(&self) -> String {
+        format!("failing in other namespaces {LINK_ARROW}")
     }
 }
 
@@ -529,13 +533,13 @@ pub struct PodQuery {
 }
 
 impl PodQuery {
-    pub fn base(&self, pods: &[Pod], matched: &[usize], cluster: &ClusterId) -> Vec<usize> {
+    pub fn base(&self, pods: &[Pod], matched: &[usize], cluster: Option<&ClusterId>) -> Vec<usize> {
         matched
             .iter()
             .copied()
             .filter(|&ix| {
                 pods.get(ix).is_some_and(|pod| {
-                    &pod.cluster == cluster
+                    cluster.is_none_or(|cluster| &pod.cluster == cluster)
                         && self
                             .namespace
                             .as_ref()
@@ -818,9 +822,12 @@ mod tests {
                 namespace: Some("payments".into()),
             })
         );
+        let labels = one
+            .as_ref()
+            .map(|elsewhere| (elsewhere.count_label(), elsewhere.place_label()));
         assert_eq!(
-            one.map(|elsewhere| elsewhere.label()).as_deref(),
-            Some("✕ 1 failing in other namespaces →")
+            labels,
+            Some(("✕ 1".into(), "failing in other namespaces →".into()))
         );
         let mut ml = pending();
         ml.status = Status::Err;
@@ -924,7 +931,7 @@ mod tests {
         };
         let pods = std::slice::from_ref(pod);
         let matched = Search::default().matching(pods, text);
-        let matched = query.base(pods, &matched, &pod.cluster);
+        let matched = query.base(pods, &matched, Some(&pod.cluster));
         let expected = pod.matches(text);
         assert_eq!(matched.is_empty(), !expected, "{text:?}");
         !matched.is_empty()
@@ -974,7 +981,7 @@ mod tests {
             ..PodQuery::default()
         };
         let all: Vec<usize> = (0..pods.len()).collect();
-        let base = query.base(&pods, &all, &prod);
+        let base = query.base(&pods, &all, Some(&prod));
         let names: Vec<&str> = query
             .apply(&pods, &base)
             .iter()
@@ -986,9 +993,10 @@ mod tests {
             filter: PodFilter::Pending,
             ..PodQuery::default()
         };
-        let base = pending.base(&pods, &all, &prod);
+        let base = pending.base(&pods, &all, Some(&prod));
         assert_eq!(pending.apply(&pods, &base).len(), 1);
         assert_eq!(base.len(), 3);
+        assert_eq!(pending.base(&pods, &all, None).len(), 4);
     }
 
     #[test]

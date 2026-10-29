@@ -97,12 +97,15 @@ impl ViewPrefs {
     }
 
     pub fn grouping(&self, scope: &str, table: &str) -> Grouping {
+        self.saved_grouping(scope, table).unwrap_or_default()
+    }
+
+    pub fn saved_grouping(&self, scope: &str, table: &str) -> Option<Grouping> {
         self.file
             .scopes
             .get(scope)
             .and_then(|prefs| prefs.groups.get(table))
             .cloned()
-            .unwrap_or_default()
     }
 
     pub fn set_grouping(
@@ -160,10 +163,9 @@ pub fn set_column_widths(scope: &str, table: &str, widths: ColumnWidths, cx: &mu
     }
 }
 
-pub fn grouping(scope: &str, table: &str, cx: &App) -> Grouping {
+pub fn saved_grouping(scope: &str, table: &str, cx: &App) -> Option<Grouping> {
     cx.try_global::<ViewPrefs>()
-        .map(|prefs| prefs.grouping(scope, table))
-        .unwrap_or_default()
+        .and_then(|prefs| prefs.saved_grouping(scope, table))
 }
 
 pub fn set_grouping(scope: &str, table: &str, grouping: Grouping, cx: &mut App) {

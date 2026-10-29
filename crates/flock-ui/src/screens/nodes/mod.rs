@@ -1,6 +1,8 @@
+use std::borrow::Cow;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use flock_core::across::{CLUSTER_FACET, STATUS_FACET, keeps, split_query};
 use flock_core::emptiness::Noun;
 use flock_core::events::Event;
 use flock_core::filter::facets;
@@ -22,9 +24,9 @@ mod shell;
 
 use super::{NODE_KIND, ScreenEvent};
 use crate::kit::{
-    ActionMenu, Column, ConfirmDialog, DockState, FilterBar, FilterEvent, MenuItem, Meter,
-    MiniMeter, Presence, Select, SelectEvent, SnapshotRow, SnapshotRows, Table, TableEvent,
-    Terminal, chip_label, confirm, pane, slide_in, slide_out,
+    ActionMenu, BulkAction, BulkBar, Column, ConfirmDialog, DockState, FilterBar, FilterEvent,
+    Grouping, MenuItem, Meter, MiniMeter, Presence, Select, SelectEvent, SnapshotRow, SnapshotRows,
+    Table, TableEvent, Terminal, chip_label, confirm, pane, slide_in, slide_out,
 };
 use crate::screens::{ListShape, edit_item, empty_list, new_tab_item};
 use crate::theme::{
@@ -56,6 +58,14 @@ const INSPECTOR_ID: &str = "node-inspector";
 const SHELL_ID: &str = "node-shell";
 const SHELL_ITEM: &str = "Shell…";
 const ALL_PODS_ID: &str = "node-inspector-all-pods";
+const CLUSTER_WIDTH: Pixels = px(104.);
+const BULK_ID: &str = "node-bulk";
+const BULK_SEPARATOR: &str = ", ";
+const CORDON: &str = "Cordon";
+const UNCORDON: &str = "Uncordon";
+const CORDON_BODY: &str =
+    "New pods stop being scheduled on these nodes. Pods already running stay.";
+const UNCORDON_BODY: &str = "These nodes accept new pods again.";
 const ACTIONS_ID: &str = "node-actions";
 const FOOTER_NOTE: &str = "requests / allocatable";
 const USED: &str = "used";
@@ -64,6 +74,8 @@ const CPU_HEADING: &str = "CPU";
 const MEMORY_HEADING: &str = "Mem";
 
 pub struct NodesScreen {
+    across: bool,
+    clusters: usize,
     cluster: Option<ClusterId>,
     cluster_name: String,
     control_plane: Option<String>,
@@ -124,17 +136,39 @@ impl NodesScreen {
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let table = cx.new(|cx| {
-            Table::new("nodes", columns(), cx)
-                .row_key(|r: &NodeRow| r.node.name.clone().into())
-                .row_status(|r: &NodeRow| (r.node.status != Status::Ok).then_some(r.node.status))
-        });
+        Self::build(false, window, cx)
+    }
+
+    pub fn across(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(true, window, cx)
+    }
+
+    fn build(across: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let table = cx.new(|cx| node_table(across, cx));
         cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
-            let TableEvent::Selected(ix) = event else {
+            let ix = match *event {
+                TableEvent::Selected(ix) => ix,
+                TableEvent::Opened(ix) => ix,
+                TableEvent::Marked => {
+                    cx.notify();
+                    return;
+                }
+            };
+            let row = table.read(cx).row(ix).cloned();
+            let Some(row) = row else {
                 return;
             };
-            let name = table.read(cx).row(*ix).map(|r| r.node.name.clone());
-            this.select(name, cx);
+            if this.across {
+                this.cluster = row.node.cluster().cloned();
+            }
+            if this.across && matches!(event, TableEvent::Opened(_)) {
+                if let Some(cluster) = row.node.cluster() {
+                    let target = node_ref(cluster, &row.node.name);
+                    cx.emit(ScreenEvent::Command(Command::OpenResource(target)));
+                }
+                return;
+            }
+            this.select(Some(row.node.name.clone()), cx);
         })
         .detach();
         let pools = cx.new(|cx| {
@@ -150,7 +184,15 @@ impl NodesScreen {
             this.refresh_rows(cx);
         })
         .detach();
-        let filter = cx.new(|cx| FilterBar::new("node-filter", window, cx).scope(pools.clone()));
+        let group = table.read(cx).group_menu().clone();
+        let filter = cx.new(|cx| {
+            let bar = FilterBar::new("node-filter", window, cx);
+            if across {
+                bar.group(group)
+            } else {
+                bar.scope(pools.clone())
+            }
+        });
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh_rows(cx);
         })
@@ -167,6 +209,8 @@ impl NodesScreen {
         })
         .detach();
         Self {
+            across,
+            clusters: 0,
             cluster: None,
             cluster_name: String::new(),
             control_plane: None,
@@ -227,6 +271,24 @@ impl NodesScreen {
         self.refresh(cx);
     }
 
+    pub fn set_across(&mut self, snapshot: &Arc<Snapshot>, cx: &mut Context<Self>) {
+        if self.nodes.from(snapshot) {
+            return;
+        }
+        self.clusters = snapshot.clusters.len();
+        self.cluster_name = flock_core::overview::plural(self.clusters, "cluster", "clusters");
+        self.nodes = SnapshotRows::across(snapshot, |snapshot, id| {
+            snapshot
+                .detail(id)
+                .map_or(&[][..], |detail| detail.nodes.as_slice())
+        });
+        self.summary = NodeSummary::of(self.nodes.items());
+        if self.selected_node().is_none() {
+            self.selected = None;
+        }
+        self.refresh(cx);
+    }
+
     pub fn filter_bar(&self) -> &Entity<FilterBar> {
         &self.filter
     }
@@ -260,7 +322,15 @@ impl NodesScreen {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let nodes = self.nodes.items();
-        let facets = facets(nodes.iter());
+        let facets = if self.across {
+            let rows = &self.nodes;
+            flock_core::across::facets(nodes.iter().enumerate().map(|(ix, node)| {
+                let name = Cow::Borrowed(rows.cluster_name(ix));
+                (node, vec![(CLUSTER_FACET, Some(name))])
+            }))
+        } else {
+            facets(nodes.iter())
+        };
         self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh_rows(cx);
     }
@@ -272,11 +342,21 @@ impl NodesScreen {
             (bar.query().clone(), bar.chip())
         };
         let pool = self.pool.as_deref();
+        let (kept, extra) = if self.across {
+            split_query(&query, &[CLUSTER_FACET])
+        } else {
+            (query.clone(), flock_core::filter::TextFilter::default())
+        };
+        let rows = &self.nodes;
         let base: Vec<(usize, &Node)> = self
             .nodes
-            .matched_items(&query)
+            .matched_items(&kept)
             .into_iter()
             .filter(|(_, n)| pool.is_none_or(|pool| n.pool() == pool))
+            .filter(|(ix, _)| {
+                let name = Cow::Borrowed(rows.cluster_name(*ix));
+                keeps(&extra, &[(CLUSTER_FACET, Some(name))])
+            })
             .collect();
         let base_nodes: Vec<&Node> = base.iter().map(|(_, node)| *node).collect();
         let chips = NodeFilter::counts(&base_nodes)
@@ -307,7 +387,11 @@ impl NodesScreen {
             bar.set_chips(chips, cx);
             bar.set_matches(shown, total, cx);
         });
-        let scope = self.cluster.as_ref().map(|c| c.as_str().to_owned());
+        let scope = self
+            .cluster
+            .as_ref()
+            .filter(|_| !self.across)
+            .map(|c| c.as_str().to_owned());
         let words = query.words;
         let actions = self.row_actions(cx);
         self.table.update(cx, |table, cx| {
@@ -341,10 +425,11 @@ impl NodesScreen {
             return;
         };
         let name = name.clone();
+        let cluster = self.cluster.clone().filter(|_| self.across);
         self.table.update(cx, |table, cx| {
-            let position = (0..)
-                .map_while(|ix| table.row(ix))
-                .position(|r| r.node.name == name);
+            let position = (0..).map_while(|ix| table.row(ix)).position(|r| {
+                r.node.name == name && cluster.as_ref().is_none_or(|c| r.node.cluster() == Some(c))
+            });
             if position.is_some() {
                 table.select(position, cx);
             }
@@ -377,7 +462,13 @@ impl NodesScreen {
 
     fn selected_node(&self) -> Option<&Node> {
         let name = self.selected.as_ref()?;
-        self.nodes.items().iter().find(|n| &n.name == name)
+        let rows = &self.nodes;
+        let same_cluster = |ix: usize| !self.across || rows.cluster(ix) == self.cluster.as_ref();
+        rows.items()
+            .iter()
+            .enumerate()
+            .find(|(ix, n)| &n.name == name && same_cluster(*ix))
+            .map(|(_, node)| node)
     }
 
     fn events(&self) -> &[Event] {
@@ -432,7 +523,7 @@ impl NodesScreen {
         let confirm_destructive = self.confirm_destructive;
         let screen = cx.weak_entity();
         move |row: &NodeRow, _: &[&NodeRow]| {
-            let Some(cluster) = cluster.clone() else {
+            let Some(cluster) = row.node.cluster().or(cluster.as_ref()).cloned() else {
                 return Vec::new();
             };
             let node = &row.node;
@@ -468,7 +559,12 @@ impl Render for NodesScreen {
             .font_family(FONT_MONO)
             .text_size(TEXT_LABEL)
             .text_color(palette.mute)
-            .child(footer_line(self.shown, self.nodes.items().len()));
+            .child(if self.across {
+                across_footer(self.shown, self.nodes.items().len(), self.clusters)
+            } else {
+                footer_line(self.shown, self.nodes.items().len())
+            });
+        let bulk = self.bulk_bar(cx);
         let current = self.selected_node().cloned();
         let allocation = current
             .as_ref()
@@ -495,6 +591,7 @@ impl Render for NodesScreen {
             .flex()
             .child(
                 div()
+                    .relative()
                     .flex_1()
                     .min_w_0()
                     .flex()
@@ -502,11 +599,91 @@ impl Render for NodesScreen {
                     .child(self.filter.clone())
                     .child(div().flex_1().min_h_0().child(body))
                     .child(footer)
-                    .children(allocation),
+                    .children(allocation)
+                    .children(bulk),
             )
             .children(inspector);
         div().size_full().flex().flex_col().child(main).child(dock)
     }
+}
+
+impl NodesScreen {
+    fn bulk_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.across {
+            return None;
+        }
+        let marked: Vec<(Seen, bool)> = self
+            .table
+            .read(cx)
+            .marked_rows()
+            .into_iter()
+            .filter_map(|row| {
+                let cluster = row.node.cluster()?;
+                Some((node_target(&row.node, cluster), row.node.schedulable))
+            })
+            .collect();
+        if marked.is_empty() {
+            return None;
+        }
+        let cordon: Vec<Seen> = marked
+            .iter()
+            .filter(|(_, schedulable)| *schedulable)
+            .map(|(seen, _)| seen.clone())
+            .collect();
+        let uncordon: Vec<Seen> = marked
+            .iter()
+            .filter(|(_, schedulable)| !*schedulable)
+            .map(|(seen, _)| seen.clone())
+            .collect();
+        let table = self.table.clone();
+        let screen = cx.weak_entity();
+        let mut bar = BulkBar::new(BULK_ID, marked.len(), move |_, cx| {
+            table.update(cx, Table::clear_marks);
+        });
+        if !cordon.is_empty() {
+            let handler =
+                toggle_handler(screen.clone(), cordon, CORDON, CORDON_BODY, Command::Cordon);
+            bar = bar.action(BulkAction::new(CORDON, handler));
+        }
+        if !uncordon.is_empty() {
+            let handler =
+                toggle_handler(screen, uncordon, UNCORDON, UNCORDON_BODY, Command::Uncordon);
+            bar = bar.action(BulkAction::new(UNCORDON, handler));
+        }
+        Some(bar.into_any_element())
+    }
+}
+
+fn toggle_handler(
+    screen: WeakEntity<NodesScreen>,
+    seen: Vec<Seen>,
+    label: &'static str,
+    body: &'static str,
+    command: fn(Seen) -> Command,
+) -> impl Fn(&mut Window, &mut gpui::App) + 'static {
+    move |window, cx| {
+        let screen = screen.clone();
+        let targets = seen.clone();
+        let detail: Vec<String> = seen
+            .iter()
+            .map(|seen| format!("{} · {}", seen.target.cluster, seen.target.name))
+            .collect();
+        let title = format!("{label} · {}", targets.len());
+        let dialog = ConfirmDialog::new(title, body, label, move |_, cx| {
+            let _ = screen.update(cx, |_, cx| {
+                for target in &targets {
+                    cx.emit(ScreenEvent::Command(command(target.clone())));
+                }
+            });
+        })
+        .detail(detail.join(BULK_SEPARATOR));
+        confirm(dialog, window, cx);
+    }
+}
+
+fn across_footer(shown: usize, total: usize, clusters: usize) -> String {
+    let scope = flock_core::overview::plural(clusters, "cluster", "clusters");
+    format!("{shown} of {total} nodes · {scope}")
 }
 
 fn footer_line(shown: usize, total: usize) -> String {
@@ -763,13 +940,52 @@ fn request_cell(fraction: f32, palette: &Palette) -> AnyElement {
         .into_any_element()
 }
 
-fn columns() -> Vec<Column<NodeRow>> {
+fn node_table(across: bool, cx: &mut Context<Table<NodeRow>>) -> Table<NodeRow> {
+    if across {
+        let grouping = Grouping::new(|r: &NodeRow| r.node.status)
+            .by(STATUS_FACET, |r: &NodeRow| {
+                Some(Cow::Borrowed(r.node.state.as_str()))
+            })
+            .by(CLUSTER_FACET, |r: &NodeRow| {
+                Some(Cow::Borrowed(r.node.cluster_name()))
+            });
+        return Table::new("flock-nodes", columns(true), cx)
+            .row_key(|r: &NodeRow| format!("{}/{}", r.node.cluster_name(), r.node.name).into())
+            .row_status(|r: &NodeRow| (r.node.status != Status::Ok).then_some(r.node.status))
+            .checkboxes()
+            .default_group(CLUSTER_FACET)
+            .grouped(grouping, cx);
+    }
+    Table::new("nodes", columns(false), cx)
+        .row_key(|r: &NodeRow| r.node.name.clone().into())
+        .row_status(|r: &NodeRow| (r.node.status != Status::Ok).then_some(r.node.status))
+}
+
+fn columns(across: bool) -> Vec<Column<NodeRow>> {
+    let name = Column::text("Name", |r: &NodeRow| r.node.name.clone().into())
+        .highlight()
+        .mono()
+        .flex(NAME_WEIGHT, NAME_MIN)
+        .sort_by_key(|r: &NodeRow| r.node.name.clone());
+    let cluster = across.then(|| {
+        Column::colored_text(
+            "Cluster",
+            |r: &NodeRow| r.node.cluster_name().to_owned().into(),
+            |_, p| p.fg2,
+        )
+        .highlight()
+        .mono()
+        .fixed(CLUSTER_WIDTH)
+        .sort_by_key(|r: &NodeRow| r.node.cluster_name().to_owned())
+    });
+    std::iter::once(name)
+        .chain(cluster)
+        .chain(node_columns())
+        .collect()
+}
+
+fn node_columns() -> Vec<Column<NodeRow>> {
     vec![
-        Column::text("Name", |r: &NodeRow| r.node.name.clone().into())
-            .highlight()
-            .mono()
-            .flex(NAME_WEIGHT, NAME_MIN)
-            .sort_by_key(|r: &NodeRow| r.node.name.clone()),
         Column::colored_text(
             "Pool",
             |r: &NodeRow| r.node.pool().to_owned().into(),

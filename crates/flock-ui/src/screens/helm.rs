@@ -1,6 +1,8 @@
+use std::borrow::Cow;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use flock_core::across::{CLUSTER_FACET, keeps, split_query};
 use flock_core::emptiness::Noun;
 use flock_core::filter::{StatusFilter, facets};
 use flock_core::flux::HelmRevision;
@@ -33,6 +35,7 @@ const FLUX_MIN: Pixels = px(160.);
 const GLYPH_WIDTH: Pixels = px(24.);
 const DESCRIPTION_WEIGHT: f32 = 1.;
 const NOT_FLUX: &str = "—";
+const CLUSTER_WIDTH: Pixels = px(104.);
 
 type HelmRow = SnapshotRow<HelmRelease>;
 const OPEN_FLUX: &str = "Open Flux HelmRelease";
@@ -55,7 +58,16 @@ fn flux_label(release: &HelmRelease) -> String {
     )
 }
 
+fn cluster_name(release: &HelmRow) -> &str {
+    let id = &release.key.cluster;
+    release
+        .snapshot()
+        .cluster(id)
+        .map_or(id.as_str(), |cluster| cluster.name.as_str())
+}
+
 pub struct HelmReleasesScreen {
+    across: bool,
     cluster: Option<ClusterId>,
     cluster_name: String,
     helm: Rc<SnapshotRows<HelmRelease>>,
@@ -70,8 +82,30 @@ impl EventEmitter<ScreenEvent> for HelmReleasesScreen {}
 
 impl HelmReleasesScreen {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(false, window, cx)
+    }
+
+    pub fn across(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(true, window, cx)
+    }
+
+    fn build(across: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let table = cx.new(|cx| {
-            Table::new("helm-releases", columns(), cx)
+            if across {
+                let grouping = Grouping::facets(|r: &HelmRow| r.status)
+                    .by(CLUSTER_FACET, |r: &HelmRow| {
+                        Some(Cow::Borrowed(cluster_name(r)))
+                    });
+                return Table::new("flock-helm-releases", columns(true), cx)
+                    .click_opens()
+                    .row_key(|r: &HelmRow| {
+                        format!("{}/{}/{}", r.key.cluster, r.key.namespace, r.key.name).into()
+                    })
+                    .row_status(|r: &HelmRow| (r.status != Status::Ok).then_some(r.status))
+                    .default_group(CLUSTER_FACET)
+                    .grouped(grouping, cx);
+            }
+            Table::new("helm-releases", columns(false), cx)
                 .click_opens()
                 .row_key(|r: &HelmRow| format!("{}/{}", r.key.namespace, r.key.name).into())
                 .row_status(|r: &HelmRow| (r.status != Status::Ok).then_some(r.status))
@@ -93,6 +127,7 @@ impl HelmReleasesScreen {
             }),
         ];
         Self {
+            across,
             cluster: None,
             cluster_name: String::new(),
             helm: SnapshotRows::empty(),
@@ -155,16 +190,49 @@ impl HelmReleasesScreen {
         self.refresh(cx);
     }
 
+    pub fn set_across(&mut self, snapshot: &Arc<Snapshot>, cx: &mut Context<Self>) {
+        if self.helm.from(snapshot) {
+            return;
+        }
+        self.cluster_name =
+            flock_core::overview::plural(snapshot.clusters.len(), "cluster", "clusters");
+        self.helm = SnapshotRows::new(snapshot, |snapshot| &snapshot.helm);
+        self.releases = (0..snapshot.helm.len()).collect();
+        let facets = flock_core::across::facets(snapshot.helm.iter().map(|release| {
+            let name = snapshot
+                .cluster(&release.key.cluster)
+                .map_or(release.key.cluster.as_str(), |cluster| {
+                    cluster.name.as_str()
+                });
+            (release, vec![(CLUSTER_FACET, Some(Cow::Borrowed(name)))])
+        }));
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
+        self.refresh(cx);
+    }
+
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())
         };
+        let (kept, extra) = if self.across {
+            split_query(&query, &[CLUSTER_FACET])
+        } else {
+            (query.clone(), flock_core::filter::TextFilter::default())
+        };
+        let snapshot = self.helm.snapshot();
         let base: Vec<(usize, &HelmRelease)> = self
             .helm
-            .matched_items(&query)
+            .matched_items(&kept)
             .into_iter()
             .filter(|(ix, _)| self.releases.binary_search(ix).is_ok())
+            .filter(|(_, release)| {
+                let id = &release.key.cluster;
+                let name = snapshot
+                    .cluster(id)
+                    .map_or(id.as_str(), |cluster| cluster.name.as_str());
+                keeps(&extra, &[(CLUSTER_FACET, Some(Cow::Borrowed(name)))])
+            })
             .collect();
         let chips = StatusFilter::counts(base.iter().map(|(_, row)| row.status))
             .into_iter()
@@ -238,17 +306,35 @@ impl Render for HelmReleasesScreen {
     }
 }
 
-fn columns() -> Vec<Column<HelmRow>> {
-    vec![
-        Column::status_text(
-            "Name",
-            |r: &HelmRow| r.status,
-            |r: &HelmRow| r.key.name.clone().into(),
+fn columns(across: bool) -> Vec<Column<HelmRow>> {
+    let name = Column::status_text(
+        "Name",
+        |r: &HelmRow| r.status,
+        |r: &HelmRow| r.key.name.clone().into(),
+    )
+    .highlight()
+    .mono()
+    .flex(NAME_WEIGHT, NAME_MIN)
+    .sort_by_key(|r: &HelmRow| r.key.name.clone());
+    let cluster = across.then(|| {
+        Column::colored_text(
+            "Cluster",
+            |r: &HelmRow| cluster_name(r).to_owned().into(),
+            |_, p| p.fg2,
         )
         .highlight()
         .mono()
-        .flex(NAME_WEIGHT, NAME_MIN)
-        .sort_by_key(|r: &HelmRow| r.key.name.clone()),
+        .fixed(CLUSTER_WIDTH)
+        .sort_by_key(|r: &HelmRow| cluster_name(r).to_owned())
+    });
+    std::iter::once(name)
+        .chain(cluster)
+        .chain(release_columns())
+        .collect()
+}
+
+fn release_columns() -> Vec<Column<HelmRow>> {
+    vec![
         Column::colored_text(
             "Namespace",
             |r: &HelmRow| r.key.namespace.clone().into(),

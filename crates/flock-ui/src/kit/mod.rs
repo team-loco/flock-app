@@ -1,3 +1,4 @@
+mod bulk;
 mod button;
 mod chart;
 mod code;
@@ -39,6 +40,7 @@ mod tile;
 mod tooltip;
 mod viewport;
 
+pub use bulk::{BulkAction, BulkBar};
 pub use button::{Button, ButtonSize, ButtonVariant, Checkbox, IconButton, Segmented, Toggle};
 pub use chart::{CapacityMeter, LineChart, Meter, MiniMeter, Series, StackedBar};
 pub use code::CodeView;

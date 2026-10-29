@@ -137,6 +137,17 @@ pub fn releases(cluster: &ClusterId) -> Vec<HelmRelease> {
         .collect()
 }
 
+pub fn unmanaged(cluster: &ClusterId) -> Vec<HelmRelease> {
+    releases(cluster)
+        .into_iter()
+        .filter(|release| release.status == Status::Ok)
+        .map(|release| HelmRelease {
+            flux: None,
+            ..release
+        })
+        .collect()
+}
+
 pub fn details(cluster: &ClusterId) -> Vec<HelmReleaseDetail> {
     seeds()
         .into_iter()

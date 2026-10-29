@@ -672,7 +672,7 @@ mod tests {
         };
         assert_eq!(nav_counts(&rows, &cluster()), Counts::total(3).with_err(1));
         let all: Vec<usize> = (0..rows.len()).collect();
-        let base = pending.base(&rows, &all, &cluster());
+        let base = pending.base(&rows, &all, Some(&cluster()));
         assert_eq!(pending.apply(&rows, &base).len(), 1);
     }
 }

@@ -452,6 +452,14 @@ impl Live {
     }
 
     fn sync_helm(&mut self) {
+        if self.navigation.page == Page::FlockReleases {
+            for cluster in self.clusters.values_mut() {
+                if cluster.helm.is_none() {
+                    cluster.helm = Some(cluster.handle.subscribe(WatchKind::HelmStorage));
+                }
+            }
+            return;
+        }
         let shown = self
             .navigation
             .selected
@@ -1319,12 +1327,19 @@ impl Live {
     }
 
     fn viewing(&self, id: &ClusterId) -> Option<bool> {
+        let across: Vec<Page> = self
+            .navigations()
+            .filter_map(|navigation| navigation.page.across())
+            .collect();
         let mut selecting = self
             .navigations()
             .filter(|navigation| navigation.selected.as_ref() == Some(id))
             .peekable();
-        selecting.peek()?;
-        Some(selecting.any(|navigation| POD_ROW_PAGES.contains(&navigation.page)))
+        if selecting.peek().is_none() && across.is_empty() {
+            return None;
+        }
+        let pods = across.contains(&Page::Pods);
+        Some(pods || selecting.any(|navigation| POD_ROW_PAGES.contains(&navigation.page)))
     }
 
     fn away(&self, saved: &SavedCluster) -> &'static str {
@@ -2426,6 +2441,30 @@ mod tests {
             .map(|pages| pages.keys().copied().collect())
             .unwrap_or_default();
         assert_eq!(shown, vec![Page::Deployments]);
+    }
+
+    #[tokio::test]
+    async fn flock_resource_pages_assemble_every_cluster_and_watch_helm_everywhere() {
+        let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+        let mut live = test_live(dir.path());
+        for name in ["a", "b"] {
+            let context = context("/missing-v21r-test-kubeconfig", name);
+            let handle = live.manager.connect(context.clone());
+            live.clusters.insert(
+                context.id,
+                Connected::watching(ClusterId::new(name), handle),
+            );
+        }
+        assert!(live.snapshot().details.is_empty());
+        live.select_page(Page::FlockDeployments);
+        let snapshot = live.snapshot();
+        assert!(snapshot.details.contains_key(&ClusterId::new("a")));
+        assert!(snapshot.details.contains_key(&ClusterId::new("b")));
+        assert!(live.clusters.values().all(|cluster| cluster.helm.is_none()));
+        live.select_page(Page::FlockReleases);
+        assert!(live.clusters.values().all(|cluster| cluster.helm.is_some()));
+        live.select_page(Page::Overview);
+        assert!(live.snapshot().details.is_empty());
     }
 
     #[tokio::test]
