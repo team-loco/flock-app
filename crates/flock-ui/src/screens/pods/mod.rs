@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use flock_core::emptiness::Noun;
 use flock_core::filter::facets;
+use flock_core::grouping::Group;
 use flock_core::multilog::LabelSelector;
 use flock_core::pods::{
     Container, FailingElsewhere, Pod, PodFilter, PodPhase, PodQuery, Usage, filter_counts,
@@ -31,9 +32,9 @@ use streams::{LogSession, ShellSession, TERMINAL_ID};
 
 use crate::kit::{
     ActionMenu, Column, ConfirmDialog, DockState, FILTER_PLACEHOLDER, FilterBar, FilterEvent,
-    InputEvent, InspectorPane, Link, LogView, MenuItem, Select, SelectEvent, ShowAll, SnapshotRow,
-    SnapshotRows, StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label, confirm,
-    pane,
+    Grouping, InputEvent, InspectorPane, Link, LogView, MenuItem, Select, SelectEvent, ShowAll,
+    SnapshotRow, SnapshotRows, StatusText, Table, TableEvent, Terminal, TextFieldState, chip_label,
+    confirm, pane,
 };
 use crate::screens::{
     ALL_NAMESPACES, ListShape, chosen_namespace, edit_item, empty_list, new_tab_item,
@@ -117,6 +118,7 @@ impl PodsScreen {
                 .multi_select()
                 .click_opens()
                 .column_gap(SPACE_6)
+                .grouped(Grouping::facets(|pod: &PodRow| pod.status), cx)
         });
         let search = cx.new(|cx| TextFieldState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
         let namespace = cx.new(|cx| {
@@ -124,7 +126,8 @@ impl PodsScreen {
                 .mono()
                 .width(NAMESPACE_SELECT)
         });
-        let (filter, elsewhere) = filter_bar(&namespace, window, cx);
+        let group = table.read(cx).group_menu().clone();
+        let (filter, elsewhere) = filter_bar(&namespace, group, window, cx);
         let containers = cx.new(|cx| {
             Select::new("pod-container", Vec::new(), cx)
                 .mono()
@@ -300,6 +303,10 @@ impl PodsScreen {
 
     pub fn filter_bar(&self) -> &Entity<FilterBar> {
         &self.filter
+    }
+
+    pub fn groups(&self, cx: &gpui::App) -> Vec<Group> {
+        self.table.read(cx).groups().to_vec()
     }
 
     pub fn header_note(&self) -> String {
@@ -775,6 +782,7 @@ fn columns() -> Vec<Column<PodRow>> {
 
 fn filter_bar(
     namespace: &Entity<Select>,
+    group: Entity<ActionMenu>,
     window: &mut Window,
     cx: &mut Context<PodsScreen>,
 ) -> (Entity<FilterBar>, Entity<ElsewhereLink>) {
@@ -787,6 +795,7 @@ fn filter_bar(
         FilterBar::new("pod-filter", window, cx)
             .scope(namespace.clone())
             .aside(elsewhere.clone())
+            .group(group)
     });
     (filter, elsewhere)
 }

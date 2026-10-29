@@ -4,7 +4,8 @@ use clap::Parser;
 use flock::{AppearanceArg, Object, Preset, Screen, parse_object};
 use flock_core::ClusterId;
 use flock_core::app_settings::Highlight;
-use flock_shots::Highlights;
+use flock_shots::{Highlights, Ui};
+use flock_ui::kit::GROUP_SLOT;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -28,6 +29,8 @@ struct Args {
     primary: Option<Highlight>,
     #[arg(long, value_name = "PRESET|#HEX", value_parser = parse_highlight)]
     secondary: Option<Highlight>,
+    #[arg(long, value_name = "KEY", conflicts_with_all = ["state", "primary", "secondary"])]
+    group: Option<String>,
 }
 
 fn parse_highlight(input: &str) -> Result<Highlight, String> {
@@ -50,6 +53,14 @@ fn main() -> anyhow::Result<()> {
         object: args.object,
     };
     let appearance = args.appearance.into();
+    if let Some(key) = args.group {
+        let mut ui = Ui::with(args.screen, preset, appearance)?;
+        ui.click(GROUP_SLOT)?;
+        ui.press(&key)?;
+        ui.save_png(&args.out)?;
+        println!("{}", args.out.display());
+        return Ok(());
+    }
     let highlights = Highlights {
         primary: args.primary.unwrap_or_default(),
         secondary: args.secondary.unwrap_or_default(),

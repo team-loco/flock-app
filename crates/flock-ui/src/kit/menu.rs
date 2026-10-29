@@ -3,14 +3,15 @@ use std::rc::Rc;
 use gpui::{
     App, Context, ElementId, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent,
     MouseButton, ParentElement, Pixels, Point, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder, relative,
+    StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder, relative, svg,
 };
 
 use super::button::{Button, IconButton};
 use super::popover::{self, Dismissal, Step};
+use crate::assets::CHEVRON_DOWN;
 use crate::theme::{
-    ActiveTheme, CHECK_SLOT, CONTROL, FONT_MONO, MENU_WIDTH, RADIUS, ROW_MENU_PAD_Y, SPACE_1,
-    SPACE_4, SPACE_5, TEXT_BODY, TEXT_LABEL, TEXT_SMALL,
+    ActiveTheme, CHECK_SLOT, CONTROL, FONT_MONO, ICON, MENU_WIDTH, RADIUS, ROW_MENU_PAD_Y, RULE,
+    SPACE_1, SPACE_3, SPACE_4, SPACE_5, TEXT_BODY, TEXT_LABEL, TEXT_MONO, TEXT_SMALL,
 };
 
 const CHECK: &str = "✓";
@@ -80,11 +81,17 @@ enum Trigger {
         label: SharedString,
         shortcut: Option<SharedString>,
     },
+    Prefixed {
+        icon: &'static str,
+        prefix: SharedString,
+        label: SharedString,
+    },
 }
 
 pub struct ActionMenu {
     id: SharedString,
     trigger: Trigger,
+    width: Pixels,
     bordered: bool,
     items: Vec<MenuItem>,
     anchor: Option<Point<Pixels>>,
@@ -103,6 +110,7 @@ impl ActionMenu {
         Self {
             id: id.into(),
             trigger: Trigger::More,
+            width: MENU_WIDTH,
             bordered: true,
             items: Vec::new(),
             anchor: None,
@@ -126,6 +134,36 @@ impl ActionMenu {
             label: label.into(),
             shortcut,
         };
+        self
+    }
+
+    pub fn prefixed(
+        mut self,
+        icon: &'static str,
+        prefix: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+    ) -> Self {
+        self.trigger = Trigger::Prefixed {
+            icon,
+            prefix: prefix.into(),
+            label: label.into(),
+        };
+        self
+    }
+
+    pub fn set_label(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
+        let text = text.into();
+        match &mut self.trigger {
+            Trigger::Label { label, .. } => *label = text,
+            Trigger::Prefixed { label, .. } => *label = text,
+            Trigger::Hidden => return,
+            Trigger::More => return,
+        }
+        cx.notify();
+    }
+
+    pub fn width(mut self, width: Pixels) -> Self {
+        self.width = width;
         self
     }
 
@@ -233,9 +271,21 @@ impl ActionMenu {
                 }
             }
             "escape" => self.close(window, cx),
-            _ => return,
+            key => match self.shortcut_item(key, event.keystroke.modifiers) {
+                Some(ix) => self.activate(ix, window, cx),
+                None => return,
+            },
         }
         cx.stop_propagation();
+    }
+
+    fn shortcut_item(&self, key: &str, modifiers: gpui::Modifiers) -> Option<usize> {
+        if modifiers.modified() {
+            return None;
+        }
+        self.items
+            .iter()
+            .position(|item| !item.disabled && item.shortcut.as_deref() == Some(key))
     }
 
     fn render_item(&self, ix: usize, item: &MenuItem, cx: &mut Context<Self>) -> impl IntoElement {
@@ -336,6 +386,41 @@ impl ActionMenu {
                 };
                 button.into_any_element()
             }
+            Trigger::Prefixed {
+                icon,
+                prefix,
+                label,
+            } => {
+                let palette = *cx.palette();
+                let hover = palette.hover;
+                let glyph = |path: &'static str| svg().path(path).size(ICON).flex_none();
+                div()
+                    .debug_selector(|| self.id.to_string())
+                    .id(id)
+                    .flex()
+                    .items_center()
+                    .gap(SPACE_3)
+                    .h(CONTROL)
+                    .px(SPACE_4)
+                    .rounded(RADIUS)
+                    .border(RULE)
+                    .border_color(palette.line2)
+                    .font_family(FONT_MONO)
+                    .text_size(TEXT_MONO)
+                    .text_color(palette.fg)
+                    .whitespace_nowrap()
+                    .cursor_pointer()
+                    .when(self.open, |trigger| trigger.bg(palette.sel))
+                    .when(!self.open, |trigger| {
+                        trigger.hover(move |style| style.bg(hover))
+                    })
+                    .child(glyph(icon).text_color(palette.mute))
+                    .child(div().text_color(palette.mute).child(prefix.clone()))
+                    .child(label.clone())
+                    .child(glyph(CHEVRON_DOWN).text_color(palette.mute))
+                    .on_click(click)
+                    .into_any_element()
+            }
         }
     }
 }
@@ -380,7 +465,7 @@ impl Render for ActionMenu {
             .size_0();
             let surface = popover::surface("menu", &palette)
                 .debug_selector(|| format!("{}-surface", self.id))
-                .w(MENU_WIDTH)
+                .w(self.width)
                 .max_h(self.fit.height())
                 .overflow_y_scroll()
                 .track_scroll(&self.scroll)

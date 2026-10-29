@@ -16,6 +16,8 @@ use flock_core::{ClusterId, Page, Snapshot, Uid};
 const ROW_COUNTS: [usize; 3] = [1_000, 5_000, 20_000];
 const QUERY_ROW: usize = 42;
 const TOUCH_LABEL: &str = "flock-bench/generation";
+pub const GROUPED_TABLE: &str = "pods";
+pub const GROUPED_BY: &str = "namespace";
 
 #[derive(Clone, Copy)]
 pub struct Table {
@@ -95,6 +97,10 @@ pub fn workloads() -> impl Iterator<Item = Workload> {
             .into_iter()
             .map(move |rows| Workload { table, rows })
     })
+}
+
+pub fn grouped_workloads() -> impl Iterator<Item = Workload> {
+    workloads().filter(|workload| workload.table.name == GROUPED_TABLE)
 }
 
 pub fn query() -> String {

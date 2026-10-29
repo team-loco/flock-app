@@ -5,9 +5,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use criterion::Criterion;
 use flock_bench::live::{SESSION_TIMEOUT, Session, bench_scroll, bench_snapshots, viewed_cluster};
-use flock_bench::tables::{Table, Workload, query, workloads};
+use flock_bench::tables::{
+    GROUPED_BY, GROUPED_TABLE, Table, Workload, grouped_workloads, query, workloads,
+};
 use flock_bench::{MEASUREMENT, SAMPLES, WARM_UP};
 use flock_core::{Command, Page, Snapshot};
+use flock_ui::prefs::{self, Grouping};
 use gpui::{App, AppContext as _, BenchAppContext, Keystroke, point, px};
 
 const SCROLL_TURNS: u64 = 60;
@@ -36,6 +39,27 @@ fn matches(session: &Session, cx: &App) -> Option<(String, (usize, usize))> {
 
 #[gpui::bench(inputs = workloads(), input_name = "rows", group = "Snapshot apply")]
 fn snapshot_apply(workload: &Workload, cx: &mut BenchAppContext) {
+    apply_snapshots(workload, cx);
+}
+
+#[gpui::bench(
+    inputs = grouped_workloads(),
+    input_name = "rows",
+    group = "Snapshot apply grouped"
+)]
+fn grouped_snapshot_apply(workload: &Workload, cx: &mut BenchAppContext) {
+    let cluster = viewed_cluster();
+    let grouping = Grouping {
+        by: Some(GROUPED_BY.to_owned()),
+        ..Grouping::default()
+    };
+    cx.update(|app| prefs::set_grouping(cluster.as_str(), GROUPED_TABLE, grouping, app));
+    let session = apply_snapshots(workload, cx);
+    let groups = cx.read(|app| session.shell.read(app).pod_groups(app));
+    assert!(groups.len() > 1, "{groups:?}");
+}
+
+fn apply_snapshots(workload: &Workload, cx: &mut BenchAppContext) -> Session {
     let table = &workload.table;
     let cluster = viewed_cluster();
     let base = table.snapshot(&cluster, workload.rows);
@@ -55,6 +79,7 @@ fn snapshot_apply(workload: &Workload, cx: &mut BenchAppContext) {
         cx,
     );
     assert!(applied > 0);
+    session
 }
 
 #[gpui::bench(inputs = workloads(), input_name = "rows", group = "Table scroll")]
@@ -139,6 +164,6 @@ gpui::bench_group! {
         .sample_size(SAMPLES)
         .warm_up_time(WARM_UP)
         .measurement_time(MEASUREMENT);
-    targets = snapshot_apply, table_scroll, filter_typing
+    targets = snapshot_apply, grouped_snapshot_apply, table_scroll, filter_typing
 }
 gpui::bench_main!(benches);

@@ -1,12 +1,13 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::Instant;
 
 use flock_core::Status;
 use flock_core::filter::highlights;
+use flock_core::grouping::{Group, Grouped, Item, group};
 use flock_core::units::Amount;
 use gpui::{
     Animation, AnimationExt, AnyElement, App, AppContext as _, ClickEvent, Context, CursorStyle,
@@ -18,17 +19,19 @@ use gpui::{
 };
 
 use super::button::IconButton;
+use super::group::{GROUP_PREFIX, Grouping, Header as GroupHeader, UNGROUPED, option_label};
 use super::list_keys::{Nav, TypeAhead, find, typed};
 use super::menu::{ActionMenu, MenuItem};
 use super::selectable::{SelectableText, is_text_drag};
 use super::status::StatusGlyph;
 use super::text::{AmountText, Highlighted};
 use super::tooltip::Tooltip;
+use crate::assets::GROUP;
 use crate::prefs::{self, ColumnWidths, FLOCK_SCOPE};
 use crate::theme::{
     ActiveTheme, COLUMN_DIVIDER, COLUMN_HANDLE, COLUMN_MIN, FLASH, FONT_MONO, FONT_SANS,
-    GLYPH_SLOT, Palette, ROW_TABLE, ROW_TABLE_MIN, RULE, SPACE_4, SPACE_6, SPACE_8, TEXT_AXIS,
-    TEXT_BODY, TEXT_MONO, TEXT_SMALL,
+    GLYPH_SLOT, GROUP_MENU_WIDTH, Palette, ROW_TABLE, ROW_TABLE_MIN, RULE, SPACE_4, SPACE_6,
+    SPACE_8, TEXT_AXIS, TEXT_BODY, TEXT_MONO, TEXT_SMALL,
 };
 
 const SORT_ASCENDING: &str = "↑";
@@ -499,6 +502,13 @@ pub struct Table<R: 'static> {
     actions: Option<RowActions<R>>,
     menu: Entity<ActionMenu>,
     type_ahead: TypeAhead,
+    grouping: Option<Grouping<R>>,
+    group_by: Option<usize>,
+    collapsed: BTreeSet<String>,
+    groups: Vec<Group>,
+    items: Vec<Item>,
+    header_focus: Option<String>,
+    group_menu: Entity<ActionMenu>,
 }
 
 impl<R: 'static> EventEmitter<TableEvent> for Table<R> {}
@@ -511,6 +521,11 @@ impl<R: 'static> Table<R> {
     ) -> Self {
         let id: SharedString = id.into();
         let menu = cx.new(|cx| ActionMenu::context(format!("{id}-row-menu"), cx));
+        let group_menu = cx.new(|cx| {
+            ActionMenu::new(format!("{id}-group"), cx)
+                .prefixed(GROUP, GROUP_PREFIX, UNGROUPED)
+                .width(GROUP_MENU_WIDTH)
+        });
         let widths = stored_widths(FLOCK_SCOPE, &id, cx);
         Self {
             id,
@@ -548,7 +563,144 @@ impl<R: 'static> Table<R> {
             hovered: None,
             actions: None,
             menu,
+            grouping: None,
+            group_by: None,
+            collapsed: BTreeSet::new(),
+            groups: Vec::new(),
+            items: Vec::new(),
+            header_focus: None,
+            group_menu,
         }
+    }
+
+    pub fn grouped(mut self, grouping: Grouping<R>, cx: &mut Context<Self>) -> Self {
+        self.grouping = Some(grouping);
+        self.load_grouping(cx);
+        self.resort();
+        self
+    }
+
+    pub fn group_menu(&self) -> &Entity<ActionMenu> {
+        &self.group_menu
+    }
+
+    pub fn group_by(&mut self, facet: Option<&str>, cx: &mut Context<Self>) {
+        let option = facet.and_then(|facet| self.option_of(facet));
+        if option == self.group_by {
+            return;
+        }
+        self.group_by = option;
+        self.collapsed.clear();
+        self.header_focus = None;
+        self.save_grouping(cx);
+        self.sync_group_menu(cx);
+        self.regroup();
+        cx.notify();
+    }
+
+    pub fn toggle_group(&mut self, value: &str, cx: &mut Context<Self>) {
+        if !self.collapsed.remove(value) {
+            self.collapsed.insert(value.to_owned());
+        }
+        self.header_focus = Some(value.to_owned());
+        self.save_grouping(cx);
+        self.regroup();
+        cx.notify();
+    }
+
+    pub fn groups(&self) -> &[Group] {
+        &self.groups
+    }
+
+    fn option_of(&self, facet: &str) -> Option<usize> {
+        let options = &self.grouping.as_ref()?.options;
+        options.iter().position(|option| option.facet == facet)
+    }
+
+    fn group_facet(&self) -> Option<&SharedString> {
+        let options = &self.grouping.as_ref()?.options;
+        options.get(self.group_by?).map(|option| &option.facet)
+    }
+
+    fn load_grouping(&mut self, cx: &mut Context<Self>) {
+        if self.grouping.is_none() {
+            return;
+        }
+        let saved = prefs::grouping(&self.scope, &self.id, cx);
+        self.group_by = saved.by.as_deref().and_then(|facet| self.option_of(facet));
+        self.collapsed = saved.collapsed;
+        self.header_focus = None;
+        self.sync_group_menu(cx);
+    }
+
+    fn save_grouping(&self, cx: &mut App) {
+        let saved = prefs::Grouping {
+            by: self.group_facet().map(ToString::to_string),
+            collapsed: self.collapsed.clone(),
+        };
+        prefs::set_grouping(&self.scope, &self.id, saved, cx);
+    }
+
+    fn sync_group_menu(&self, cx: &mut Context<Self>) {
+        let Some(grouping) = &self.grouping else {
+            return;
+        };
+        let table = cx.weak_entity();
+        let choices = std::iter::once(None).chain(
+            grouping
+                .options
+                .iter()
+                .map(|option| Some(option.facet.clone())),
+        );
+        let items: Vec<MenuItem> = choices
+            .enumerate()
+            .map(|(ix, facet)| {
+                let label = facet
+                    .as_deref()
+                    .map_or_else(|| UNGROUPED.into(), option_label);
+                let checked = facet.as_ref() == self.group_facet();
+                let table = table.clone();
+                MenuItem::new(label, move |_, cx| {
+                    let facet = facet.clone();
+                    let table = table.clone();
+                    cx.defer(move |cx| {
+                        let _ = table.update(cx, |table, cx| table.group_by(facet.as_deref(), cx));
+                    });
+                })
+                .checked(checked)
+                .shortcut((ix + 1).to_string())
+            })
+            .collect();
+        let label = self
+            .group_facet()
+            .map_or_else(|| UNGROUPED.into(), |facet| option_label(facet));
+        self.group_menu.update(cx, |menu, cx| {
+            menu.set_items(items, cx);
+            menu.set_label(label, cx);
+        });
+    }
+
+    fn regroup(&mut self) {
+        let grouped = match (&self.grouping, self.group_by) {
+            (Some(grouping), Some(option)) => grouping.options.get(option).map(|option| {
+                let rows = &self.rows;
+                let entries = self.order.iter().filter_map(|&ix| {
+                    let row = rows.get(ix)?;
+                    Some((ix, (option.key)(row), (grouping.status)(row)))
+                });
+                group(entries, &self.collapsed)
+            }),
+            (Some(_), None) => None,
+            (None, _) => None,
+        };
+        let Grouped { groups, items } = grouped.unwrap_or_else(|| Grouped {
+            groups: Vec::new(),
+            items: self.order.iter().map(|&ix| Item::Row(ix)).collect(),
+        });
+        self.groups = groups;
+        self.items = items;
+        let focus = self.header_focus.take();
+        self.header_focus = focus.filter(|value| self.groups.iter().any(|g| &g.value == value));
     }
 
     pub fn row_actions(mut self, actions: impl Fn(&R, &[&R]) -> Vec<MenuItem> + 'static) -> Self {
@@ -567,6 +719,8 @@ impl<R: 'static> Table<R> {
         }
         self.widths = stored_widths(&scope, &self.id, cx);
         self.scope = scope;
+        self.load_grouping(cx);
+        self.regroup();
         cx.notify();
     }
 
@@ -908,7 +1062,7 @@ impl<R: 'static> Table<R> {
             Header::Sans => ROW_TABLE_MIN,
             Header::Mono => ROW_TABLE_MIN,
         };
-        let rows = u16::try_from(self.rows.len().max(1)).unwrap_or(u16::MAX);
+        let rows = u16::try_from(self.items.len().max(1)).unwrap_or(u16::MAX);
         header + self.row_height * f32::from(rows)
     }
 
@@ -931,6 +1085,7 @@ impl<R: 'static> Table<R> {
             return;
         }
         self.selected = index;
+        self.header_focus = None;
         if let Some(position) = self.position_of(self.selected) {
             self.scroll.scroll_to_item(position, ScrollStrategy::Center);
         }
@@ -1028,11 +1183,31 @@ impl<R: 'static> Table<R> {
             None => (0..self.rows.len()).collect(),
         };
         self.order_marks();
+        self.regroup();
     }
 
     fn position_of(&self, row: Option<usize>) -> Option<usize> {
         let row = row?;
-        self.order.iter().position(|&ix| ix == row)
+        self.items.iter().position(|&item| item == Item::Row(row))
+    }
+
+    fn focused_group(&self) -> Option<usize> {
+        let value = self.header_focus.as_ref()?;
+        self.groups.iter().position(|group| &group.value == value)
+    }
+
+    fn cursor(&self) -> Option<usize> {
+        match self.focused_group() {
+            Some(group) => self
+                .items
+                .iter()
+                .position(|&item| item == Item::Group(group)),
+            None => self.position_of(self.selected),
+        }
+    }
+
+    fn shows_selection(&self, ix: usize) -> bool {
+        (self.selected == Some(ix) && self.header_focus.is_none()) || self.is_marked(ix)
     }
 
     fn toggle_sort(&mut self, column: usize, cx: &mut Context<Self>) {
@@ -1058,6 +1233,7 @@ impl<R: 'static> Table<R> {
             return;
         }
         window.focus(&self.focus, cx);
+        self.header_focus = None;
         if self.marked.is_some() && event.modifiers().shift {
             self.toggle_mark(row);
             self.selected = Some(row);
@@ -1082,41 +1258,54 @@ impl<R: 'static> Table<R> {
     fn key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         if keystroke.key == "enter" && !keystroke.modifiers.modified() {
-            if let Some(row) = self.selected {
-                cx.emit(TableEvent::Opened(row));
+            let focused = self.focused_group().and_then(|g| self.groups.get(g));
+            match (focused.map(|group| group.value.clone()), self.selected) {
+                (Some(value), _) => self.toggle_group(&value, cx),
+                (None, Some(row)) => cx.emit(TableEvent::Opened(row)),
+                (None, None) => {}
             }
             cx.stop_propagation();
             return;
         }
-        let position = self.position_of(self.selected);
         let target = match (Nav::parse(keystroke), typed(keystroke)) {
-            (Some(nav), _) => nav.target(position, self.order.len()),
+            (Some(nav), _) => nav.target(self.cursor(), self.items.len()),
             (None, Some(text)) => self.jump_to_name(text),
             (None, None) => return,
         };
         cx.stop_propagation();
-        let Some(row) = target.and_then(|p| self.order.get(p).copied()) else {
+        let Some(position) = target else {
             return;
         };
-        self.selected = Some(row);
-        if let Some(position) = self.position_of(Some(row)) {
-            self.scroll
-                .scroll_to_item(position, ScrollStrategy::Nearest);
+        match self.items.get(position).copied() {
+            Some(Item::Row(row)) => {
+                self.selected = Some(row);
+                self.header_focus = None;
+                cx.emit(TableEvent::Selected(row));
+            }
+            Some(Item::Group(group)) => {
+                self.header_focus = self.groups.get(group).map(|g| g.value.clone());
+            }
+            None => return,
         }
-        cx.emit(TableEvent::Selected(row));
+        self.scroll
+            .scroll_to_item(position, ScrollStrategy::Nearest);
         cx.notify();
     }
 
     fn jump_to_name(&mut self, text: &str) -> Option<usize> {
         let key = self.name.clone().or_else(|| self.key.clone())?;
         let query = self.type_ahead.push(text, Instant::now()).to_owned();
-        let names: Vec<SharedString> = self
-            .order
+        let rows: Vec<(usize, SharedString)> = self
+            .items
             .iter()
-            .filter_map(|&ix| self.rows.get(ix))
-            .map(|row| key(row))
+            .enumerate()
+            .filter_map(|(position, item)| match item {
+                Item::Row(ix) => self.rows.get(*ix).map(|row| (position, key(row))),
+                Item::Group(_) => None,
+            })
             .collect();
-        find(&query, names.iter().map(SharedString::as_ref))
+        let found = find(&query, rows.iter().map(|(_, name)| name.as_ref()))?;
+        rows.get(found).map(|(position, _)| *position)
     }
 
     fn render_header(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
@@ -1209,12 +1398,41 @@ impl<R: 'static> Table<R> {
         let columns = self.columns.clone();
         let rows = self.rows.clone();
         range
-            .filter_map(|position| {
-                let ix = *self.order.get(position)?;
-                let row = rows.get(ix)?;
-                Some(self.render_row(ix, row, &columns, &palette, cx))
+            .filter_map(|position| match *self.items.get(position)? {
+                Item::Row(ix) => {
+                    let row = rows.get(ix)?;
+                    Some(self.render_row(ix, row, &columns, &palette, cx))
+                }
+                Item::Group(group) => self.render_group(group, &palette, cx),
             })
             .collect()
+    }
+
+    fn render_group(
+        &self,
+        ix: usize,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let group = self.groups.get(ix)?;
+        let facet = self.group_facet()?;
+        let header = GroupHeader {
+            id: format!("{}-group-{ix}", self.id).into(),
+            facet,
+            group,
+            focused: self.header_focus.as_ref() == Some(&group.value),
+            height: self.row_height,
+            inset: self.inset,
+            trailing: TRAILING,
+        };
+        let value = group.value.clone();
+        let element = header
+            .render(palette)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                window.focus(&this.focus, cx);
+                this.toggle_group(&value, cx);
+            }));
+        Some(element.into_any_element())
     }
 
     fn render_row(
@@ -1236,7 +1454,7 @@ impl<R: 'static> Table<R> {
                 .child(content)
                 .into_any_element();
         }
-        let selected = self.selected == Some(ix) || self.is_marked(ix);
+        let selected = self.shows_selection(ix);
         let status = self.status.as_ref().and_then(|status| status(row));
         let tint = status.and_then(|status| palette.tint(status));
         let hover = palette.hover;
@@ -1388,7 +1606,7 @@ impl<R: 'static> Render for Table<R> {
         } else {
             let list = uniform_list(
                 ElementId::Name(self.id.clone()),
-                self.order.len(),
+                self.items.len(),
                 cx.processor(Self::render_rows),
             )
             .track_scroll(&self.scroll);
@@ -1580,6 +1798,138 @@ mod tests {
         });
         let height = empty.read_with(cx, |table, _| table.fit_height());
         assert_eq!(height, ROW_TABLE);
+    }
+
+    type Member = (&'static str, &'static str, Status);
+
+    fn team_table(cx: &mut gpui::TestAppContext) -> Entity<Table<Member>> {
+        cx.new(|cx| {
+            let columns = vec![
+                Column::text("Name", |row: &Member| row.0.into()).sort_by_key(|row: &Member| row.0),
+            ];
+            let grouping = Grouping::new(|row: &Member| row.2).by("team", |row: &Member| {
+                Some(std::borrow::Cow::Borrowed(row.1))
+            });
+            Table::new("teams", columns, cx)
+                .row_key(|row: &Member| row.0.into())
+                .grouped(grouping, cx)
+                .rows(vec![
+                    ("b", "web", Status::Ok),
+                    ("a", "pay", Status::Err),
+                    ("c", "web", Status::Warn),
+                    ("d", "pay", Status::Ok),
+                ])
+        })
+    }
+
+    fn shown(table: &Table<Member>) -> Vec<String> {
+        table
+            .items
+            .iter()
+            .map(|item| match *item {
+                Item::Group(g) => table
+                    .groups
+                    .get(g)
+                    .map(|group| format!("[{}]", group.value))
+                    .unwrap_or_default(),
+                Item::Row(ix) => table
+                    .rows
+                    .get(ix)
+                    .map(|row| row.0.to_owned())
+                    .unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    #[gpui::test]
+    fn grouping_puts_headers_before_their_sorted_rows_and_hides_collapsed_groups(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let table = team_table(cx);
+        table.update(cx, |table, cx| {
+            assert_eq!(shown(table), ["b", "a", "c", "d"]);
+            table.group_by(Some("team"), cx);
+            assert_eq!(shown(table), ["[pay]", "a", "d", "[web]", "b", "c"]);
+            table.toggle_sort(0, cx);
+            table.toggle_sort(0, cx);
+            assert_eq!(shown(table), ["[pay]", "d", "a", "[web]", "c", "b"]);
+            table.toggle_group("pay", cx);
+            assert_eq!(shown(table), ["[pay]", "[web]", "c", "b"]);
+            assert_eq!(table.fit_height(), ROW_TABLE_MIN + ROW_TABLE * 4.);
+            table.group_by(None, cx);
+            assert_eq!(shown(table), ["d", "c", "b", "a"]);
+        });
+    }
+
+    #[gpui::test]
+    fn grouping_and_collapsed_groups_are_remembered_per_scope(cx: &mut gpui::TestAppContext) {
+        let table = team_table(cx);
+        table.update(cx, |table, cx| {
+            table.set_scope("prod", cx);
+            table.group_by(Some("team"), cx);
+            table.toggle_group("web", cx);
+            table.set_scope("staging", cx);
+            assert_eq!(shown(table), ["b", "a", "c", "d"]);
+            table.set_scope("prod", cx);
+            assert_eq!(shown(table), ["[pay]", "a", "d", "[web]"]);
+        });
+        let reopened = team_table(cx);
+        reopened.update(cx, |table, cx| {
+            table.set_scope("prod", cx);
+            assert_eq!(shown(table), ["[pay]", "a", "d", "[web]"]);
+        });
+    }
+
+    fn press(table: &Entity<Table<Member>>, key: &str, cx: &mut gpui::TestAppContext) {
+        let keystroke =
+            gpui::Keystroke::parse(key).unwrap_or_else(|error| panic!("{key}: {error}"));
+        let event = KeyDownEvent {
+            keystroke,
+            is_held: false,
+            prefer_character_input: false,
+        };
+        table.update(cx, |table, cx| table.key_down(&event, cx));
+    }
+
+    #[gpui::test]
+    fn arrow_keys_land_on_headers_and_enter_toggles_them(cx: &mut gpui::TestAppContext) {
+        let table = team_table(cx);
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let seen = events.clone();
+        let _subscription = cx.update(|cx| {
+            cx.subscribe(&table, move |_, event: &TableEvent, _| {
+                seen.borrow_mut().push(*event);
+            })
+        });
+        table.update(cx, |table, cx| table.group_by(Some("team"), cx));
+        press(&table, "down", cx);
+        assert_eq!(
+            table
+                .read_with(cx, |t, _| t.header_focus.clone())
+                .as_deref(),
+            Some("pay")
+        );
+        press(&table, "enter", cx);
+        assert_eq!(
+            table.read_with(cx, |t, _| shown(t)),
+            ["[pay]", "[web]", "b", "c"]
+        );
+        press(&table, "down", cx);
+        press(&table, "down", cx);
+        assert_eq!(
+            table.read_with(cx, |t, _| t.selected_row().map(|r| r.0)),
+            Some("b")
+        );
+        assert_eq!(table.read_with(cx, |t, _| t.header_focus.clone()), None);
+        press(&table, "enter", cx);
+        assert_eq!(
+            *events.borrow(),
+            [TableEvent::Selected(0), TableEvent::Opened(0)]
+        );
+        press(&table, "up", cx);
+        press(&table, "enter", cx);
+        assert_eq!(table.read_with(cx, |t, _| shown(t)), ["[pay]", "[web]"]);
+        assert_eq!(events.borrow().len(), 2);
     }
 
     fn marked_names(table: &Table<&'static str>) -> Vec<&'static str> {

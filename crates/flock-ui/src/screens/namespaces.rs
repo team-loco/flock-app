@@ -15,8 +15,8 @@ use gpui::{
 use super::{ListShape, ScreenEvent, empty_list};
 use crate::kit::status_symbols;
 use crate::kit::{
-    Column, FilterBar, FilterEvent, SnapshotRow, SnapshotRows, StatusGlyph, Table, TableEvent,
-    chip_label,
+    Column, FilterBar, FilterEvent, Grouping, SnapshotRow, SnapshotRows, StatusGlyph, Table,
+    TableEvent, chip_label,
 };
 use crate::theme::{ActiveTheme, FONT_MONO, GLYPH_SLOT, Palette, SPACE_4};
 
@@ -61,6 +61,7 @@ impl NamespacesScreen {
             Table::new("namespaces", columns(), cx)
                 .click_opens()
                 .row_key(|n: &NamespaceRow| n.name.clone().into())
+                .grouped(Grouping::facets(|n: &NamespaceRow| n.status), cx)
         });
         cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
             let TableEvent::Opened(ix) = *event else {
@@ -72,7 +73,8 @@ impl NamespacesScreen {
             }
         })
         .detach();
-        let filter = cx.new(|cx| FilterBar::new("namespace-filter", window, cx));
+        let group = table.read(cx).group_menu().clone();
+        let filter = cx.new(|cx| FilterBar::new("namespace-filter", window, cx).group(group));
         cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| {
             this.refresh_rows(cx);
         })

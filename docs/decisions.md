@@ -589,3 +589,17 @@ Settled; change only with a new entry that says why.
     `name:*text*` first and up to six matching values per facet, `@` lists facets, `@facet:`
     lists all of that facet's values; every value row has a hover "−" that adds it excluded.
     Esc closes the menu first and clears the filter second.
+58. **List grouping is one facet, picked beside the query bar** (design v2.1 `FleetBrowse`): list
+    tables that use `FilterSpec` offer a "group" button at the right end of the FilterBar. Its
+    menu lists None, then the namespace (when the spec has one) and the spec's declared facets in
+    spec order; label is left out because a row has many labels. The current choice has a check
+    and each option shows its menu position as a key hint that picks it while the menu is open.
+    One facet at a time: the board's nested `status › namespace` grouping is not built. Rows go
+    under the facet's first value, rows without one under "—". Groups order by problems (any ✕,
+    then any ▲, then none), then by value, with "—" last in its tier; the sort applies inside each
+    group. A header row (same height as rows) shows the disclosure chevron, the facet key in mono
+    mute (shown although the board hides it for a single key), the value, the row count and
+    non-zero ✕ and ▲ totals; clicking it or Enter on it collapses or expands the group. ↑ / ↓ land
+    on headers as well as rows; a header with the keyboard on it takes the selection fill, and
+    Enter on a row still opens it. The choice and the collapsed groups are stored per table and
+    scope in `view.json` beside column widths (#115); changing the facet expands every group.

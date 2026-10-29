@@ -21,9 +21,9 @@ use gpui::{
 use super::ScreenEvent;
 use crate::kit::{
     Button, CONDITIONS, CodeView, Column, ConditionTable, ConfirmDialog, EmptyState, FilterBar,
-    FilterEvent, IconButton, Inspector, MenuItem, PanelSection, Presence, Select, SelectEvent,
-    ShowAll, Skeleton, SnapshotRow, SnapshotRows, Table, TableEvent, chip_label, confirm,
-    reason_cell, reason_tooltip, slide_in, slide_out,
+    FilterEvent, Grouping, IconButton, Inspector, MenuItem, PanelSection, Presence, Select,
+    SelectEvent, ShowAll, Skeleton, SnapshotRow, SnapshotRows, Table, TableEvent, chip_label,
+    confirm, reason_cell, reason_tooltip, slide_in, slide_out,
 };
 use crate::screens::edit::{EDIT_KEYS, EditYaml, YAML_CONTEXT, edit_command};
 use crate::screens::related::{OnPick, Pick, RELATED, inspector_section};
@@ -355,6 +355,7 @@ impl ResourcesScreen {
             Table::new(format!("resources-{}", kind.name()), columns(kind), cx)
                 .row_key(|r: &ResourceRow| format!("{}/{}", r.namespace, r.name).into())
                 .row_status(|r: &ResourceRow| (r.status != Status::Ok).then_some(r.status))
+                .grouped(Grouping::facets(|r: &ResourceRow| r.status), cx)
         });
         let subscription = cx.subscribe(&table, |this, table, event: &TableEvent, cx| {
             let ix = match *event {
@@ -427,6 +428,8 @@ impl ResourcesScreen {
         let scope = self.cluster.as_ref().map(|c| c.as_str().to_owned());
         let actions = self.row_actions(cx);
         let words = query.words.clone();
+        let group = table.read(cx).group_menu().clone();
+        self.filter.update(cx, |bar, cx| bar.set_group(group, cx));
         table.update(cx, |table, cx| {
             if let Some(scope) = scope {
                 table.set_scope(scope, cx);

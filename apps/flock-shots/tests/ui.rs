@@ -692,6 +692,65 @@ fn marking_pods_for_logs_moves_nothing() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn second_group_gap(ui: &mut Ui) -> anyhow::Result<Option<Pixels>> {
+    let first = bounds_of(ui, "pods-group-0")?;
+    let gap = ui
+        .bounds("pods-group-1")
+        .map(|second| second.origin.y - first.origin.y);
+    Ok(gap)
+}
+
+fn rows_tall(ui: &mut Ui, rows: usize) -> anyhow::Result<Pixels> {
+    let height = bounds_of(ui, "pods-group-0")?.size.height;
+    Ok(height * f32::from(u16::try_from(rows + 1)?))
+}
+
+#[test]
+fn grouping_pods_by_namespace_adds_collapsible_headers_with_counts() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.click("pod-namespace")?;
+    ui.click("pod-namespace-option-0")?;
+    let (shown, _) = ui
+        .read(|shell, cx| shell.filter_bar(cx)?.read(cx).matches())
+        .context("pod matches")?;
+    assert!(ui.bounds("pods-group-0").is_none());
+    ui.click("pods-group")?;
+    ui.click("pods-group-item-1")?;
+    let groups = ui.read(Shell::pod_groups);
+    assert!(groups.len() > 1, "{groups:?}");
+    assert_eq!(groups.iter().map(|g| g.rows).sum::<usize>(), shown);
+    let problems = |g: &flock_core::grouping::Group| (g.errors == 0, g.errors + g.warnings == 0);
+    assert!(groups.is_sorted_by_key(problems), "{groups:?}");
+    let first = groups.first().cloned().context("first group")?;
+    assert!(first.errors > 0, "{first:?}");
+    let expanded = Some(rows_tall(&mut ui, first.rows)?);
+    let collapsed = Some(rows_tall(&mut ui, 0)?);
+    let gap = second_group_gap(&mut ui)?;
+    assert!(gap.is_none() || gap == expanded, "{gap:?}");
+    ui.click("pods-group-0")?;
+    let groups = ui.read(Shell::pod_groups);
+    assert!(
+        groups
+            .first()
+            .is_some_and(|g| g.collapsed && g.rows == first.rows)
+    );
+    assert_eq!(second_group_gap(&mut ui)?, collapsed);
+    ui.press("enter")?;
+    let gap = second_group_gap(&mut ui)?;
+    assert!(gap.is_none() || gap == expanded, "{gap:?}");
+    assert!(ui.read(Shell::pod_groups).iter().all(|g| !g.collapsed));
+    ui.press("down")?;
+    ui.press("up")?;
+    ui.press("enter")?;
+    assert_eq!(second_group_gap(&mut ui)?, collapsed);
+    ui.click("pods-group")?;
+    ui.press("1")?;
+    assert_eq!(ui.read(Shell::pod_groups), []);
+    assert!(ui.bounds("pods-group-0").is_none());
+    assert!(ui.bounds("pods-row-0").is_some());
+    Ok(())
+}
+
 #[test]
 fn hovering_an_open_popover_does_not_hover_the_rows_beneath() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Resources)?;

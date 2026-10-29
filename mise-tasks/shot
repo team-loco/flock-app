@@ -5,6 +5,7 @@
 #USAGE flag "--state <state>" help="loading, connecting, empty, error, metrics-local, metrics-empty or metrics-error: render the screen in that page state"
 #USAGE flag "--primary <highlight>" help="primary highlight: blue, purple, teal, green, orange, pink, graphite or a #hex colour"
 #USAGE flag "--secondary <highlight>" help="secondary highlight: a preset name or a #hex colour"
+#USAGE flag "--group <key>" help="group the list by the group menu option with this hint key (1 None, 2 the first facet, …)"
 set -euo pipefail
 
 screen="${usage_screen:-${1:?screen}}"
@@ -13,8 +14,10 @@ root="$(git rev-parse --show-toplevel)"
 state="${usage_state:-}"
 primary="${usage_primary:-}"
 secondary="${usage_secondary:-}"
-tag="${primary:+-${primary#\#}}${secondary:+-sel-${secondary#\#}}"
+group="${usage_group:-}"
+tag="${primary:+-${primary#\#}}${secondary:+-sel-${secondary#\#}}${group:+-group-$group}"
 out="$root/target/shots/$screen${state:+-$state}$tag-$appearance.png"
 
 cargo run -p flock-shots --quiet ${FLOCK_FEATURES:+--features "$FLOCK_FEATURES"} -- "$screen" "$appearance" --out "$out" \
-  ${state:+--state "$state"} ${primary:+--primary "$primary"} ${secondary:+--secondary "$secondary"}
+  ${state:+--state "$state"} ${primary:+--primary "$primary"} ${secondary:+--secondary "$secondary"} \
+  ${group:+--group "$group"}

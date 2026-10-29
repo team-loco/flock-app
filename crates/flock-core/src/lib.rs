@@ -19,6 +19,7 @@ pub mod flux;
 pub mod flux_graph;
 pub mod fuzzy;
 pub mod gitops;
+pub mod grouping;
 pub mod helm;
 pub mod history;
 pub mod home;

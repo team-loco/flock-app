@@ -17,6 +17,7 @@ pub const DASH: &str = "icons/dash.svg";
 pub const CLUSTERS: &str = "icons/clusters.svg";
 pub const CLUSTER: &str = "icons/cluster.svg";
 pub const SEARCH: &str = "icons/search.svg";
+pub const GROUP: &str = "icons/group.svg";
 
 const ICONS: &[(&str, &[u8])] = &[
     (
@@ -46,6 +47,7 @@ const ICONS: &[(&str, &[u8])] = &[
     (DASH, include_bytes!("../assets/icons/dash.svg")),
     (CLUSTERS, include_bytes!("../assets/icons/clusters.svg")),
     (CLUSTER, include_bytes!("../assets/icons/cluster.svg")),
+    (GROUP, include_bytes!("../assets/icons/group.svg")),
 ];
 
 pub(crate) const PLEX_SANS_SEMIBOLD: &[u8] =
