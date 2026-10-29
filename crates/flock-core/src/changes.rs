@@ -54,6 +54,15 @@ impl ChangesLog {
         self.commits.iter().find(|c| c.sha.starts_with(sha))
     }
 
+    pub fn restrict(&mut self, keep: &[ClusterId]) {
+        self.lanes.retain(|lane| keep.contains(&lane.cluster));
+        for commit in &mut self.commits {
+            commit
+                .rollout
+                .retain(|rollout| keep.contains(&rollout.cluster));
+        }
+    }
+
     pub fn visible(&self, query: &TextFilter, cluster: Option<&ClusterId>) -> Vec<&Commit> {
         self.commits
             .iter()

@@ -612,10 +612,7 @@ mod tests {
             Some(COMPARE_KEY)
         );
         assert_eq!(label("Show the Flux owner").as_deref(), Some(OWNER_KEY));
-        assert_eq!(
-            label("All clusters in this tab").as_deref(),
-            Some(crate::shell::switcher::ALL_CLUSTERS_KEY)
-        );
+        assert_eq!(label("All clusters in this tab").as_deref(), Some("⌘0"));
     }
 
     #[test]

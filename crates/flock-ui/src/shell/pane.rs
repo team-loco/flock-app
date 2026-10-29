@@ -2,8 +2,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use flock_core::history::Location;
 use flock_core::tabs::{Divider, PaneId, TabId};
-use flock_core::{Command, Sender, Snapshot};
+use flock_core::{ClusterId, Command, Sender, Snapshot};
 use gpui::{AppContext as _, Context, Entity, EventEmitter, ScrollHandle, Subscription, Window};
 
 use super::Shell;
@@ -64,6 +65,30 @@ impl Drop for Scope {
     }
 }
 
+struct FlockView {
+    source: Arc<Snapshot>,
+    restriction: Option<Vec<ClusterId>>,
+    view: Arc<Snapshot>,
+}
+
+impl FlockView {
+    fn of(source: &Arc<Snapshot>, restriction: Option<&[ClusterId]>) -> Self {
+        let view = match restriction {
+            Some(keep) => Arc::new(source.restricted(keep)),
+            None => Arc::clone(source),
+        };
+        Self {
+            source: Arc::clone(source),
+            restriction: restriction.map(<[ClusterId]>::to_vec),
+            view,
+        }
+    }
+
+    fn is_for(&self, source: &Arc<Snapshot>, restriction: Option<&[ClusterId]>) -> bool {
+        Arc::ptr_eq(&self.source, source) && self.restriction.as_deref() == restriction
+    }
+}
+
 pub(super) struct PaneScreens {
     pub(super) pane: PaneId,
     pub(super) navigation: Entity<crate::kit::HeaderNavigation>,
@@ -92,6 +117,7 @@ pub(super) struct PaneScreens {
     pub(super) strip: ScrollHandle,
     pub(super) shown: Option<TabId>,
     pub(super) motion: super::tab_motion::StripMotion,
+    flock_view: Option<FlockView>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -183,11 +209,34 @@ impl PaneScreens {
             strip: ScrollHandle::default(),
             shown: None,
             motion: super::tab_motion::StripMotion::default(),
+            flock_view: None,
             _subscriptions: subscriptions,
         }
     }
 
     pub(super) fn set_snapshot(&self, snapshot: &Arc<Snapshot>, cx: &mut Context<Shell>) {
+        self.settings
+            .update(cx, |settings, cx| settings.set_snapshot(snapshot, cx));
+        self.pods.update(cx, |pods, _| pods.set_snapshot(snapshot));
+    }
+
+    pub(super) fn show_scope(
+        &mut self,
+        source: &Arc<Snapshot>,
+        location: &Location,
+        cx: &mut Context<Shell>,
+    ) {
+        let scope = location.scope();
+        let restriction = scope.restriction();
+        if self
+            .flock_view
+            .as_ref()
+            .is_some_and(|shown| shown.is_for(source, restriction))
+        {
+            return;
+        }
+        let shown = FlockView::of(source, restriction);
+        let snapshot = &shown.view;
         self.flock
             .update(cx, |flock, cx| flock.set_snapshot(snapshot, cx));
         self.problems
@@ -198,9 +247,11 @@ impl PaneScreens {
             .update(cx, |gitops, cx| gitops.set_snapshot(snapshot, cx));
         self.flux_events
             .update(cx, |screen, cx| screen.set_snapshot(snapshot, cx));
-        self.settings
-            .update(cx, |settings, cx| settings.set_snapshot(snapshot, cx));
-        self.pods.update(cx, |pods, _| pods.set_snapshot(snapshot));
+        self.flock_view = Some(shown);
+    }
+
+    pub(super) fn scoped_snapshot(&self) -> Option<&Arc<Snapshot>> {
+        self.flock_view.as_ref().map(|shown| &shown.view)
     }
 }
 
@@ -357,7 +408,7 @@ impl Shell {
         self.screens(self.state.panes().focused_index())
     }
 
-    pub(super) fn location_at(&self, ix: usize) -> &flock_core::history::Location {
+    pub(super) fn location_at(&self, ix: usize) -> &Location {
         match self.state.panes().panes().get(ix) {
             Some(pane) => pane.active().location(),
             None => unreachable!("every pane has its screens"),

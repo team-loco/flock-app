@@ -1448,7 +1448,8 @@ fn live_the_switcher_moves_between_clusters_and_back_to_all() -> anyhow::Result<
         visit(&mut ui, Page::Deployments)?;
     }
     ui.click("cluster-switcher")?;
-    ui.click("switcher-row-1")?;
+    ui.hover("switcher-row-1")?;
+    ui.press("enter")?;
     anyhow::ensure!(
         ui.state()
             .location()

@@ -6,6 +6,7 @@ use crate::crd::CrdKey;
 use crate::helm::HelmKey;
 use crate::history::Location;
 use crate::resource::page_for_kind;
+use crate::scope::Scope;
 use crate::tabs::{Panes, SavedWindow, TabId};
 use crate::{
     AddClusterStep, CheckLine, ClusterId, ContextRef, ExecRequest, FluxAction, FluxKey, FluxKind,
@@ -251,8 +252,8 @@ impl AppState {
         true
     }
 
-    pub fn retarget(&mut self, cluster: Option<&ClusterId>) {
-        let target = retargeted(self.location(), cluster, &self.snapshot);
+    pub fn retarget(&mut self, scope: &Scope) {
+        let target = retargeted(self.location(), scope, &self.snapshot);
         let tab = self.panes.active_mut();
         *tab.location_mut() = target;
         tab.record();
@@ -412,7 +413,7 @@ const fn is_inspection(command: &Command) -> bool {
 
 fn select_page(location: &mut Location, page: Page) {
     if page.is_flock() {
-        *location = Location::flock(page);
+        *location = Location::flock_in(page, &location.scope());
     } else if let Some(cluster) = location.cluster.clone() {
         *location = Location::page_on(cluster, page);
     }
@@ -475,9 +476,15 @@ fn exists(resource: &ResourceRef, snapshot: &Snapshot) -> bool {
         || snapshot.resources.iter().any(|r| &r.resource == resource)
 }
 
-fn retargeted(location: &Location, cluster: Option<&ClusterId>, snapshot: &Snapshot) -> Location {
-    let Some(id) = cluster else {
-        return Location::default();
+fn retargeted(location: &Location, scope: &Scope, snapshot: &Snapshot) -> Location {
+    let Some(id) = scope.cluster() else {
+        let on_flock = location.cluster.is_none() && location.page.is_flock();
+        let page = if on_flock {
+            location.page
+        } else {
+            Page::Overview
+        };
+        return Location::flock_in(page, scope);
     };
     if snapshot.cluster(id).is_none() {
         return location.clone();
@@ -811,7 +818,7 @@ mod tests {
         assert_eq!(location.workload(), None);
         let title = crate::tabs::title(&location, &state.snapshot);
         assert_eq!(title.label, "Logs");
-        state.retarget(Some(&ClusterId::new("b")));
+        state.retarget(&Scope::One(ClusterId::new("b")));
         assert_eq!(state.location().page, Page::ClusterOverview);
         assert_eq!(state.location().logs, None);
         let Ok(selector) = crate::multilog::LabelSelector::parse("app=cart") else {
@@ -823,7 +830,7 @@ mod tests {
             selector,
         };
         state.apply(&Command::FollowLogs(selected.clone()));
-        state.retarget(Some(&ClusterId::new("b")));
+        state.retarget(&Scope::One(ClusterId::new("b")));
         assert_eq!(
             state.location().logs,
             Some(selected.on(&ClusterId::new("b")))
@@ -938,12 +945,12 @@ mod tests {
         assert_eq!(state.location().detail(), None);
         let title = crate::tabs::title(state.location(), &state.snapshot);
         assert_eq!(title.label, "tls");
-        state.retarget(Some(&ClusterId::new("b")));
+        state.retarget(&Scope::One(ClusterId::new("b")));
         assert_eq!(
             state.location(),
             &Location::crd_on(ClusterId::new("b"), key.clone())
         );
-        state.retarget(Some(&ClusterId::new("c")));
+        state.retarget(&Scope::One(ClusterId::new("c")));
         assert_eq!(state.location().page, Page::ClusterOverview);
         assert_eq!(state.location().crd, None);
     }
@@ -967,7 +974,7 @@ mod tests {
         );
         let title = crate::tabs::title(&location, &state.snapshot);
         assert_eq!(title.label, "checkout-api");
-        state.retarget(Some(&ClusterId::new("b")));
+        state.retarget(&Scope::One(ClusterId::new("b")));
         assert_eq!(
             state.location(),
             &Location::page_on(ClusterId::new("b"), Page::Releases)
@@ -1189,25 +1196,25 @@ mod tests {
         state.update(Update::Snapshot(Arc::new(snapshot)));
         state.apply(&Command::SelectCluster(Some(ClusterId::new("a"))));
         state.apply(&Command::SelectPage(Page::Events));
-        state.retarget(Some(&ClusterId::new("b")));
+        state.retarget(&Scope::One(ClusterId::new("b")));
         assert_eq!(
             state.location(),
             &Location::page_on(ClusterId::new("b"), Page::Events)
         );
         state.apply(&Command::OpenResource(deployment("a")));
-        state.retarget(Some(&ClusterId::new("b")));
+        state.retarget(&Scope::One(ClusterId::new("b")));
         assert_eq!(state.location().resource, Some(deployment("b")));
         assert_eq!(state.location().page, Page::Deployments);
-        state.retarget(Some(&ClusterId::new("c")));
+        state.retarget(&Scope::One(ClusterId::new("c")));
         assert_eq!(
             state.location(),
             &Location::page_on(ClusterId::new("c"), Page::ClusterOverview)
         );
-        state.retarget(Some(&ClusterId::new("nope")));
+        state.retarget(&Scope::One(ClusterId::new("nope")));
         assert_eq!(state.location().cluster, Some(ClusterId::new("c")));
-        state.retarget(None);
+        state.retarget(&Scope::All);
         assert_eq!(state.location(), &Location::default());
-        state.retarget(Some(&ClusterId::new("a")));
+        state.retarget(&Scope::One(ClusterId::new("a")));
         assert_eq!(
             state.location(),
             &Location::page_on(ClusterId::new("a"), Page::ClusterOverview)
@@ -1216,17 +1223,37 @@ mod tests {
     }
 
     #[test]
+    fn several_clusters_keep_the_flock_page_and_leave_cluster_pages_for_the_home() {
+        let mut state = loaded();
+        let two = Scope::Several(vec![ClusterId::new("a"), ClusterId::new("b")]);
+        state.apply(&Command::SelectPage(Page::Problems));
+        state.retarget(&two);
+        assert_eq!(state.location().page, Page::Problems);
+        assert_eq!(state.location().scope(), two);
+        state.apply(&Command::SelectPage(Page::GitOps));
+        assert_eq!(state.location().scope(), two);
+        state.retarget(&Scope::All);
+        assert_eq!(state.location(), &Location::flock(Page::GitOps));
+        state.retarget(&Scope::One(ClusterId::new("a")));
+        state.apply(&Command::SelectPage(Page::Events));
+        state.retarget(&two);
+        assert_eq!(state.location(), &Location::flock_in(Page::Overview, &two));
+        state.apply(&Command::SelectCluster(None));
+        assert_eq!(state.location().scope(), Scope::All);
+    }
+
+    #[test]
     fn retargeting_a_flux_object_falls_back_to_the_overview_when_it_is_missing() {
         let (mut state, key) = with_flux();
         state.apply(&Command::OpenFluxObject(key.clone()));
-        state.retarget(Some(&ClusterId::new("a")));
+        state.retarget(&Scope::One(ClusterId::new("a")));
         assert_eq!(
             state.location(),
             &Location::page_on(ClusterId::new("a"), Page::ClusterOverview)
         );
-        state.retarget(Some(&key.cluster));
+        state.retarget(&Scope::One(key.cluster.clone()));
         state.apply(&Command::OpenFluxObject(key.clone()));
-        state.retarget(Some(&key.cluster));
+        state.retarget(&Scope::One(key.cluster.clone()));
         assert_eq!(state.location().flux_object, Some(key));
     }
 

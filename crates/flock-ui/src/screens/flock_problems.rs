@@ -91,6 +91,13 @@ impl FleetProblemsScreen {
         }
     }
 
+    pub fn problem_clusters(&self) -> Vec<ClusterId> {
+        self.problems
+            .iter()
+            .map(|problem| problem.target.cluster.clone())
+            .collect()
+    }
+
     pub fn filter_bar(&self) -> &Entity<FilterBar> {
         &self.filter
     }

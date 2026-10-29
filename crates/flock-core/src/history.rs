@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crd::CrdKey;
 use crate::helm::HelmKey;
+use crate::scope::Scope;
 use crate::{ClusterId, Command, FluxKey, LogTarget, Page, ResourceRef, Snapshot, WorkloadKind};
 
 pub const HISTORY_LIMIT: usize = 50;
@@ -9,6 +10,8 @@ pub const HISTORY_LIMIT: usize = 50;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Location {
     pub cluster: Option<ClusterId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clusters: Vec<ClusterId>,
     pub page: Page,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resource: Option<ResourceRef>,
@@ -36,6 +39,7 @@ impl Location {
     pub const fn flock(page: Page) -> Self {
         Self {
             cluster: None,
+            clusters: Vec::new(),
             page,
             resource: None,
             flux_object: None,
@@ -44,6 +48,24 @@ impl Location {
             crd: None,
             helm: None,
             inspecting: None,
+        }
+    }
+
+    pub fn flock_in(page: Page, scope: &Scope) -> Self {
+        Self {
+            clusters: scope
+                .restriction()
+                .map(<[ClusterId]>::to_vec)
+                .unwrap_or_default(),
+            ..Self::flock(page)
+        }
+    }
+
+    pub fn scope(&self) -> Scope {
+        match &self.cluster {
+            Some(id) => Scope::One(id.clone()),
+            None if self.clusters.len() > 1 => Scope::Several(self.clusters.clone()),
+            None => Scope::All,
         }
     }
 

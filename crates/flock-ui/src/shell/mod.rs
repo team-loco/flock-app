@@ -11,6 +11,7 @@ mod tabs;
 use flock_core::history::Location;
 use flock_core::palette::{COMPARE_KEY, LOGS_KEY, OWNER_KEY, resource_commands};
 use flock_core::resource::short_kind;
+use flock_core::scope::Scope;
 use flock_core::settings::NamespaceSelection;
 use flock_core::{
     AddClusterStep, AppState, ClusterId, ClusterSummary, Command, Page, Preferences, Sender,
@@ -305,8 +306,9 @@ impl Shell {
         self.palette.update(cx, |palette, cx| {
             palette.set_context(snapshot, current, cx);
         });
+        let scope = self.state.location().scope();
         self.switcher.update(cx, |switcher, cx| {
-            switcher.set_context(&snapshot.clusters, current, cx);
+            switcher.set_context(&snapshot.clusters, scope, cx);
         });
     }
 
@@ -342,6 +344,14 @@ impl Shell {
 
     pub fn switcher_open(&self, cx: &App) -> bool {
         self.switcher.read(cx).is_open()
+    }
+
+    pub fn problem_clusters(&self, cx: &App) -> Vec<ClusterId> {
+        self.focused_screens().problems.read(cx).problem_clusters()
+    }
+
+    pub fn switcher_label(&self, cx: &App) -> String {
+        self.switcher.read(cx).label()
     }
 
     pub fn cluster_settings_selection(&self, cx: &App) -> Option<ClusterId> {
@@ -579,8 +589,8 @@ impl Shell {
         crate::session::record(self.window_id, saved, cx);
     }
 
-    pub(super) fn retarget(&mut self, cluster: Option<&ClusterId>, cx: &mut Context<Self>) {
-        self.state.retarget(cluster);
+    pub(super) fn retarget(&mut self, scope: &Scope, cx: &mut Context<Self>) {
+        self.state.retarget(scope);
         self.show_active(cx);
     }
 
@@ -709,7 +719,12 @@ impl Shell {
         }
     }
 
-    fn sync_page(&self, cx: &mut Context<Self>) {
+    fn sync_page(&mut self, cx: &mut Context<Self>) {
+        let source = &self.state.snapshot;
+        let panes = self.state.panes().panes();
+        for (pane, screens) in panes.iter().zip(self.panes.iter_mut()) {
+            screens.show_scope(source, pane.active().location(), cx);
+        }
         for ix in 0..self.panes.len() {
             self.sync_pane(ix, cx);
         }
@@ -982,7 +997,7 @@ impl Render for Shell {
                 this.refresh_view(cx);
             }))
             .on_action(cx.listener(|this, _: &ShowAllClusters, _, cx| {
-                this.retarget(None, cx);
+                this.retarget(&Scope::All, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleClusterSwitcher, window, cx| {
                 this.switcher
