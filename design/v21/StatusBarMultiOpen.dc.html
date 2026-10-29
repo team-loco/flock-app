@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Status bar, cluster menu open</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>body{margin:0}</style>
+</helmet>
+<div style="width:100%;height:380px;display:flex;flex-direction:column;justify-content:flex-end;background:{{bg}}">
+  <dc-import name="StatusBarMulti" theme="{{theme}}" open="{{ true }}" hint-size="100%,26px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"$preview":{"width":1440,"height":380}}'>
+class Component extends DCLogic {
+  renderVals() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    return { theme: t, bg: t === 'light' ? '#FFFFFF' : '#111317' };
+  }
+}
+</script>
+</body>
+</html>

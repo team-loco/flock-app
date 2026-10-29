@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pane tab strip</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div role="tablist" aria-label="Open views" style="{{vars}}font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:12.5px;width:100%;height:32px;box-sizing:border-box;display:flex;align-items:stretch;background:var(--chrome);border-bottom:1px solid var(--line);overflow:hidden">
+  <sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+    <button role="tab" aria-selected="{{t.selected}}" onClick="{{t.pick}}" style="{{t.style}}">
+      <sc-if value="{{t.hasGlyph}}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:{{t.gc}}"><svg viewBox="0 0 16 16" aria-hidden="true" style="width:{{t.g__i.w}};margin-right:{{t.g__i.m}};height:1em;vertical-align:-.14em;overflow:visible;flex:none"><path d="{{t.g__i.d}}" fill="{{t.g__i.f}}" stroke="{{t.g__i.s}}" stroke-dasharray="{{t.g__i.da}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>{{t.g__i.t}}</span></sc-if>
+      <span>{{t.label}}</span>
+      <span style="color:var(--mute)">{{t.ctx}}</span>
+      <span aria-hidden="true" style="width:14px;text-align:center;color:var(--mute);font-size:13px;{{t.closeStyle}}">×</span>
+    </button>
+  </sc-for>
+  <span style="flex:1"></span>
+  <button aria-label="Split right" title="Split right  ⌘\" style="width:32px;border:0;background:transparent;color:var(--mute);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1"/><path d="M8 2.5v11"/></svg></button>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["system","dark","light"],"default":"system"},"tabs":{"editor":null,"default":[{"kind":"deploy","label":"checkout-api","ctx":"us-east","active":true},{"kind":"logs","label":"x2lqp","ctx":"us-east"}]},"focused":{"editor":"boolean","default":true},"onPick":{"editor":null},"$preview":{"width":720,"height":32}}'>
+class Component extends DCLogic {
+  vars() {
+    let t = this.props.theme ?? 'system';
+    if (t !== 'dark' && t !== 'light') { try { t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch (e) { t = 'dark'; } }
+    const D = '--editor:#111317;--panel:#15181D;--chrome:#1A1D22;--raise:#20242A;--hover:#1D2127;--line:#262A30;--line2:#323740;--guide:#2A2E35;--fg:#DCDFE4;--fg2:#B3B9C3;--mute:#8E96A3;--sep:#4C525C;--sel:#1F2C40;--selfg:#F2F6FC;--selline:#3A5A8C;--acc:#74ADFF;--onacc:#0C1220;--ok:#48C78E;--warn:#E8B04B;--err:#F26D6D;--sus:#9AA2AE;--okbg:rgba(72,199,142,.10);--errbg:rgba(242,109,109,.11);--warnbg:rgba(232,176,75,.10);--accbg:rgba(116,173,255,.12);--addbg:rgba(72,199,142,.12);--delbg:rgba(242,109,109,.13);--addfg:#7FDDB2;--delfg:#FF9C9C;--shadow:rgba(0,0,0,.5);color-scheme:dark;';
+    const L = '--editor:#FFFFFF;--panel:#F6F7F8;--chrome:#EEEFF1;--raise:#E9EBEE;--hover:#F1F2F4;--line:#E1E3E7;--line2:#CFD3D9;--guide:#E4E6EA;--fg:#1D2027;--fg2:#3B414B;--mute:#5F6774;--sep:#A5ABB5;--sel:#DCE7FA;--selfg:#0D2850;--selline:#8DB0EA;--acc:#1F5FD1;--onacc:#FFFFFF;--ok:#167A4C;--warn:#935800;--err:#C53030;--sus:#6B7280;--okbg:rgba(22,122,76,.08);--errbg:rgba(197,48,48,.07);--warnbg:rgba(147,88,0,.08);--accbg:rgba(31,95,209,.08);--addbg:rgba(22,122,76,.10);--delbg:rgba(197,48,48,.09);--addfg:#0F5E3A;--delfg:#A12626;--shadow:rgba(20,24,32,.18);color-scheme:light;';
+    return { theme: t, vars: t === 'light' ? L : D };
+  }
+  __icons(o) {
+    const P = {"✕":["M8 1.6 14.4 8 8 14.4 1.6 8Z","currentColor","none","none"],"▲":["M8 2.2 14.3 13.25H1.7Z M8 6.5v3.1 M8 11.4v.1","none","currentColor","none"],"●":["M8 4.4a3.6 3.6 0 1 1 0 7.2a3.6 3.6 0 1 1 0-7.2Z","currentColor","none","none"],"◐":["M8 2a6 6 0 1 1-6 6","none","currentColor","none"],"‖":["M6 3.75v8.5M10 3.75v8.5","none","currentColor","none"],"○":["M8 2.25a5.75 5.75 0 1 1 0 11.5a5.75 5.75 0 1 1 0-11.5Z","none","currentColor","2.1 2.1"]};
+    const mk = (s) => { const c = s.charAt(0); if (!P[c]) return { d: '', f: 'none', s: 'none', da: 'none', w: '0', m: '0', t: s }; const r = s.slice(1).replace(/^\s+/, ''); const p = P[c]; return { d: p[0], f: p[1], s: p[2], da: p[3], w: '1em', m: r ? '.35em' : '0', t: r }; };
+    const seen = new Set();
+    const walk = (x) => { if (!x || typeof x !== 'object' || seen.has(x)) return; seen.add(x); if (Array.isArray(x)) { x.forEach(walk); return; } Object.keys(x).forEach((k) => { const v = x[k]; if (typeof v === 'string') { if (!k.endsWith('__i')) x[k + '__i'] = mk(v); } else walk(v); }); };
+    walk(o); return o;
+  }
+  renderVals() { return this.__icons(this.__rv()); }
+  __rv() {
+    const focused = this.props.focused ?? true;
+    const list = this.props.tabs ?? [];
+    const onPick = this.props.onPick;
+    const tabs = list.map((t, i) => {
+      const on = !!t.active;
+      let style = 'display:flex;align-items:center;gap:6px;padding:0 8px 0 12px;border:0;border-right:1px solid var(--line);font-family:inherit;font-size:12.5px;white-space:nowrap;cursor:pointer;';
+      style += on ? 'background:var(--editor);color:var(--fg);margin-bottom:-1px;' + (focused ? 'box-shadow:inset 0 -2px 0 var(--acc);' : '') : 'background:transparent;color:var(--mute);';
+      return {
+        kind: t.kind || '', label: t.label || '', ctx: t.ctx || (t.kind === 'fleet' ? 'All clusters' : ''),
+        g: t.g || '', gc: t.gc || 'var(--mute)', hasGlyph: !!t.g,
+        selected: on ? 'true' : 'false', style,
+        closeStyle: on ? 'opacity:1;' : 'opacity:0;',
+        pick: () => { if (onPick) onPick(i); }
+      };
+    });
+    return { vars: this.vars().vars, tabs };
+  }
+}
+</script>
+</body>
+</html>
