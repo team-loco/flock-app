@@ -233,6 +233,14 @@ impl LogTarget {
         }
     }
 
+    pub fn across(&self, clusters: &[ClusterId]) -> Vec<Self> {
+        match self {
+            Self::Pods { .. } => vec![self.clone()],
+            Self::Workload(_) => clusters.iter().map(|cluster| self.on(cluster)).collect(),
+            Self::Selector { .. } => clusters.iter().map(|cluster| self.on(cluster)).collect(),
+        }
+    }
+
     pub fn follows_new_pods(&self) -> bool {
         match self {
             Self::Workload(_) => true,
@@ -456,6 +464,27 @@ mod tests {
             log.insert(at.map(Stamp), SourceId(*source), *text);
         }
         log.iter().map(|entry| entry.item).collect()
+    }
+
+    #[test]
+    fn workloads_follow_every_selected_cluster_and_picked_pods_stay_put() {
+        let clusters = [
+            ClusterId::new("kind-fleet-a"),
+            ClusterId::new("kind-fleet-b"),
+        ];
+        let workload = LogTarget::Workload(deployment("checkout"));
+        let spread: Vec<ClusterId> = workload
+            .across(&clusters)
+            .iter()
+            .map(|target| target.cluster().clone())
+            .collect();
+        assert_eq!(spread, clusters);
+        let picked = LogTarget::pods(&[ResourceRef {
+            kind: "Pod".into(),
+            ..deployment("checkout-x2lqp")
+        }]);
+        let picked = picked.map(|target| target.across(&clusters).len());
+        assert_eq!(picked, Some(1));
     }
 
     #[test]

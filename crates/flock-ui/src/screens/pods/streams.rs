@@ -86,6 +86,26 @@ pub fn log_file_name(pod: &str, container: &str) -> String {
     format!("{pod}-{container}.log")
 }
 
+pub(crate) fn save_log(name: &str, text: String, cx: &mut App) {
+    let directory = std::env::home_dir().unwrap_or_default().join(DOWNLOADS);
+    let chosen = cx.prompt_for_new_path(&directory, Some(name));
+    cx.spawn(async move |cx| {
+        let Ok(Ok(Some(path))) = chosen.await else {
+            return;
+        };
+        let detail = path.display().to_string();
+        let result = std::fs::write(&path, text);
+        cx.update(|cx| {
+            let message = match result {
+                Ok(()) => Toast::new(Status::Ok, SAVED).detail(detail),
+                Err(error) => Toast::new(Status::Err, SAVE_FAILED).detail(error.to_string()),
+            };
+            toast(message, cx);
+        });
+    })
+    .detach();
+}
+
 pub fn previous_banner(last: &Termination) -> String {
     let terminated = last
         .ago
@@ -412,23 +432,7 @@ impl PodsScreen {
             (Some(pod), None) => log_file_name(&pod.name, LOGS_LABEL),
             (None, _) => return,
         };
-        let directory = std::env::home_dir().unwrap_or_default().join(DOWNLOADS);
-        let chosen = cx.prompt_for_new_path(&directory, Some(&name));
-        cx.spawn(async move |_, cx| {
-            let Ok(Ok(Some(path))) = chosen.await else {
-                return;
-            };
-            let detail = path.display().to_string();
-            let result = std::fs::write(&path, text);
-            cx.update(|cx| {
-                let message = match result {
-                    Ok(()) => Toast::new(Status::Ok, SAVED).detail(detail),
-                    Err(error) => Toast::new(Status::Err, SAVE_FAILED).detail(error.to_string()),
-                };
-                toast(message, cx);
-            });
-        })
-        .detach();
+        save_log(&name, text, cx);
     }
 
     pub fn open_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {

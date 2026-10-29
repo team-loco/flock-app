@@ -221,6 +221,8 @@ empties the text and resets the status chip.
 
 ```rust
 let filter = cx.new(|cx| FilterBar::new("pod-filter", window, cx).scope(namespace_select.clone()));
+// FilterBar::new(..).inline() renders only the query field (no row padding, rule, chips, Clear
+// or note) so a page header can hold it; set_placeholder(..) replaces "Filter".
 cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| this.refresh(cx)).detach();
 // on new rows: offer their facet values
 filter.update(cx, |bar, cx| bar.set_facets(facets(rows.iter()), cx));
@@ -504,6 +506,18 @@ l.set_lines(lines, cx)       // replace the buffer (a re-filtered or re-merged v
 l.set_highlight(text, cx)    // highlight matches without jumping or leaving follow
 ```
 
+`LogLine::with_detail(SourceDetail { workload, place, cluster }, slot)` draws the Logs page
+source cell instead: a 3px bar in the source colour, the workload in `fg2`, `pod/container` and
+the cluster in `mute`, `set_source_width(LOG_SOURCE_DETAIL or LOG_SOURCE_CLUSTERS)` wide.
+`LogView::new(..).marked()` is the Logs page mode: a `LOG_MARKER` column shows ◆ on the current
+match, matches are `warnbg` with a `warn` underline and the current one is `warn` on `editor`.
+
+```rust
+l.match_lines_from(start)    // indices whose shown text contains the highlight phrase
+l.set_current(Some(ix), cx)  // mark the current match without scrolling
+l.reveal(ix, cx)             // scroll it to the centre and stop following
+```
+
 ### Merged pod logs
 
 `screens::multilog::MultiLogs` follows every pod and container of a `flock_core::LogTarget`
@@ -514,8 +528,17 @@ The legend chips (`{id}-source-{n}`) toggle a source; the filter field hides lin
 match and highlights the rest; `pause` holds new lines (counting them) until resumed; `follow`,
 `timestamps` and `wrap` drive the `LogView`. Pods that start join and deleted pods leave
 (`left`); a container whose stream ends shows `ended`. `MultiLogs::tools(cx)` returns the toolbar
-for a dock bar or page row. `MultiLogsScreen` is the `Logs <target>` tab (`Location::logs`); the
-workload dock's `all pods` toggle shows the same view for the workload.
+for a dock bar. The workload dock's `all pods` toggle shows it for the workload.
+
+### Logs page
+
+`screens::logs_page::LogsPage` is the Logs tab (`Location::logs`, decision 59): a header with the
+inline query bar, the match position with ▲/▼, time-range and view (`wrap`, `time`, `raw`)
+groups and Export; a Volume `PanelSection` with the level-stacked histogram; a Sources panel
+(`LOG_SOURCES_PANEL`) with the group picker, group rows (`logs-group-row-{n}`), source rows
+(`logs-source-{id}`) and Add source; then the `LogView` in `marked()` mode. The logic it renders
+(levels, facets, line matching, buckets, ticks, grouping, the match cursor) lives in
+`flock_core::logpage` and is unit-tested there.
 
 ## Terminal
 

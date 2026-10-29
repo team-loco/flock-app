@@ -317,16 +317,20 @@ impl Shell {
     }
 
     pub fn pod_logs(&self, cx: &App) -> Option<(Vec<String>, String)> {
-        let (screen, _) = self.focused_screens().multi_logs.as_ref()?;
-        let view = screen.read(cx).view().read(cx);
-        let legend = view
-            .legend()
-            .iter()
-            .filter(|entry| !entry.hidden)
-            .map(|entry| entry.label.to_string())
+        let page = self.logs_page()?.read(cx);
+        let shown = page
+            .sources()
+            .into_iter()
+            .filter(|source| source.on)
+            .map(crate::screens::logs_page::PageSource::label)
             .collect();
-        let text = view.logs().read(cx).export();
-        Some((legend, text))
+        let text = page.logs().read(cx).export();
+        Some((shown, text))
+    }
+
+    pub fn logs_page(&self) -> Option<&Entity<crate::screens::logs_page::LogsPage>> {
+        let (screen, _) = self.focused_screens().multi_logs.as_ref()?;
+        Some(screen)
     }
 
     pub fn log_view(&self, cx: &App) -> Option<Entity<LogView>> {
@@ -335,7 +339,7 @@ impl Shell {
             return Some(screen.read(cx).logs().clone());
         }
         let (screen, _) = screens.multi_logs.as_ref()?;
-        Some(screen.read(cx).view().read(cx).logs().clone())
+        Some(screen.read(cx).logs().clone())
     }
 
     pub fn custom_empty_sentence(&self, cx: &App) -> Option<String> {
