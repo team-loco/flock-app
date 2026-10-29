@@ -1,25 +1,28 @@
 use flock_core::Snapshot;
 use flock_core::filter::{
-    FieldValues, LABEL_PREFIXES, NAMESPACE_PREFIX, NODE_PREFIX, Search, Searchable, TextFilter,
+    FieldValues, LABEL_PREFIXES, NAMESPACE_PREFIX, Search, Searchable, TextFilter,
 };
+use flock_core::query::Term;
 use flock_core::resources::ResourceKind;
 
 const SAMPLED_ROWS: usize = 4;
 const PREFIX_CHARS: usize = 3;
-const NODE_FIELD: &str = "node";
 const MISSING: &str = "zz-no-such-row";
 
 fn queries<T: Searchable>(rows: &[T]) -> Vec<String> {
     let mut queries = vec![String::new(), MISSING.to_owned()];
     for row in rows.iter().take(SAMPLED_ROWS) {
-        let mut values = FieldValues::new();
-        for (name, field) in T::FILTER.fields {
-            let start = values.len();
-            field(row, &(), &mut values);
-            if *name == NODE_FIELD {
-                let nodes = values.get(start..).unwrap_or_default();
-                queries.extend(nodes.iter().map(|node| format!("{NODE_PREFIX}{node}")));
+        for (name, field) in T::FILTER.facets {
+            let mut facet = FieldValues::new();
+            field(row, &(), &mut facet);
+            for value in &facet {
+                queries.push(Term::include(name, value).to_string());
+                queries.push(Term::exclude(name, value).to_string());
             }
+        }
+        let mut values = FieldValues::new();
+        for (_, field) in T::FILTER.fields {
+            field(row, &(), &mut values);
         }
         for value in &values {
             let short: String = value.chars().take(PREFIX_CHARS).collect();

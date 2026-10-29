@@ -95,6 +95,8 @@ impl DefinitionsScreen {
             return;
         }
         self.rows = definitions;
+        let facets = Definition::FILTER.unlabeled_facets(self.rows.iter().map(|row| (row, None)));
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh(cx);
     }
 

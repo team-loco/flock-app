@@ -39,6 +39,7 @@ impl Searchable for Namespace {
             ("name", |n, (), out| out.push(n.name.as_str().into())),
             ("phase", |n, (), out| out.push(n.phase.as_str().into())),
         ],
+        facets: &[("phase", |n, (), out| out.push(n.phase.as_str().into()))],
         namespace: true,
         labels: true,
     };
@@ -297,9 +298,9 @@ mod tests {
         let ns = namespace("payments", Counts::default());
         assert!(ns.matches(&TextFilter::parse("pay")));
         assert!(!ns.matches(&TextFilter::parse("orders")));
-        assert!(ns.matches(&TextFilter::parse("ns:pay")));
+        assert!(ns.matches(&TextFilter::parse("ns:payments")));
         assert!(!ns.matches(&TextFilter::parse("ns:orders")));
-        assert!(ns.matches(&TextFilter::parse("ns:pay active")));
+        assert!(ns.matches(&TextFilter::parse("ns:payments active")));
     }
 
     fn namespace(name: &str, problems: Counts) -> Namespace {

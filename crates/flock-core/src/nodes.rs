@@ -79,6 +79,14 @@ impl Searchable for Node {
                 out.extend(n.labels.iter().map(|l| l.as_str().into()));
             }),
         ],
+        facets: &[
+            ("status", |n, (), out| out.push(n.state.as_str().into())),
+            ("type", |n, (), out| {
+                out.push(n.instance_type.as_str().into());
+            }),
+            ("zone", |n, (), out| out.push(n.zone.as_str().into())),
+            ("version", |n, (), out| out.push(n.version.as_str().into())),
+        ],
         namespace: false,
         labels: true,
     };

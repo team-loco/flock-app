@@ -111,6 +111,9 @@ impl ChangesScreen {
                 .update(cx, |select, cx| select.set_options(options, cx));
         }
         self.log.clone_from(&snapshot.changes);
+        let commits = self.log.commits.iter().map(|commit| (commit, None));
+        let facets = Commit::FILTER.unlabeled_facets(commits);
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh(cx);
     }
 

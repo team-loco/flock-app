@@ -214,6 +214,7 @@ impl Searchable for Resource {
                 out.push(r.namespace.as_str().into());
             }),
         ],
+        facets: &[],
         namespace: true,
         labels: true,
     };
@@ -323,7 +324,7 @@ pub(crate) mod tests {
     fn label_filters_match_resource_metadata() {
         let mut row = resource("payments", "checkout", Status::Ok);
         row.labels.insert("app".into(), "cart".into());
-        assert!(row.matches(&TextFilter::parse("checkout ns:pay label:app=cart")));
+        assert!(row.matches(&TextFilter::parse("checkout ns:payments label:app=cart")));
         assert!(row.matches(&TextFilter::parse("l:app")));
         assert!(!row.matches(&TextFilter::parse("l:app=web")));
     }

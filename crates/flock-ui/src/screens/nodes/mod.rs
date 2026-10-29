@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use flock_core::emptiness::Noun;
 use flock_core::events::Event;
-use flock_core::filter::label_values;
+use flock_core::filter::facets;
 use flock_core::node_pools::{kubelet_skewed, pressure};
 use flock_core::nodes::{Node, NodeFilter, NodePod, NodeSummary, Usage, pool_counts, request_line};
 use flock_core::overview::{Commitment, percent};
@@ -260,9 +260,8 @@ impl NodesScreen {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let nodes = self.nodes.items();
-        let node_labels: Vec<_> = nodes.iter().map(Node::label_map).collect();
-        let labels = label_values(&node_labels);
-        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        let facets = facets(nodes.iter());
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh_rows(cx);
     }
 

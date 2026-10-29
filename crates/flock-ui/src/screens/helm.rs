@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use flock_core::emptiness::Noun;
-use flock_core::filter::StatusFilter;
+use flock_core::filter::{StatusFilter, facets};
 use flock_core::flux::HelmRevision;
 use flock_core::helm::{HelmKey, HelmRelease, HelmReleaseDetail};
 use flock_core::time::age;
@@ -147,6 +147,9 @@ impl HelmReleasesScreen {
             .filter(|(_, release)| release.key.cluster == cluster.id)
             .map(|(ix, _)| ix)
             .collect();
+        let releases = self.releases.iter().filter_map(|&ix| snapshot.helm.get(ix));
+        let facets = facets(releases);
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh(cx);
     }
 

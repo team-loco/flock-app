@@ -1,5 +1,4 @@
 use flock_core::emptiness::Noun;
-use flock_core::filter::label_values;
 use flock_core::loco::{Listener, Route, RouteFilter, Routes};
 use flock_core::{Page, Status};
 use gpui::{
@@ -101,8 +100,11 @@ impl RoutesScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let labels = label_values(self.routes.routes.iter().map(|route| &route.labels));
-        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        let mut facets = Route::FILTER.facets();
+        for route in &self.routes.routes {
+            route.count_facets(&mut facets);
+        }
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         let (query, chip) = {
             let bar = self.filter.read(cx);
             (bar.query().clone(), bar.chip())

@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use super::{Workspace, short_digest};
 use crate::filter::{FilterSpec, TextFilter};
+use crate::query::Facets;
 use crate::{ResourceRef, Seen, Status, Uid};
 
 const MISSING: &str = "—";
@@ -107,6 +108,12 @@ impl Build {
                 out.push(b.workspace.namespace.as_str().into());
             }),
         ],
+        facets: &[
+            ("service", |b, (), out| out.push(b.service.as_str().into())),
+            ("workspace", |b, (), out| {
+                out.push(b.workspace.label().into());
+            }),
+        ],
         namespace: true,
         labels: true,
     };
@@ -118,6 +125,11 @@ impl Build {
             Some(&self.workspace.namespace),
             &[&self.labels],
         )
+    }
+
+    pub fn count_facets(&self, facets: &mut Facets) {
+        let namespace = Some(self.workspace.namespace.as_str());
+        Self::FILTER.count_facets(self, &(), namespace, &[&self.labels], facets);
     }
 
     pub fn took_label(&self) -> String {

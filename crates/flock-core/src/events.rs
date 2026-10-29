@@ -123,6 +123,7 @@ impl Searchable for Event {
                 out.push(e.namespace.as_deref().unwrap_or_default().into());
             }),
         ],
+        facets: &[("reason", |e, (), out| out.push(e.reason.as_str().into()))],
         namespace: true,
         labels: true,
     };
@@ -266,6 +267,15 @@ impl Searchable for ClusterEvent {
             }),
             ("namespace", |e, (), out| {
                 out.push(e.event.namespace.as_deref().unwrap_or_default().into());
+            }),
+        ],
+        facets: &[
+            ("cluster", |e, (), out| {
+                out.push(e.cluster_name.as_str().into());
+            }),
+            ("kind", |e, (), out| out.push(e.kind().into())),
+            ("reason", |e, (), out| {
+                out.push(e.event.reason.as_str().into());
             }),
         ],
         namespace: true,

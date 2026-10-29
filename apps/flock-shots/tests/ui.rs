@@ -648,7 +648,7 @@ fn slash_focuses_the_filter_and_escape_clears_it() -> anyhow::Result<()> {
             .is_none()
     );
     assert_eq!(toolbar.map(|part| ui.bounds(part)), idle);
-    ui.press("escape")?;
+    ui.press("escape escape")?;
     assert_eq!(filter_words(&ui), Some(Vec::new()));
     assert!(
         ui.bounds(selector(format!("{DEPLOYMENTS}-row-1")))
@@ -3229,9 +3229,18 @@ fn a_right_clicked_row_menu_takes_the_keyboard() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn filter_terms(ui: &Ui) -> Vec<flock_core::query::Term> {
+    ui.read(|shell, cx| {
+        shell
+            .filter_bar(cx)
+            .map(|bar| bar.read(cx).query().terms.clone())
+            .unwrap_or_default()
+    })
+}
+
 #[test]
-fn filter_namespace_completion_chips_and_backspace_work_in_both_appearances() -> anyhow::Result<()>
-{
+
+fn query_bar_picks_excludes_and_removes_facet_chips_in_both_appearances() -> anyhow::Result<()> {
     let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     for (appearance, name) in [
         (flock_ui::theme::Appearance::Dark, "dark"),
@@ -3241,9 +3250,12 @@ fn filter_namespace_completion_chips_and_backspace_work_in_both_appearances() ->
         assert!(ui.bounds("resource-filter-shortcut").is_some());
         ui.save_png(&dir.join(format!("filter-empty-{name}.png")))?;
         ui.press("/")?;
-        ui.type_text("ns:")?;
-        assert!(ui.bounds("resource-filter-shortcut").is_none());
         assert!(ui.bounds("resource-filter-suggestion-0").is_some());
+        ui.type_text("@")?;
+        assert!(ui.bounds("resource-filter-shortcut").is_none());
+        ui.press("enter")?;
+        assert!(ui.bounds("resource-filter-suggestion-0").is_some());
+        assert_eq!(filter_terms(&ui), []);
         ui.save_png(&dir.join(format!("filter-suggestions-{name}.png")))?;
         ui.hover("resource-filter-suggestion-0")?;
         for row in 0..ROWS_UNDER_POPOVER {
@@ -3252,35 +3264,33 @@ fn filter_namespace_completion_chips_and_backspace_work_in_both_appearances() ->
         }
         ui.press("down up tab")?;
         assert!(ui.bounds("resource-filter-token-0").is_some());
-        assert!(ui.bounds("resource-filter-suggestion-0").is_none());
-        let namespace = ui.read(|shell, cx| {
-            shell
-                .filter_bar(cx)
-                .and_then(|bar| bar.read(cx).query().namespace.clone())
-        });
-        assert!(namespace.is_some());
+        let picked = filter_terms(&ui);
+        assert_eq!(picked.len(), 1);
+        assert_eq!(picked[0].facet, "namespace");
+        assert!(!picked[0].exclude);
+        ui.type_text("@label:")?;
+        ui.hover("resource-filter-suggestion-0")?;
+        ui.click("resource-filter-exclude-0")?;
+        assert!(ui.bounds("resource-filter-token-1").is_some());
+        let terms = filter_terms(&ui);
+        assert_eq!(terms.len(), 2);
+        assert!(terms[1].exclude);
         ui.save_png(&dir.join(format!("filter-chips-{name}.png")))?;
-        ui.press("backspace")?;
-        assert!(ui.bounds("resource-filter-token-0").is_none());
-        assert!(ui.read(|shell, cx| {
-            shell
-                .filter_bar(cx)
-                .is_some_and(|bar| bar.read(cx).query().is_empty())
-        }));
-        ui.type_text("na")?;
-        ui.press("enter")?;
-        assert!(ui.bounds("resource-filter-suggestion-0").is_some());
         ui.press("escape")?;
         assert!(ui.bounds("resource-filter-suggestion-0").is_none());
-        assert!(ui.read(|shell, cx| {
-            shell
-                .filter_bar(cx)
-                .is_some_and(|bar| bar.read(cx).query().namespace.as_deref() == Some(""))
-        }));
+        assert_eq!(filter_terms(&ui).len(), 2);
+        ui.press("backspace")?;
+        assert!(ui.bounds("resource-filter-token-1").is_none());
+        assert_eq!(filter_terms(&ui), picked);
+        ui.click("resource-filter-clear-query")?;
+        assert!(ui.bounds("resource-filter-token-0").is_none());
+        ui.type_text("na")?;
+        ui.press("enter")?;
+        assert!(ui.bounds("resource-filter-token-0").is_some());
+        assert_eq!(filter_words(&ui), Some(vec!["na".to_owned()]));
     }
     Ok(())
 }
-
 #[test]
 fn the_pod_phase_filter_keeps_one_phase() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Pods)?;
@@ -3478,8 +3488,6 @@ fn label_completion_keeps_free_text_and_tokens_can_be_removed_by_click() -> anyh
     let mut ui = Ui::open(Screen::Pods)?;
     ui.press("/")?;
     ui.type_text("checkout l:")?;
-    assert!(ui.bounds("pod-filter-suggestion-0").is_some());
-    ui.press("enter")?;
     assert!(ui.bounds("pod-filter-suggestion-0").is_some());
     ui.press("enter")?;
     assert!(ui.bounds("pod-filter-token-0").is_some());
@@ -3780,6 +3788,7 @@ fn a_label_filter_on_pods_offers_logs_for_the_selector_in_the_row_menu() -> anyh
     let mut ui = Ui::open(Screen::Pods)?;
     ui.press("/")?;
     ui.type_text("l:app=checkout-api ")?;
+    ui.press("escape")?;
     ui.right_click("pods-row-0")?;
     ui.click(POD_LOGS_FOR_ITEM)?;
     let target = ui.state().location().logs.clone();
@@ -4424,7 +4433,7 @@ fn a_node_inspector_opens_the_pods_list_filtered_to_its_node() -> anyhow::Result
         .map(|node| node.pods as usize);
     assert_eq!(inspected, Some(on_node));
     let text = ui.read(|shell, cx| shell.filter_bar(cx).map(|bar| bar.read(cx).text(cx)));
-    assert_eq!(text, Some(format!("node:{NODE}")));
+    assert_eq!(text, Some(format!("@node:{NODE}")));
     assert!(ui.bounds("pod-filter-token-0").is_some());
     let shown =
         |ui: &Ui| ui.read(|shell, cx| shell.filter_bar(cx).and_then(|bar| bar.read(cx).matches()));
@@ -4775,7 +4784,7 @@ fn flux_events_filter_by_cluster_and_open_their_object() -> anyhow::Result<()> {
     ui.type_text("staging")?;
     assert!(ui.bounds("flux-events-row-1").is_some());
     assert!(ui.bounds("flux-events-row-2").is_none());
-    ui.press("escape")?;
+    ui.press("escape escape")?;
     ui.click("flux-events-row-0")?;
     assert_eq!(
         opened_flux(&ui),
@@ -4995,7 +5004,7 @@ fn helm_releases_open_their_history_values_and_flux_owner() -> anyhow::Result<()
     ui.press("/")?;
     ui.type_text("airflow")?;
     assert!(ui.bounds("helm-releases-row-1").is_none());
-    ui.press("escape")?;
+    ui.press("escape escape")?;
     ui.click("helm-releases-row-0")?;
     let location = ui.state().location().clone();
     let opened = location.helm.map(|key| key.name);

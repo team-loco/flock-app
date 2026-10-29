@@ -47,6 +47,10 @@ impl Problem {
                 out.push(p.target.to_string().into());
             }),
         ],
+        facets: &[
+            ("reason", |p, (), out| out.push(p.reason.as_str().into())),
+            ("kind", |p, (), out| out.push(p.target.kind.as_str().into())),
+        ],
         namespace: true,
         labels: false,
     };

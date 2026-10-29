@@ -171,6 +171,7 @@ impl Definition {
             ("plural", |d, (), out| out.push(d.plural.as_str().into())),
             ("group", |d, (), out| out.push(d.key.group.as_str().into())),
         ],
+        facets: &[("group", |d, (), out| out.push(d.key.group.as_str().into()))],
         namespace: false,
         labels: false,
     };

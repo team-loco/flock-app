@@ -1,12 +1,9 @@
-use std::collections::BTreeSet;
-
-use flock_core::filter::{
-    FilterCandidates, LabelValues, TextFilter, applied_token, extract_tokens,
-};
+use flock_core::filter::TextFilter;
+use flock_core::query::{Chip, Facets, Suggestion, add_term, extract_terms, last_token, suggest};
 use gpui::{
-    AnyView, AppContext as _, Context, Entity, EventEmitter, Focusable, InteractiveElement,
+    Anchor, AnyView, AppContext as _, Context, Entity, EventEmitter, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Window, div, prelude::FluentBuilder,
+    Subscription, Window, anchored, deferred, div, prelude::FluentBuilder, svg,
 };
 
 use super::button::{Button, Segmented};
@@ -15,15 +12,20 @@ use super::input::{
     TextFieldState, TextFieldTab, TextFieldUp,
 };
 use super::{Kbd, popover};
+use crate::assets::SEARCH;
 use crate::theme::{
-    ActiveTheme, CONTROL, FILTER_MIN, FILTER_WIDTH, FONT_MONO, MATCH_NOTE, Palette, RADIUS,
-    ROW_TABLE, RULE, SPACE_4, SPACE_8, TEXT_MONO, TEXT_SMALL,
+    ActiveTheme, FILTER_MIN, FILTER_WIDTH, FONT_MONO, ICON, MATCH_NOTE, Palette, QUERY_BAR,
+    QUERY_CHIP, QUERY_CHIP_REMOVE, QUERY_INPUT_MIN, QUERY_MENU_HEIGHT, QUERY_MENU_WIDTH, RADIUS,
+    ROW_TABLE, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_8, TEXT_LABEL, TEXT_MONO,
+    TEXT_SMALL,
 };
 
 pub const FILTER_PLACEHOLDER: &str = "Filter";
 const CLEAR: &str = "Clear";
 const REMOVE_TOKEN: &str = "×";
+const EXCLUDE: &str = "−";
 const WIDEST_DIGIT: char = '0';
+const CHIP_SEPARATOR: &str = " ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilterEvent {
@@ -65,16 +67,16 @@ pub struct FilterBar {
     field: Entity<TextFieldState>,
     scope: Option<AnyView>,
     aside: Option<AnyView>,
-    chips: Vec<SharedString>,
+    segments: Vec<SharedString>,
     chip_digits: usize,
     chip: usize,
     matches: Option<(usize, usize)>,
     query: TextFilter,
-    tokens: Vec<String>,
-    candidates: FilterCandidates,
-    suggestions: Vec<String>,
-    highlighted: usize,
-    fit: popover::Fit,
+    tokens: Vec<Chip>,
+    facets: Facets,
+    suggestions: Vec<Suggestion>,
+    highlighted: Option<usize>,
+    open: bool,
     _subscription: Subscription,
 }
 
@@ -95,103 +97,184 @@ impl FilterBar {
             field,
             scope: None,
             aside: None,
-            chips: Vec::new(),
+            segments: Vec::new(),
             chip_digits: 0,
             chip: 0,
             matches: None,
             query: TextFilter::default(),
             tokens: Vec::new(),
-            candidates: FilterCandidates::default(),
+            facets: Facets::default(),
             suggestions: Vec::new(),
-            highlighted: 0,
-            fit: popover::Fit::default(),
+            highlighted: None,
+            open: false,
             _subscription: subscription,
         }
     }
 
-    pub fn set_namespaces(&mut self, namespaces: BTreeSet<String>, cx: &mut Context<Self>) {
-        if self.candidates.namespaces != namespaces {
-            self.candidates.namespaces = namespaces;
-            self.resuggest(cx);
+    pub fn set_facets(&mut self, facets: Facets, cx: &mut Context<Self>) {
+        if self.facets != facets {
+            self.facets = facets;
+            self.suggestions = self.suggest(cx);
+            let last = self.suggestions.len().checked_sub(1);
+            self.highlighted = self.highlighted.zip(last).map(|(ix, last)| ix.min(last));
+            cx.notify();
         }
     }
 
-    pub fn set_labels(&mut self, labels: LabelValues, cx: &mut Context<Self>) {
-        if self.candidates.labels != labels {
-            self.candidates.labels = labels;
-            self.resuggest(cx);
-        }
+    pub fn facets(&self) -> &Facets {
+        &self.facets
+    }
+
+    fn typed_text(&self, cx: &gpui::App) -> String {
+        self.field.read(cx).value().to_string()
+    }
+
+    fn suggest(&self, cx: &gpui::App) -> Vec<Suggestion> {
+        suggest(&self.facets, &self.tokens, &self.typed_text(cx))
     }
 
     fn resuggest(&mut self, cx: &mut Context<Self>) {
-        if self.suggestions.is_empty() {
-            return;
-        }
-        self.suggestions = self.candidates.suggest(&self.field.read(cx).value());
-        self.highlighted = self
-            .highlighted
-            .min(self.suggestions.len().saturating_sub(1));
-        cx.notify();
+        self.suggestions = self.suggest(cx);
+        let typing = !self.typed_text(cx).is_empty() && !self.suggestions.is_empty();
+        self.highlighted = typing.then_some(0);
+    }
+
+    fn set_typed(
+        &mut self,
+        text: impl Into<SharedString>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = text.into();
+        self.field
+            .update(cx, |field, cx| field.set_value(text, window, cx));
     }
 
     fn typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let value = self.field.read(cx).value().to_string();
-        let (tokens, remaining) = extract_tokens(&value);
-        if !tokens.is_empty() {
-            self.tokens.extend(tokens);
-            self.field
-                .update(cx, |field, cx| field.set_value(remaining, window, cx));
+        let (terms, remaining) = extract_terms(&self.typed_text(cx));
+        let extracted = !terms.is_empty();
+        if extracted {
+            for term in terms {
+                add_term(&mut self.tokens, term);
+            }
+            self.set_typed(remaining, window, cx);
         }
-        self.suggestions = self.candidates.suggest(&self.field.read(cx).value());
-        self.highlighted = 0;
-        self.refresh_query(cx);
+        self.open = true;
+        self.resuggest(cx);
+        let query = TextFilter::from_chips(&self.tokens, &self.typed_text(cx));
+        if extracted || query != self.query {
+            self.refresh_query(cx);
+        } else {
+            cx.notify();
+        }
     }
 
     fn refresh_query(&mut self, cx: &mut Context<Self>) {
-        self.query = TextFilter::parse(&self.text(cx));
+        self.query = TextFilter::from_chips(&self.tokens, &self.typed_text(cx));
         cx.emit(FilterEvent::Changed);
         cx.notify();
     }
 
-    fn choose(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+    fn choose(&mut self, ix: usize, exclude: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(suggestion) = self.suggestions.get(ix).cloned() else {
             return;
         };
-        let value = self.field.read(cx).value().to_string();
-        let start = value.rfind(char::is_whitespace).map_or(0, |ix| ix + 1);
-        let mut remaining = value[..start].to_owned();
-        if applied_token(&suggestion) {
-            self.tokens.push(suggestion);
-        } else {
-            remaining.push_str(&suggestion);
+        let typed = self.typed_text(cx);
+        let before = typed
+            .get(..typed.len() - last_token(&typed).len())
+            .unwrap_or_default()
+            .to_owned();
+        match suggestion {
+            Suggestion::Text(text) => {
+                self.tokens.push(Chip::Text(text));
+                self.set_typed("", window, cx);
+            }
+            Suggestion::Facet { .. } => {
+                self.set_typed(format!("{before}{}", suggestion.key()), window, cx);
+                self.resuggest(cx);
+                cx.notify();
+                return;
+            }
+            Suggestion::Value { mut term, .. } => {
+                term.exclude |= exclude;
+                add_term(&mut self.tokens, term);
+                self.set_typed(before, window, cx);
+            }
         }
-        self.field
-            .update(cx, |field, cx| field.set_value(remaining, window, cx));
-        self.suggestions = self.candidates.suggest(&self.field.read(cx).value());
-        self.highlighted = 0;
+        self.resuggest(cx);
         self.refresh_query(cx);
     }
 
-    fn remove_token(&mut self, ix: usize, cx: &mut Context<Self>) {
+    fn commit_typed(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let typed = self.typed_text(cx);
+        let typed = typed.trim();
+        if typed.is_empty() {
+            return false;
+        }
+        match Chip::parse(typed) {
+            Chip::Term(term) => add_term(&mut self.tokens, term),
+            text @ Chip::Text(_) => self.tokens.push(text),
+        }
+        self.set_typed("", window, cx);
+        self.resuggest(cx);
+        self.refresh_query(cx);
+        true
+    }
+
+    fn remove_token(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         if ix < self.tokens.len() {
             self.tokens.remove(ix);
+            self.focus(window, cx);
             self.refresh_query(cx);
         }
     }
 
+    fn clear_query(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.tokens.clear();
+        self.set_typed("", window, cx);
+        self.focus(window, cx);
+        self.refresh_query(cx);
+    }
+
+    fn menu_shown(&self, window: &Window, cx: &gpui::App) -> bool {
+        self.open && !self.suggestions.is_empty() && self.is_focused(window, cx)
+    }
+
     fn suggestion_key(&mut self, key: SuggestionKey, window: &mut Window, cx: &mut Context<Self>) {
-        let count = self.suggestions.len();
-        if count == 0 || !self.is_focused(window, cx) {
+        if !self.menu_shown(window, cx) {
             return;
         }
+        let count = self.suggestions.len();
         match key {
-            SuggestionKey::Up => self.highlighted = (self.highlighted + count - 1) % count,
-            SuggestionKey::Down => self.highlighted = (self.highlighted + 1) % count,
-            SuggestionKey::Complete => self.choose(self.highlighted, window, cx),
-            SuggestionKey::Close => self.suggestions.clear(),
+            SuggestionKey::Up => {
+                self.highlighted =
+                    popover::step(self.highlighted, count, |_| true, popover::Step::Previous);
+            }
+            SuggestionKey::Down => {
+                self.highlighted =
+                    popover::step(self.highlighted, count, |_| true, popover::Step::Next);
+            }
+            SuggestionKey::Complete => {
+                self.choose(self.highlighted.unwrap_or_default(), false, window, cx);
+            }
+            SuggestionKey::Close => self.open = false,
         }
         cx.stop_propagation();
         cx.notify();
+    }
+
+    fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.is_focused(window, cx) {
+            return;
+        }
+        if let Some(ix) = self.highlighted.filter(|_| self.menu_shown(window, cx)) {
+            self.choose(ix, false, window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if self.commit_typed(window, cx) {
+            cx.stop_propagation();
+        }
     }
 
     fn backspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -200,6 +283,7 @@ impl FilterBar {
             return;
         }
         self.tokens.pop();
+        self.resuggest(cx);
         self.refresh_query(cx);
         cx.stop_propagation();
     }
@@ -223,6 +307,10 @@ impl FilterBar {
         &self.query
     }
 
+    pub fn tokens(&self) -> &[Chip] {
+        &self.tokens
+    }
+
     pub fn placeholder(&self) -> &str {
         &self.placeholder
     }
@@ -232,14 +320,14 @@ impl FilterBar {
     }
 
     pub fn text(&self, cx: &gpui::App) -> String {
-        let value = self.field.read(cx).value();
+        let typed = self.typed_text(cx);
         self.tokens
             .iter()
-            .map(String::as_str)
-            .chain([value.as_ref()])
+            .map(ToString::to_string)
+            .chain([typed])
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
-            .join(" ")
+            .join(CHIP_SEPARATOR)
     }
 
     pub fn chip(&self) -> usize {
@@ -247,21 +335,21 @@ impl FilterBar {
     }
 
     pub fn is_active(&self) -> bool {
-        !self.query.is_empty() || self.chip != 0
+        !self.query.is_empty() || !self.tokens.is_empty() || self.chip != 0
     }
 
     pub fn set_chips(&mut self, chips: Vec<SharedString>, cx: &mut Context<Self>) {
-        if self.chips != chips {
+        if self.segments != chips {
             let digits = chips.iter().map(|chip| count_digits(chip)).max();
             self.chip_digits = self.chip_digits.max(digits.unwrap_or_default());
             self.chip = self.chip.min(chips.len().saturating_sub(1));
-            self.chips = chips;
+            self.segments = chips;
             cx.notify();
         }
     }
 
     pub fn select_chip(&mut self, ix: usize, cx: &mut Context<Self>) {
-        if ix < self.chips.len().max(1) && ix != self.chip {
+        if ix < self.segments.len().max(1) && ix != self.chip {
             self.chip = ix;
             cx.emit(FilterEvent::Changed);
             cx.notify();
@@ -280,8 +368,11 @@ impl FilterBar {
         self.matches
     }
 
-    pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.field.update(cx, |field, cx| field.focus(window, cx));
+        self.open = true;
+        self.resuggest(cx);
+        cx.notify();
     }
 
     pub fn is_focused(&self, window: &Window, cx: &gpui::App) -> bool {
@@ -292,16 +383,16 @@ impl FilterBar {
     }
 
     pub fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_active() {
-            self.preset(Vec::new(), window, cx);
+        if self.is_active() || !self.typed_text(cx).is_empty() {
+            self.preset(&[], window, cx);
         }
     }
 
-    pub fn preset(&mut self, tokens: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
-        self.tokens = tokens;
-        self.field
-            .update(cx, |field, cx| field.set_value("", window, cx));
-        self.suggestions.clear();
+    pub fn preset(&mut self, tokens: &[String], window: &mut Window, cx: &mut Context<Self>) {
+        self.tokens = tokens.iter().map(|token| Chip::parse(token)).collect();
+        self.set_typed("", window, cx);
+        self.open = false;
+        self.resuggest(cx);
         self.chip = 0;
         self.refresh_query(cx);
     }
@@ -317,75 +408,186 @@ impl FilterBar {
             .iter()
             .enumerate()
             .map(|(ix, token)| {
+                let (key, value, exclude) = match token {
+                    Chip::Text(text) => (String::new(), text.clone(), false),
+                    Chip::Term(term) => (term.key(), term.value.clone(), term.exclude),
+                };
+                let (key_color, background) = if exclude {
+                    (palette.err, palette.errbg)
+                } else {
+                    (palette.acc, palette.accbg)
+                };
                 div()
                     .id(("token", ix))
                     .debug_selector(|| format!("{}-token-{ix}", self.id))
                     .flex()
                     .flex_none()
                     .items_center()
-                    .gap(SPACE_4)
-                    .px(SPACE_4)
+                    .h(QUERY_CHIP)
+                    .pl(SPACE_3)
+                    .pr(SPACE_1)
                     .rounded(RADIUS)
-                    .bg(palette.chrome)
-                    .text_color(palette.fg2)
-                    .child(token.clone())
+                    .bg(background)
+                    .text_size(TEXT_SMALL)
+                    .whitespace_nowrap()
+                    .child(div().text_color(key_color).child(key))
+                    .child(div().text_color(palette.fg).child(value))
                     .child(
-                        Button::new(format!("{}-remove-{ix}", self.id), REMOVE_TOKEN)
-                            .ghost()
-                            .small()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.remove_token(ix, cx);
-                            })),
+                        div()
+                            .id(("remove", ix))
+                            .debug_selector(|| format!("{}-remove-{ix}", self.id))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size(QUERY_CHIP_REMOVE)
+                            .ml(SPACE_1)
+                            .cursor_pointer()
+                            .text_size(TEXT_MONO)
+                            .text_color(palette.mute)
+                            .hover(|style| style.text_color(palette.fg))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.remove_token(ix, window, cx);
+                            }))
+                            .child(REMOVE_TOKEN),
                     )
             })
             .collect()
     }
 
-    fn suggestion_popover(
+    fn suggestion_row(
+        &self,
+        ix: usize,
+        suggestion: &Suggestion,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let highlighted = self.highlighted == Some(ix);
+        let excludable = matches!(suggestion, Suggestion::Value { .. });
+        let exclude = div()
+            .id(("exclude", ix))
+            .debug_selector(|| format!("{}-exclude-{ix}", self.id))
+            .flex()
+            .flex_none()
+            .items_center()
+            .h(QUERY_CHIP)
+            .px(SPACE_2)
+            .rounded(RADIUS)
+            .border(RULE)
+            .border_color(palette.line2)
+            .text_size(TEXT_LABEL)
+            .text_color(palette.mute)
+            .hover(|style| style.text_color(palette.err).border_color(palette.err))
+            .when(!highlighted, Styled::invisible)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.choose(ix, true, window, cx);
+            }))
+            .child(EXCLUDE);
+        let count = suggestion.count().map(|count| {
+            div()
+                .flex_none()
+                .text_size(TEXT_LABEL)
+                .text_color(palette.mute)
+                .child(count.to_string())
+        });
+        div()
+            .id(("suggestion", ix))
+            .debug_selector(|| format!("{}-suggestion-{ix}", self.id))
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(SPACE_4)
+            .h(ROW_TABLE)
+            .pl(SPACE_4)
+            .pr(SPACE_3)
+            .rounded(RADIUS)
+            .cursor_pointer()
+            .when(highlighted, |row| row.bg(palette.hover))
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                if *hovered {
+                    this.highlighted = Some(ix);
+                    cx.notify();
+                }
+            }))
+            .on_click(cx.listener(move |this, _, window, cx| this.choose(ix, false, window, cx)))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(palette.acc)
+                            .child(suggestion.key()),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .text_color(palette.fg)
+                            .child(suggestion.value()),
+                    ),
+            )
+            .children(count)
+            .when(excludable, |row| row.child(exclude))
+    }
+
+    fn suggestion_menu(
         &self,
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        let rows = self
-            .suggestions
-            .iter()
-            .enumerate()
-            .map(|(ix, suggestion)| {
-                div()
-                    .id(ix)
-                    .debug_selector(|| format!("{}-suggestion-{ix}", self.id))
-                    .h(ROW_TABLE)
-                    .px(SPACE_4)
-                    .cursor_pointer()
-                    .when(ix == self.highlighted, |row| {
-                        row.bg(palette.sel).text_color(palette.selfg)
-                    })
-                    .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                        if *hovered {
-                            this.highlighted = ix;
-                            cx.notify();
-                        }
-                    }))
-                    .on_click(cx.listener(move |this, _, window, cx| this.choose(ix, window, cx)))
-                    .child(suggestion.clone())
-            })
-            .collect::<Vec<_>>();
-        let surface = popover::fitted_surface(
-            "filter-suggestions",
-            palette,
-            cx.entity().downgrade(),
-            |bar: &mut Self| &mut bar.fit,
+        let mut rows = Vec::new();
+        let mut header = None;
+        for (ix, suggestion) in self.suggestions.iter().enumerate() {
+            let next = suggestion.header();
+            if next != header {
+                if let Some(label) = next.clone() {
+                    rows.push(
+                        div()
+                            .flex_none()
+                            .pt(SPACE_3)
+                            .pb(SPACE_1)
+                            .px(SPACE_4)
+                            .text_size(TEXT_LABEL)
+                            .text_color(palette.mute)
+                            .child(label)
+                            .into_any_element(),
+                    );
+                }
+                header = next;
+            }
+            rows.push(
+                self.suggestion_row(ix, suggestion, palette, cx)
+                    .into_any_element(),
+            );
+        }
+        let surface = popover::surface("filter-suggestions", palette)
+            .debug_selector(|| format!("{}-menu", self.id))
+            .w(QUERY_MENU_WIDTH)
+            .max_h(QUERY_MENU_HEIGHT)
+            .overflow_y_scroll()
+            .font_family(FONT_MONO)
+            .text_size(TEXT_MONO)
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                this.open = false;
+                cx.notify();
+            }))
+            .children(rows);
+        div().absolute().left_0().top_full().pt(SPACE_2).child(
+            deferred(
+                anchored()
+                    .anchor(Anchor::TopLeft)
+                    .snap_to_window_with_margin(SPACE_4)
+                    .child(surface),
+            )
+            .priority(1),
         )
-        .w(FILTER_WIDTH)
-        .max_h(self.fit.height())
-        .overflow_y_scroll()
-        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-            this.suggestions.clear();
-            cx.notify();
-        }))
-        .children(rows)
-        .into_any_element();
-        popover::below_left(CONTROL, surface)
     }
 
     fn field_element(
@@ -395,36 +597,57 @@ impl FilterBar {
     ) -> impl IntoElement + use<> {
         let palette = *cx.palette();
         let focused = self.is_focused(window, cx);
-        let empty = self.field.read(cx).value().is_empty() && self.tokens.is_empty();
+        let typed = !self.field.read(cx).value().is_empty();
+        let empty = !typed && self.tokens.is_empty();
+        let clear = div()
+            .id("filter-clear-query")
+            .debug_selector(|| format!("{}-clear-query", self.id))
+            .flex_none()
+            .px(SPACE_1)
+            .cursor_pointer()
+            .text_size(TEXT_MONO)
+            .text_color(palette.mute)
+            .hover(|style| style.text_color(palette.fg))
+            .on_click(cx.listener(|this, _, window, cx| {
+                cx.stop_propagation();
+                this.clear_query(window, cx);
+            }))
+            .child(REMOVE_TOKEN);
         div()
             .id("filter-field")
             .debug_selector(|| format!("{}-field", self.id))
             .on_click(cx.listener(|this, _, window, cx| this.focus(window, cx)))
             .relative()
             .flex()
+            .flex_wrap()
             .items_center()
-            .gap(SPACE_4)
+            .gap(SPACE_2)
             .max_w(FILTER_WIDTH)
             .flex_1()
             .min_w(FILTER_MIN)
-            .h(CONTROL)
-            .px(SPACE_4)
+            .min_h(QUERY_BAR)
+            .px(SPACE_3)
+            .py(SPACE_1)
             .rounded(RADIUS)
             .border(RULE)
-            .border_color(if focused {
-                palette.selline
-            } else {
-                palette.line2
-            })
+            .border_color(if focused { palette.acc } else { palette.line2 })
             .bg(palette.editor)
+            .cursor_text()
             .font_family(FONT_MONO)
             .text_size(TEXT_MONO)
+            .child(
+                svg()
+                    .path(SEARCH)
+                    .flex_none()
+                    .size(ICON)
+                    .text_color(palette.mute),
+            )
             .children(self.token_chips(&palette, cx))
             .child(
                 div()
                     .relative()
                     .flex_1()
-                    .min_w_0()
+                    .min_w(QUERY_INPUT_MIN)
                     .child(TextField::bare(&self.field, TEXT_MONO))
                     .when(empty, |input| {
                         input.child(
@@ -454,8 +677,9 @@ impl FilterBar {
                         .child(Kbd::new("/")),
                 )
             })
-            .when(focused && !self.suggestions.is_empty(), |field| {
-                field.child(self.suggestion_popover(&palette, cx))
+            .when(!empty, |field| field.child(clear))
+            .when(self.menu_shown(window, cx), |field| {
+                field.child(self.suggestion_menu(&palette, cx))
             })
     }
 }
@@ -463,8 +687,8 @@ impl FilterBar {
 impl Render for FilterBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = *cx.palette();
-        let chips = (!self.chips.is_empty()).then(|| {
-            self.chips
+        let chips = (!self.segments.is_empty()).then(|| {
+            self.segments
                 .iter()
                 .fold(Segmented::new(format!("{}-chips", self.id)), |seg, chip| {
                     seg.reserved_option(chip.clone(), widest_label(chip, self.chip_digits))
@@ -517,7 +741,7 @@ impl Render for FilterBar {
             }))
             .capture_action(cx.listener(|this, action: &TextFieldEnter, window, cx| {
                 if !action.secondary && !action.shift {
-                    this.suggestion_key(SuggestionKey::Complete, window, cx);
+                    this.enter(window, cx);
                 }
             }))
             .capture_action(cx.listener(|this, _: &TextFieldEscape, window, cx| {

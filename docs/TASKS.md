@@ -146,7 +146,7 @@ Spec column points at `design/`.
 
 | id | unit | owner | branch | status |
 |---|---|---|---|---|
-| V21Q | Query bar: `@facet:value` chips, `-` exclusion, facet and value suggestions with counts, on every list page | claude | v21-query-bar | todo |
+| V21Q | Query bar: `@facet:value` chips, `-` exclusion, facet and value suggestions with counts, on every list page | claude | v21-query-bar | pr |
 | V21S | Multi-cluster scope: a set of selected clusters per pane; status bar with problems left and the multi-select cluster menu right | claude | v21-multi-scope | pr |
 | V21G | Grouping on list views: group picker, collapsible group header rows with counts and ✕/▲ totals | claude | v21-grouping | todo |
 | V21L | Logs v3: Logs page with sources panel, levels, volume histogram, query bar with match navigation | claude | v21-logs | todo |

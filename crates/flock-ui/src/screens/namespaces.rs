@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use flock_core::cluster::Namespace;
 use flock_core::emptiness::Noun;
-use flock_core::filter::{StatusFilter, label_values};
+use flock_core::filter::{StatusFilter, facets};
 use flock_core::related::NAMESPACE;
 use flock_core::time::age;
 use flock_core::{ClusterId, ClusterSummary, Command, Counts, Page, ResourceRef, Snapshot, Status};
@@ -93,8 +93,8 @@ impl NamespacesScreen {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let namespaces = self.namespaces.items();
-        let labels = label_values(namespaces.iter().map(|namespace| &namespace.labels));
-        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        let facets = facets(namespaces.iter());
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh_rows(cx);
     }
 

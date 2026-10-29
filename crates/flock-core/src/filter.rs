@@ -6,17 +6,11 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use crate::Status;
+use crate::query::{Chip, Facets, LABEL_FACET, NAMESPACE_FACET, NODE_FACET, Term, is_facet_token};
 
 pub const NAMESPACE_PREFIX: &str = "ns:";
 pub const LABEL_PREFIXES: [&str; 2] = ["label:", "l:"];
-pub const NODE_PREFIX: &str = "node:";
 const LABEL_SEPARATOR: char = '=';
-const TOKEN_KEYWORDS: [(&str, &str); 4] = [
-    (NAMESPACE_PREFIX, NAMESPACE_PREFIX),
-    ("namespace", NAMESPACE_PREFIX),
-    (LABEL_PREFIXES[0], LABEL_PREFIXES[0]),
-    (LABEL_PREFIXES[1], LABEL_PREFIXES[1]),
-];
 
 pub type LabelMatch = (String, Option<String>);
 pub type Labels = BTreeMap<String, String>;
@@ -27,12 +21,8 @@ pub fn namespace_token(token: &str) -> Option<String> {
         .map(str::to_ascii_lowercase)
 }
 
-pub fn node_token(token: &str) -> Option<String> {
-    token.strip_prefix(NODE_PREFIX).map(str::to_ascii_lowercase)
-}
-
 pub fn node_query(node: &str) -> String {
-    format!("{NODE_PREFIX}{node}")
+    Term::include(NODE_FACET, node).to_string()
 }
 
 pub fn label_token(token: &str) -> Option<LabelMatch> {
@@ -52,102 +42,6 @@ pub fn label_matches(wanted: &LabelMatch, labels: &BTreeMap<String, String>) -> 
         (Some(_), None) => true,
         (None, _) => false,
     }
-}
-
-pub type LabelValues = BTreeMap<String, BTreeSet<String>>;
-
-pub fn label_values<'a>(
-    sets: impl IntoIterator<Item = &'a BTreeMap<String, String>>,
-) -> LabelValues {
-    let mut values = LabelValues::new();
-    for (key, value) in sets.into_iter().flatten() {
-        values.entry(key.clone()).or_default().insert(value.clone());
-    }
-    values
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FilterCandidates {
-    pub namespaces: BTreeSet<String>,
-    pub labels: LabelValues,
-}
-
-impl FilterCandidates {
-    pub fn suggest(&self, input: &str) -> Vec<String> {
-        if input.ends_with(char::is_whitespace) {
-            return Vec::new();
-        }
-        let Some(token) = input.split_whitespace().last() else {
-            return Vec::new();
-        };
-        if let Some(part) = token.strip_prefix(NAMESPACE_PREFIX) {
-            return self
-                .namespaces
-                .iter()
-                .filter(|name| name.starts_with(part))
-                .map(|name| format!("{NAMESPACE_PREFIX}{name}"))
-                .collect();
-        }
-        if let Some((prefix, part)) = LABEL_PREFIXES
-            .iter()
-            .find_map(|prefix| Some((*prefix, token.strip_prefix(prefix)?)))
-        {
-            return self.suggest_label(prefix, part);
-        }
-        let prefixes: BTreeSet<&str> = TOKEN_KEYWORDS
-            .iter()
-            .filter(|(keyword, _)| keyword.starts_with(token))
-            .map(|(_, prefix)| *prefix)
-            .collect();
-        prefixes.into_iter().map(str::to_owned).collect()
-    }
-
-    fn suggest_label(&self, prefix: &str, part: &str) -> Vec<String> {
-        match part.split_once(LABEL_SEPARATOR) {
-            Some((key, part)) => self
-                .labels
-                .get(key)
-                .into_iter()
-                .flatten()
-                .filter(|value| value.starts_with(part))
-                .map(|value| format!("{prefix}{key}{LABEL_SEPARATOR}{value}"))
-                .collect(),
-            None => self
-                .labels
-                .keys()
-                .filter(|key| key.starts_with(part))
-                .map(|key| format!("{prefix}{key}{LABEL_SEPARATOR}"))
-                .collect(),
-        }
-    }
-}
-
-pub fn extract_tokens(input: &str) -> (Vec<String>, String) {
-    let mut tokens = Vec::new();
-    let mut text = String::new();
-    for part in input.split_inclusive(char::is_whitespace) {
-        let token = part.trim_end();
-        if part.ends_with(char::is_whitespace) && applied_token(token) {
-            tokens.push(token.to_owned());
-        } else {
-            text.push_str(part);
-        }
-    }
-    if text.trim().is_empty() {
-        text.clear();
-    }
-    (tokens, text)
-}
-
-pub fn applied_token(token: &str) -> bool {
-    if let Some(namespace) = namespace_token(token) {
-        return !namespace.is_empty();
-    }
-    if let Some(node) = node_token(token) {
-        return !node.is_empty();
-    }
-    label_token(token)
-        .is_some_and(|(key, value)| !key.is_empty() && value.is_none_or(|value| !value.is_empty()))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -190,7 +84,6 @@ impl StatusFilter {
     }
 }
 
-const NODE_NAME: &str = "node";
 const SEARCH_SEPARATOR: &str = "\n";
 
 pub type FieldValues<'a> = Vec<Cow<'a, str>>;
@@ -198,6 +91,7 @@ pub type FieldFn<T, C = ()> = for<'a> fn(&'a T, &'a C, &mut FieldValues<'a>);
 
 pub struct FilterSpec<T: 'static, C: 'static = ()> {
     pub fields: &'static [(&'static str, FieldFn<T, C>)],
+    pub facets: &'static [(&'static str, FieldFn<T, C>)],
     pub namespace: bool,
     pub labels: bool,
 }
@@ -211,6 +105,17 @@ impl<T> FilterSpec<T> {
         label_sets: &[&BTreeMap<String, String>],
     ) -> bool {
         self.matches_in(row, &(), query, namespace, label_sets)
+    }
+
+    pub fn unlabeled_facets<'a>(
+        &self,
+        rows: impl IntoIterator<Item = (&'a T, Option<&'a str>)>,
+    ) -> Facets {
+        let mut facets = self.facets();
+        for (row, namespace) in rows {
+            self.count_facets(row, &(), namespace, &[], &mut facets);
+        }
+        facets
     }
 
     fn search_text(&self, row: &T) -> String {
@@ -238,11 +143,21 @@ pub trait Searchable: Sized + 'static {
     }
 }
 
+pub fn facets<'a, T: Searchable>(rows: impl IntoIterator<Item = &'a T>) -> Facets {
+    let mut facets = T::FILTER.facets();
+    for row in rows {
+        let labels = row.labels();
+        let label_sets: Vec<&Labels> = labels.iter().map(AsRef::as_ref).collect();
+        T::FILTER.count_facets(row, &(), row.namespace(), &label_sets, &mut facets);
+    }
+    facets
+}
+
 fn matches_search<T: Searchable>(row: &T, query: &TextFilter, search_text: &str) -> bool {
-    let labels = if query.labels.is_empty() {
-        None
-    } else {
+    let labels = if query.has_facet(LABEL_FACET) {
         row.labels()
+    } else {
+        None
     };
     let label_sets: Vec<&Labels> = labels.iter().map(AsRef::as_ref).collect();
     T::FILTER.scope_matches(row, &(), query, row.namespace(), &label_sets)
@@ -316,6 +231,52 @@ impl<T, C> FilterSpec<T, C> {
             && self.text_matches(row, context, query)
     }
 
+    pub fn facets(&self) -> Facets {
+        let mut facets = Facets::default();
+        if self.namespace {
+            facets.declare(NAMESPACE_FACET);
+        }
+        for (name, _) in self.facets {
+            facets.declare(name);
+        }
+        if self.labels {
+            facets.declare(LABEL_FACET);
+        }
+        facets
+    }
+
+    pub fn count_facets(
+        &self,
+        row: &T,
+        context: &C,
+        namespace: Option<&str>,
+        label_sets: &[&BTreeMap<String, String>],
+        facets: &mut Facets,
+    ) {
+        if let Some(namespace) = namespace.filter(|_| self.namespace) {
+            facets.count(NAMESPACE_FACET, namespace);
+        }
+        for (name, field) in self.facets {
+            let mut values = FieldValues::new();
+            field(row, context, &mut values);
+            values.sort();
+            values.dedup();
+            for value in &values {
+                facets.count(name, value);
+            }
+        }
+        if self.labels {
+            let labels: BTreeSet<String> = label_sets
+                .iter()
+                .flat_map(|labels| labels.iter())
+                .map(|(key, value)| format!("{key}{LABEL_SEPARATOR}{value}"))
+                .collect();
+            for label in &labels {
+                facets.count(LABEL_FACET, label);
+            }
+        }
+    }
+
     fn scope_matches(
         &self,
         row: &T,
@@ -324,25 +285,40 @@ impl<T, C> FilterSpec<T, C> {
         namespace: Option<&str>,
         label_sets: &[&BTreeMap<String, String>],
     ) -> bool {
-        let namespace_ok = if self.namespace {
-            query.matches_namespace(namespace)
-        } else {
-            query.namespace.is_none()
+        let matches_with = |labels: &[&BTreeMap<String, String>]| {
+            query.terms_match(|term| self.has_value(row, context, namespace, labels, term))
         };
-        let labels_ok = query.labels.is_empty()
-            || (self.labels && label_sets.iter().any(|labels| query.matches_labels(labels)));
-        namespace_ok && labels_ok && self.node_matches(row, context, query)
+        if label_sets.len() > 1 && query.has_facet(LABEL_FACET) {
+            return label_sets
+                .iter()
+                .any(|labels| matches_with(std::slice::from_ref(labels)));
+        }
+        matches_with(label_sets)
     }
 
-    fn node_matches(&self, row: &T, context: &C, query: &TextFilter) -> bool {
-        let Some(wanted) = &query.node else {
-            return true;
-        };
+    fn has_value(
+        &self,
+        row: &T,
+        context: &C,
+        namespace: Option<&str>,
+        label_sets: &[&BTreeMap<String, String>],
+        term: &Term,
+    ) -> bool {
+        if term.facet == NAMESPACE_FACET {
+            return self.namespace
+                && namespace.is_some_and(|namespace| term.matches_value(namespace));
+        }
+        if let Some(label) = term.label() {
+            return self.labels
+                && label_sets
+                    .iter()
+                    .any(|labels| label_matches(&label, labels));
+        }
         let mut values = FieldValues::new();
-        for (_, field) in self.fields.iter().filter(|(name, _)| *name == NODE_NAME) {
+        for (_, field) in self.facets.iter().filter(|(name, _)| *name == term.facet) {
             field(row, context, &mut values);
         }
-        values.iter().any(|node| node.eq_ignore_ascii_case(wanted))
+        values.iter().any(|value| term.matches_value(value))
     }
 
     fn text_matches(&self, row: &T, context: &C, query: &TextFilter) -> bool {
@@ -358,33 +334,70 @@ impl<T, C> FilterSpec<T, C> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TextFilter {
     pub words: Vec<String>,
-    pub namespace: Option<String>,
-    pub node: Option<String>,
-    pub labels: Vec<LabelMatch>,
+    pub terms: Vec<Term>,
 }
 
 impl TextFilter {
     pub fn parse(input: &str) -> Self {
         let mut filter = Self::default();
         for token in input.split_whitespace() {
-            if let Some(namespace) = namespace_token(token) {
-                filter.namespace = Some(namespace);
-            } else if let Some(node) = node_token(token) {
-                filter.node = Some(node);
-            } else if let Some(label) = label_token(token) {
-                filter.labels.push(label);
-            } else {
+            if let Some(term) = Term::parse(token) {
+                filter.terms.push(term);
+            } else if !is_facet_token(token) {
                 filter.words.push(token.to_ascii_lowercase());
             }
         }
         filter
     }
 
+    pub fn from_chips(chips: &[Chip], typed: &str) -> Self {
+        let mut filter = Self::default();
+        for chip in chips {
+            match chip {
+                Chip::Text(text) => filter
+                    .words
+                    .extend(text.split_whitespace().map(str::to_ascii_lowercase)),
+                Chip::Term(term) => filter.terms.push(term.clone()),
+            }
+        }
+        filter.words.extend(Self::parse(typed).words);
+        filter
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.words.is_empty()
-            && self.namespace.is_none()
-            && self.node.is_none()
-            && self.labels.is_empty()
+        self.words.is_empty() && self.terms.is_empty()
+    }
+
+    pub fn has_facet(&self, facet: &str) -> bool {
+        self.terms.iter().any(|term| term.facet == facet)
+    }
+
+    pub fn terms_match(&self, has: impl Fn(&Term) -> bool) -> bool {
+        let (negative, positive): (Vec<&Term>, Vec<&Term>) =
+            self.terms.iter().partition(|term| term.exclude);
+        let removed = negative.iter().any(|term| has(term));
+        let kept = positive.iter().all(|wanted| {
+            positive
+                .iter()
+                .filter(|term| term.group() == wanted.group())
+                .any(|term| has(term))
+        });
+        !removed && kept
+    }
+
+    pub fn selector_labels(&self) -> Option<Vec<LabelMatch>> {
+        let labels: Vec<LabelMatch> = self
+            .terms
+            .iter()
+            .filter(|term| !term.exclude)
+            .filter_map(Term::label)
+            .collect();
+        let keys: BTreeSet<&str> = labels.iter().map(|(key, _)| key.as_str()).collect();
+        let excluded = self
+            .terms
+            .iter()
+            .any(|term| term.exclude && term.facet == LABEL_FACET);
+        (!labels.is_empty() && !excluded && keys.len() == labels.len()).then_some(labels)
     }
 
     pub fn matches_text(&self, fields: &[&str]) -> bool {
@@ -402,44 +415,11 @@ impl TextFilter {
     }
 
     pub fn narrows(&self, previous: &Self) -> bool {
-        self.namespace == previous.namespace
-            && self.node == previous.node
-            && self.labels == previous.labels
+        self.terms == previous.terms
             && previous
                 .words
                 .iter()
                 .all(|old| self.words.iter().any(|new| new.contains(old.as_str())))
-    }
-
-    pub fn matches_namespace(&self, namespace: Option<&str>) -> bool {
-        self.namespace.as_ref().is_none_or(|wanted| {
-            namespace.is_some_and(|ns| ns.to_ascii_lowercase().contains(wanted.as_str()))
-        })
-    }
-
-    pub fn matches_labels(&self, labels: &BTreeMap<String, String>) -> bool {
-        self.labels
-            .iter()
-            .all(|wanted| label_matches(wanted, labels))
-    }
-
-    pub fn matches(&self, namespace: Option<&str>, fields: &[&str]) -> bool {
-        self.labels.is_empty()
-            && self.node.is_none()
-            && self.matches_namespace(namespace)
-            && self.matches_text(fields)
-    }
-
-    pub fn matches_labeled(
-        &self,
-        namespace: Option<&str>,
-        labels: &BTreeMap<String, String>,
-        fields: &[&str],
-    ) -> bool {
-        self.node.is_none()
-            && self.matches_namespace(namespace)
-            && self.matches_labels(labels)
-            && self.matches_text(fields)
     }
 
     pub fn highlights(&self, text: &str) -> Vec<Range<usize>> {
@@ -482,130 +462,97 @@ mod tests {
     }
 
     #[test]
-    fn extracting_complete_tokens_keeps_free_text_and_its_word_boundaries() {
-        assert_eq!(
-            extract_tokens("checkout ns:payments api "),
-            (vec!["ns:payments".into()], "checkout api ".into())
-        );
-        assert_eq!(
-            extract_tokens("ns:payments  "),
-            (vec!["ns:payments".into()], String::new())
-        );
-        assert_eq!(
-            extract_tokens("label:app=cart checkout"),
-            (vec!["label:app=cart".into()], "checkout".into())
-        );
-        assert_eq!(
-            extract_tokens("checkout  l:app="),
-            (Vec::new(), "checkout  l:app=".into())
-        );
-        assert_eq!(
-            extract_tokens("ns:payments"),
-            (Vec::new(), "ns:payments".into())
-        );
-    }
-
-    #[test]
-    fn completion_suggests_prefixes_namespaces_and_only_current_label_values() {
-        let sets = [
-            labels(&[("app", "cart"), ("tier", "api")]),
-            labels(&[("app", "web")]),
-        ];
-        let none: Vec<String> = Vec::new();
-        let candidates = FilterCandidates {
-            namespaces: BTreeSet::from(["payments".into(), "platform".into()]),
-            labels: label_values(&sets),
-        };
-        assert_eq!(candidates.suggest("n"), ["ns:"]);
-        assert_eq!(candidates.suggest("na"), ["ns:"]);
-        assert_eq!(candidates.suggest("l"), ["l:", "label:"]);
-        assert_eq!(candidates.suggest("nginx"), none);
-        assert_eq!(candidates.suggest("ns:"), ["ns:payments", "ns:platform"]);
-        assert_eq!(candidates.suggest("checkout ns:pay"), ["ns:payments"]);
-        assert_eq!(candidates.suggest("l:"), ["l:app=", "l:tier="]);
-        assert_eq!(candidates.suggest("label:a"), ["label:app="]);
-        assert_eq!(
-            candidates.suggest("label:app="),
-            ["label:app=cart", "label:app=web"]
-        );
-        assert_eq!(candidates.suggest("l:app=c"), ["l:app=cart"]);
-        assert_eq!(candidates.suggest("label:unknown="), none);
-        assert_eq!(candidates.suggest("checkout"), none);
-        assert_eq!(candidates.suggest("ns:payments "), none);
-        assert_eq!(candidates.suggest(""), none);
-    }
-
-    #[test]
-    fn chips_require_complete_tokens_and_preserve_label_case() {
-        for token in ["ns:payments", "label:App=Cart", "l:tier"] {
-            assert!(applied_token(token), "{token}");
-        }
-        assert!(applied_token("node:ip-10-4-12-87"));
-        for token in [
-            "ns:",
-            "node:",
-            "label:",
-            "l:app=",
-            "checkout",
-            "label:=cart",
-        ] {
-            assert!(!applied_token(token), "{token}");
-        }
-        let filter = TextFilter::parse("checkout ns:payments label:App=Cart");
-        assert!(filter.matches_labeled(
-            Some("payments"),
-            &labels(&[("App", "Cart")]),
-            &["checkout"]
-        ));
-        assert!(!filter.matches_labeled(
-            Some("payments"),
-            &labels(&[("App", "cart")]),
-            &["checkout"]
-        ));
-    }
-
-    #[test]
-    fn parses_namespace_and_label_tokens_like_the_palette() {
-        let filter = TextFilter::parse("Checkout ns:Pay label:app=cart l:tier api");
+    fn parses_facet_chips_legacy_tokens_and_words() {
+        let filter = TextFilter::parse("Checkout ns:Pay label:app=cart -@status:Failing @ns: api");
         assert_eq!(filter.words, ["checkout", "api"]);
-        assert_eq!(filter.namespace.as_deref(), Some("pay"));
         assert_eq!(
-            filter.labels,
+            filter.terms,
             [
-                ("app".to_owned(), Some("cart".to_owned())),
-                ("tier".to_owned(), None)
+                Term::include(NAMESPACE_FACET, "Pay"),
+                Term::include(LABEL_FACET, "app=cart"),
+                Term::exclude("status", "Failing"),
             ]
         );
         assert!(TextFilter::parse("   ").is_empty());
+        assert!(TextFilter::parse("@namespace").is_empty());
+    }
+
+    #[test]
+    fn chips_and_typed_words_make_one_query_without_half_typed_terms() {
+        let chips = [
+            Chip::Text("Check Out".into()),
+            Chip::parse("@namespace:web"),
+        ];
+        let filter = TextFilter::from_chips(&chips, "api @namespace:pay");
+        assert_eq!(filter.words, ["check", "out", "api"]);
+        assert_eq!(filter.terms, [Term::include(NAMESPACE_FACET, "web")]);
     }
 
     #[test]
     fn every_word_must_hit_some_field() {
         let filter = TextFilter::parse("check API");
-        assert!(filter.matches(None, &["checkout-api", "payments"]));
-        assert!(filter.matches(None, &["checkout", "api-gw"]));
-        assert!(!filter.matches(None, &["checkout", "payments"]));
-        assert!(TextFilter::default().matches(None, &[]));
+        assert!(filter.matches_text(&["checkout-api", "payments"]));
+        assert!(filter.matches_text(&["checkout", "api-gw"]));
+        assert!(!filter.matches_text(&["checkout", "payments"]));
+        assert!(TextFilter::default().matches_text(&[]));
     }
 
     #[test]
-    fn namespace_tokens_match_by_substring_and_need_a_namespace() {
-        let filter = TextFilter::parse("ns:pay");
-        assert!(filter.matches(Some("payments"), &[]));
-        assert!(!filter.matches(Some("orders"), &[]));
-        assert!(!filter.matches(None, &[]));
+    fn includes_of_one_facet_or_different_facets_and_excludes_remove() {
+        let row = [("namespace", "web"), ("status", "Failing")];
+        let matches = |query: &str| {
+            TextFilter::parse(query).terms_match(|term| {
+                row.iter()
+                    .any(|(facet, value)| term.facet == *facet && term.matches_value(value))
+            })
+        };
+        assert!(matches(""));
+        assert!(matches("@namespace:payments @namespace:WEB"));
+        assert!(!matches("@namespace:payments"));
+        assert!(matches("@namespace:web @status:failing"));
+        assert!(!matches("@namespace:web @status:Healthy"));
+        assert!(!matches("@namespace:web -@status:Failing"));
+        assert!(matches("-@status:Healthy -@node:a"));
+        assert!(!matches("@node:a"));
     }
 
     #[test]
-    fn label_tokens_need_labels() {
-        let filter = TextFilter::parse("l:app=cart");
-        assert!(filter.matches_labeled(None, &labels(&[("app", "cart")]), &[]));
-        assert!(!filter.matches_labeled(None, &labels(&[("app", "web")]), &[]));
-        assert!(!filter.matches(None, &["app=cart"]));
+    fn label_terms_need_labels_and_keep_their_case() {
+        let filter = TextFilter::parse("l:App=Cart");
+        let matches = |labels: &BTreeMap<String, String>| {
+            filter.terms_match(|term| term.label().is_some_and(|l| label_matches(&l, labels)))
+        };
+        assert!(matches(&labels(&[("App", "Cart")])));
+        assert!(!matches(&labels(&[("App", "cart")])));
+        let pod = labels(&[("app", "web"), ("tier", "db")]);
+        let on_pod = |query: &str| {
+            TextFilter::parse(query)
+                .terms_match(|term| term.label().is_some_and(|l| label_matches(&l, &pod)))
+        };
+        assert!(on_pod("@label:app=api @label:app=web"));
+        assert!(!on_pod("@label:app=web @label:tier=cache"));
+        assert!(on_pod("@label:app=web @label:tier=db"));
         let key_only = TextFilter::parse("label:app");
-        assert!(key_only.matches_labeled(None, &labels(&[("app", "web")]), &[]));
+        assert!(key_only.terms_match(|term| {
+            term.label()
+                .is_some_and(|l| label_matches(&l, &labels(&[("app", "web")])))
+        }));
     }
 
+    #[test]
+    fn only_unambiguous_label_includes_become_a_selector() {
+        let selector = |query: &str| TextFilter::parse(query).selector_labels();
+        assert_eq!(
+            selector("@label:app=web l:canary @namespace:x"),
+            Some(vec![
+                ("app".to_owned(), Some("web".to_owned())),
+                ("canary".to_owned(), None)
+            ])
+        );
+        assert_eq!(selector("@namespace:x"), None);
+        assert_eq!(selector("@label:app=web @label:app=api"), None);
+        assert_eq!(selector("@label:app=web -@label:tier=db"), None);
+    }
     #[test]
     fn status_chips_count_everything_and_what_needs_attention() {
         let statuses = [Status::Ok, Status::Err, Status::Warn, Status::Ok];
@@ -643,6 +590,7 @@ mod tests {
                 ("title", |t, (), out| out.push(t.title.as_str().into())),
                 ("owner", |t, (), out| out.push(t.owner.as_str().into())),
             ],
+            facets: &[("owner", |t, (), out| out.push(t.owner.as_str().into()))],
             namespace: false,
             labels: true,
         };
@@ -680,21 +628,46 @@ mod tests {
     }
 
     #[test]
-    fn node_tokens_parse_lowercased_and_need_a_node_field() {
-        let filter = TextFilter::parse("api node:Worker-2");
-        assert_eq!(filter.words, ["api"]);
-        assert_eq!(filter.node.as_deref(), Some("worker-2"));
-        assert!(!filter.is_empty());
-        assert!(TextFilter::parse(&node_query("worker")).node.is_some());
-        assert!(!TextFilter::parse("node:worker").matches(None, &["worker"]));
+    fn node_presets_are_node_facet_chips_and_need_a_node_facet() {
+        assert_eq!(node_query("worker-2"), "@node:worker-2");
+        assert_eq!(
+            TextFilter::parse(&node_query("worker-2")).terms,
+            [Term::include(NODE_FACET, "worker-2")]
+        );
         assert!(!toy_matches("node:alpha"));
+        assert!(toy_matches("-@node:alpha"));
     }
 
     #[test]
-    fn spec_honours_its_namespace_and_label_flags() {
+    fn spec_honours_its_namespace_label_and_declared_facets() {
         assert!(!toy_matches("ns:delta"));
         assert!(toy_matches("label:team=core"));
         assert!(!toy_matches("label:team=other"));
+        assert!(toy_matches("@owner:BETA"));
+        assert!(!toy_matches("@owner:bet"));
+        assert!(!toy_matches("-@owner:beta"));
+        assert!(!toy_matches("@title:alpha"));
+    }
+
+    #[test]
+    fn facets_count_declared_values_and_labels_in_spec_order() {
+        let rows = [
+            toy(),
+            Toy {
+                owner: "gamma".into(),
+                labels: labels(&[("team", "core"), ("tier", "db")]),
+                ..toy()
+            },
+        ];
+        let facets = facets(&rows);
+        assert_eq!(
+            facets.names().collect::<Vec<_>>(),
+            [("owner", 2), (LABEL_FACET, 2)]
+        );
+        assert_eq!(
+            facets.values(LABEL_FACET),
+            [("team=core", 2), ("tier=db", 1)]
+        );
     }
 
     #[test]
@@ -735,12 +708,12 @@ mod tests {
         assert!(narrows("check", ""));
         assert!(narrows("check out", "check"));
         assert!(narrows("xcheckx", "check"));
-        assert!(narrows("check ns:pay", "check ns:pay"));
+        assert!(narrows("check @namespace:pay", "check ns:pay"));
         assert!(!narrows("che", "check"));
         assert!(!narrows("", "check"));
         assert!(!narrows("check ns:pay", "check"));
         assert!(!narrows("check ns:payments", "check ns:pay"));
-        assert!(!narrows("check node:a", "check"));
+        assert!(!narrows("check -@node:a", "check"));
         assert!(!narrows("check l:app=web", "check l:app"));
     }
 }

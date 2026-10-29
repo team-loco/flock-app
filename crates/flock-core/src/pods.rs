@@ -499,6 +499,15 @@ impl Searchable for Pod {
                 out.extend(p.labels.iter().map(|(k, v)| format!("{k}={v}").into()));
             }),
         ],
+        facets: &[
+            ("status", |p, (), out| out.push(p.reason.as_str().into())),
+            ("node", |p, (), out| {
+                out.extend(p.node.as_deref().map(Into::into));
+            }),
+            ("owner", |p, (), out| {
+                out.extend(p.owner_label().map(Into::into));
+            }),
+        ],
         namespace: true,
         labels: true,
     };
@@ -932,7 +941,7 @@ mod tests {
         assert!(!matches_query(&pod, &TextFilter::parse("grafana")));
         assert!(matches_query(
             &pod,
-            &TextFilter::parse("l:app=checkout-api ns:pay")
+            &TextFilter::parse("l:app=checkout-api ns:payments")
         ));
         assert!(!matches_query(&pod, &TextFilter::parse("l:app=web")));
     }
@@ -945,7 +954,7 @@ mod tests {
             "ip-10-4-12-87.ec2.internal"
         )));
         assert!(scheduled("node:IP-10-4-12-87.EC2.internal"));
-        assert!(scheduled("node:ip-10-4-12-87.ec2.internal ns:pay"));
+        assert!(scheduled("node:ip-10-4-12-87.ec2.internal ns:payments"));
         assert!(!scheduled("node:ip-10-4-12-8"));
         assert!(!scheduled("node:ip-10-4-30-5.ec2.internal"));
         assert!(!matches_query(

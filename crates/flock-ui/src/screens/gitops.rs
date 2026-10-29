@@ -1,4 +1,4 @@
-use flock_core::filter::{TextFilter, label_values};
+use flock_core::filter::TextFilter;
 use flock_core::gitops::{
     FluxInstall, Source, SyncCell, SyncFilter, SyncRow, VisibleGroup, filter_counts, visible_groups,
 };
@@ -106,14 +106,11 @@ impl GitOpsScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let labels = label_values(
-            self.gitops
-                .groups
-                .iter()
-                .flat_map(|group| &group.rows)
-                .flat_map(|row| &row.label_sets),
-        );
-        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        let mut facets = SyncRow::FILTER.facets();
+        for row in self.gitops.groups.iter().flat_map(|group| &group.rows) {
+            row.count_facets(&mut facets);
+        }
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         let query = self.filter.read(cx).query().clone();
         let counts = filter_counts(&self.gitops.groups, &query);
         let chips = counts
