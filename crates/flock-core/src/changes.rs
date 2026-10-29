@@ -254,6 +254,12 @@ impl Commit {
                 out.extend(files.iter().map(|f| f.path.as_str().into()));
             }),
         ],
+        facets: &[
+            ("author", |c, (), out| out.push(c.author.as_str().into())),
+            ("target", |c, (), out| {
+                out.push(c.target.name.as_str().into());
+            }),
+        ],
         namespace: false,
         labels: false,
     };

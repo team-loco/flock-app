@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::filter::{FilterSpec, TextFilter};
+use crate::query::Facets;
 use crate::{ClusterId, ResourceRef, Status};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -75,6 +76,7 @@ impl SyncRow {
                 out.push(r.namespace.as_str().into());
             }),
         ],
+        facets: &[],
         namespace: true,
         labels: true,
     };
@@ -82,6 +84,11 @@ impl SyncRow {
     pub fn matches(&self, query: &TextFilter) -> bool {
         let label_sets: Vec<&BTreeMap<String, String>> = self.label_sets.iter().collect();
         Self::FILTER.matches(self, query, Some(&self.namespace), &label_sets)
+    }
+
+    pub fn count_facets(&self, facets: &mut Facets) {
+        let label_sets: Vec<&BTreeMap<String, String>> = self.label_sets.iter().collect();
+        Self::FILTER.count_facets(self, &(), Some(&self.namespace), &label_sets, facets);
     }
 
     pub fn target(&self, cluster: &ClusterId) -> ResourceRef {
@@ -210,6 +217,7 @@ impl Source {
             }),
             ("url", |s, (), out| out.push(s.url.as_str().into())),
         ],
+        facets: &[],
         namespace: true,
         labels: false,
     };

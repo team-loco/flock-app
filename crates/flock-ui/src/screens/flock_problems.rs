@@ -109,6 +109,12 @@ impl FleetProblemsScreen {
     pub fn set_snapshot(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
         self.problems.clone_from(&snapshot.home.problems);
         self.clusters.clone_from(&snapshot.clusters);
+        let problems = self
+            .problems
+            .iter()
+            .map(|problem| (problem, problem.target.namespace.as_deref()));
+        let facets = Problem::FILTER.unlabeled_facets(problems);
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh(cx);
     }
 

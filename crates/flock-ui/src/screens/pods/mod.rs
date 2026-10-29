@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use flock_core::emptiness::Noun;
-use flock_core::filter::label_values;
+use flock_core::filter::facets;
 use flock_core::multilog::LabelSelector;
 use flock_core::pods::{
     Container, FailingElsewhere, Pod, PodFilter, PodPhase, PodQuery, Usage, filter_counts,
@@ -313,7 +313,7 @@ impl PodsScreen {
 
     fn selector_logs(&self) -> Option<(LogTarget, String)> {
         let cluster = self.cluster.clone()?;
-        let selector = LabelSelector::from_matches(&self.query.text.labels)?;
+        let selector = LabelSelector::from_matches(&self.query.text.selector_labels()?)?;
         let label = selector.to_string();
         let target = LogTarget::Selector {
             cluster,
@@ -363,15 +363,14 @@ impl PodsScreen {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let namespace = self.query.namespace.as_ref();
-        let labels = label_values(
+        let facets = facets(
             self.snapshot
                 .pods
                 .iter()
                 .filter(|pod| self.cluster.as_ref() == Some(&pod.cluster))
-                .filter(|pod| namespace.is_none_or(|namespace| &pod.namespace == namespace))
-                .map(|pod| &pod.labels),
+                .filter(|pod| namespace.is_none_or(|namespace| &pod.namespace == namespace)),
         );
-        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         let counts = self.namespace_counts();
         let total = self.cluster_total();
         let chosen = self.query.namespace.as_deref();

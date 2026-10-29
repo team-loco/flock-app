@@ -6,7 +6,7 @@ use flock_core::crd::{Crd, CrdKey, Definition};
 use flock_core::diagnosis;
 use flock_core::emptiness::Noun;
 use flock_core::events::Event;
-use flock_core::filter::{StatusFilter, label_values};
+use flock_core::filter::{StatusFilter, facets};
 use flock_core::pods::PodEvent;
 use flock_core::resources::{Resource, filter_counts, filter_resources, namespace_counts};
 use flock_core::settings::NamespaceSelection;
@@ -377,13 +377,8 @@ impl CustomResourcesScreen {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let resources = self.rows.items();
-        let labels = label_values(
-            resources
-                .iter()
-                .filter(|row| self.in_namespace(row))
-                .map(|row| &row.labels),
-        );
-        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        let facets = facets(resources.iter().filter(|row| self.in_namespace(row)));
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh_rows(cx);
     }
 

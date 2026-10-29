@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use flock_core::emptiness::Noun;
-use flock_core::filter::{StatusFilter, label_values};
+use flock_core::filter::{StatusFilter, facets};
 use flock_core::pods::PodEvent;
 use flock_core::resources::{Resource, filter_counts, filter_resources, namespace_counts};
 use flock_core::settings::NamespaceSelection;
@@ -379,13 +379,12 @@ impl ResourcesScreen {
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let namespace = self.namespace.as_ref();
         let resources = self.rows.items();
-        let labels = label_values(
+        let facets = facets(
             resources
                 .iter()
-                .filter(|row| namespace.is_none_or(|namespace| &row.namespace == namespace))
-                .map(|row| &row.labels),
+                .filter(|row| namespace.is_none_or(|namespace| &row.namespace == namespace)),
         );
-        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh_rows(cx);
     }
 

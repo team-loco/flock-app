@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::filter::{FilterSpec, TextFilter};
+use crate::query::Facets;
 use crate::{ResourceRef, Status};
 
 const MISSING: &str = "—";
@@ -53,6 +54,7 @@ impl Route {
             ("backend", |r, (), out| out.push(r.backend.as_str().into())),
             ("detail", |r, (), out| out.push(r.detail.as_str().into())),
         ],
+        facets: &[("backend", |r, (), out| out.push(r.backend.as_str().into()))],
         namespace: true,
         labels: true,
     };
@@ -63,6 +65,14 @@ impl Route {
             .as_ref()
             .and_then(|a| a.namespace.as_deref());
         Self::FILTER.matches(self, query, namespace, &[&self.labels])
+    }
+
+    pub fn count_facets(&self, facets: &mut Facets) {
+        let namespace = self
+            .application
+            .as_ref()
+            .and_then(|a| a.namespace.as_deref());
+        Self::FILTER.count_facets(self, &(), namespace, &[&self.labels], facets);
     }
 
     pub fn host_label(&self) -> &str {

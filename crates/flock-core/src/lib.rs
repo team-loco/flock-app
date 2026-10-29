@@ -39,6 +39,7 @@ pub mod palette;
 pub mod pod_tops;
 pub mod pods;
 pub mod problem_groups;
+pub mod query;
 pub mod related;
 pub mod rename;
 pub mod resource;

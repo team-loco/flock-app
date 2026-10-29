@@ -1,5 +1,4 @@
 use flock_core::emptiness::Noun;
-use flock_core::filter::label_values;
 use flock_core::loco::{Build, BuildLogLine, Builds, LocoCommand, LogTone};
 use flock_core::{Command, Page, ResourceRef, Status};
 use gpui::{
@@ -93,8 +92,11 @@ impl BuildsScreen {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        let labels = label_values(self.builds.builds.iter().map(|build| &build.labels));
-        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        let mut facets = Build::FILTER.facets();
+        for build in &self.builds.builds {
+            build.count_facets(&mut facets);
+        }
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         let query = self.filter.read(cx).query().clone();
         let rows: Vec<Build> = self
             .builds

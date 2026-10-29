@@ -65,6 +65,17 @@ impl Occurrence {
                 }
             }),
         ],
+        facets: &[
+            ("workload", |o, (), out| {
+                out.extend(o.workload.as_deref().map(Into::into));
+            }),
+            ("node", |o, (), out| {
+                out.extend(o.node.as_deref().map(Into::into));
+            }),
+            ("image", |o, (), out| {
+                out.extend(o.image.as_deref().map(Into::into));
+            }),
+        ],
         namespace: true,
         labels: false,
     };

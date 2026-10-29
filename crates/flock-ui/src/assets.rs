@@ -16,6 +16,7 @@ pub const EXTERNAL_LINK: &str = "icons/external-link.svg";
 pub const DASH: &str = "icons/dash.svg";
 pub const CLUSTERS: &str = "icons/clusters.svg";
 pub const CLUSTER: &str = "icons/cluster.svg";
+pub const SEARCH: &str = "icons/search.svg";
 
 const ICONS: &[(&str, &[u8])] = &[
     (
@@ -37,6 +38,7 @@ const ICONS: &[(&str, &[u8])] = &[
     (GEAR, include_bytes!("../assets/icons/gear.svg")),
     (SPLIT, include_bytes!("../assets/icons/split.svg")),
     (REFRESH, include_bytes!("../assets/icons/refresh.svg")),
+    (SEARCH, include_bytes!("../assets/icons/search.svg")),
     (
         EXTERNAL_LINK,
         include_bytes!("../assets/icons/external-link.svg"),

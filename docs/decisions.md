@@ -573,3 +573,19 @@ Settled; change only with a new entry that says why.
     the highlighted row and Enter picks only it and closes, so ⌘⇧C, a name and ↵ still switch to
     one cluster. The gear, right-click and ⌘. menu opens to the left of the list. The sidebar
     header and pane-tab context read All clusters, the cluster's name, or "N clusters".
+57. **The filter is a query of facet chips** (design v2.1 `QueryBar`; amends the FilterBar token
+    syntax from #189): the FilterBar field holds a list of chips. `@facet:value` includes,
+    `-@facet:value` excludes, plain text is a name chip whose words match the list's text fields
+    as before (typed text still filters while it is typed; Enter commits it as a chip). Includes
+    of one facet OR together, different facets AND, excludes remove; label chips group by label
+    key, so `@label:app=a @label:app=b` is either app and `@label:app=a @label:tier=db` needs both.
+    Facet values match whole and ignore case (labels keep their case), so `ns:pay` no longer
+    matches `payments`. Each list's `FilterSpec` declares its facets beside its text fields;
+    `namespace` and `label` come from the spec's flags, and values and counts are computed from
+    the rows the list currently holds, never from a fixed list. The old tokens (`ns:`,
+    `namespace:`, `label:` / `l:`, `node:`) parse to the same chips, so `ScreenEvent::Filter`
+    presets and typed tokens keep working; a token typed before a space still becomes a chip.
+    The menu opens on focus: empty input shows up to four unchosen values per facet, typing shows
+    `name:*text*` first and up to six matching values per facet, `@` lists facets, `@facet:`
+    lists all of that facet's values; every value row has a hover "−" that adds it excluded.
+    Esc closes the menu first and clears the filter second.

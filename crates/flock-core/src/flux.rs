@@ -465,6 +465,7 @@ impl Searchable for FluxObject {
             ("name", |o, (), out| out.push(o.key.name.as_str().into())),
             ("kind", |o, (), out| out.push(o.key.kind.label().into())),
         ],
+        facets: &[("kind", |o, (), out| out.push(o.key.kind.label().into()))],
         namespace: true,
         labels: true,
     };

@@ -64,6 +64,10 @@ impl Searchable for HelmRelease {
             }),
             ("status", |r, (), out| out.push(r.state.as_str().into())),
         ],
+        facets: &[
+            ("status", |r, (), out| out.push(r.state.as_str().into())),
+            ("chart", |r, (), out| out.push(r.chart_label().into())),
+        ],
         namespace: true,
         labels: false,
     };

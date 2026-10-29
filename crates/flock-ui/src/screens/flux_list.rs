@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use flock_core::emptiness::Noun;
-use flock_core::filter::{StatusFilter, label_values};
+use flock_core::filter::{StatusFilter, facets};
 use flock_core::overview::plural;
 use flock_core::{ClusterId, ClusterSummary, Command, FluxAction, FluxObject, Page, Snapshot};
 use gpui::{
@@ -120,13 +120,8 @@ impl FluxListScreen {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let flux = self.flux.items();
-        let labels = label_values(
-            self.objects
-                .iter()
-                .filter_map(|&ix| flux.get(ix))
-                .map(|object| &object.labels),
-        );
-        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        let facets = facets(self.objects.iter().filter_map(|&ix| flux.get(ix)));
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh_rows(cx);
     }
 

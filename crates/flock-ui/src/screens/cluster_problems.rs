@@ -131,6 +131,14 @@ impl ClusterProblemsScreen {
     }
 
     fn refresh_rows(&mut self, cx: &mut Context<Self>) {
+        let occurrences = self.current().into_iter().flat_map(|cause| {
+            cause
+                .occurrences
+                .iter()
+                .map(|o| (o, o.target.namespace.as_deref()))
+        });
+        let facets = Occurrence::FILTER.unlabeled_facets(occurrences);
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         let query = self.filter.read(cx).query().clone();
         let rows: Vec<Occurrence> = self
             .current()

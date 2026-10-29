@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use flock_core::emptiness::Noun;
 use flock_core::events::{self, Event, EventFilter, filter_counts, filter_events};
-use flock_core::filter::label_values;
+use flock_core::filter::facets;
 use flock_core::overview::plural;
 use flock_core::resources::{EVENT_LIST, namespace_counts};
 use flock_core::settings::NamespaceSelection;
@@ -204,8 +204,8 @@ impl EventsScreen {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let events = self.events.items();
-        let labels = label_values(events.iter().map(|event| &event.labels));
-        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        let facets = facets(events.iter());
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh_rows(cx);
     }
 

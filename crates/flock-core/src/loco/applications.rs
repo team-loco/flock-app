@@ -4,6 +4,7 @@ use std::time::Duration;
 use super::Workspace;
 use crate::filter::{FilterSpec, TextFilter};
 use crate::issue::{Issue, object_line};
+use crate::query::Facets;
 use crate::time::age;
 use crate::{ClusterId, ResourceRef, Seen, Status, Uid, units};
 
@@ -326,6 +327,15 @@ impl Application {
                 out.push(a.hostname.as_deref().unwrap_or_default().into());
             }),
         ],
+        facets: &[
+            ("environment", |a, _, out| {
+                out.push(a.environment.as_str().into());
+            }),
+            ("workspace", |_, w, out| out.push(w.label().into())),
+            ("image", |a, _, out| {
+                out.extend(a.image.as_deref().map(Into::into));
+            }),
+        ],
         namespace: true,
         labels: true,
     };
@@ -338,6 +348,11 @@ impl Application {
             Some(&workspace.namespace),
             &[&self.labels],
         )
+    }
+
+    pub fn count_facets(&self, workspace: &Workspace, facets: &mut Facets) {
+        let namespace = Some(workspace.namespace.as_str());
+        Self::FILTER.count_facets(self, workspace, namespace, &[&self.labels], facets);
     }
 }
 

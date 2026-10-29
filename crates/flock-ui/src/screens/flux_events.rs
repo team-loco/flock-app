@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use flock_core::events::{ClusterEvent, EventFilter, filter_cluster_events, filter_counts};
-use flock_core::filter::label_values;
+use flock_core::filter::facets;
 use flock_core::time::age;
 use flock_core::{Command, Snapshot, Status};
 use gpui::{
@@ -86,8 +86,8 @@ impl FluxEventsScreen {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let events = self.events.items();
-        let labels = label_values(events.iter().map(|row| &row.event.labels));
-        self.filter.update(cx, |bar, cx| bar.set_labels(labels, cx));
+        let facets = facets(events.iter());
+        self.filter.update(cx, |bar, cx| bar.set_facets(facets, cx));
         self.refresh_rows(cx);
     }
 

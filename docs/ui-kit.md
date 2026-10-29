@@ -193,31 +193,37 @@ the trigger as a plain 22px button without the chevron (page header filters such
 ### FilterBar
 
 The one filter row every list page uses, always the first row above the list and always in this
-order: an optional scope picker (namespace, or cluster on Changes), the text filter, status chips
+order: an optional scope picker (namespace, or cluster on Changes), the query field, status chips
 with counts, Clear, and `n of m` on the right while the list is narrowed. `/` focuses the current
-page's bar (the shell routes it; ignored while typing in a field or terminal), Esc in the field
-clears it. The text is parsed into `flock_core::filter::TextFilter`: plain words must all match,
-`ns:<part>` matches the namespace, `l:key=value` / `label:key` match labels, as in the palette,
-and `node:<name>` matches the whole node name on lists whose `FilterSpec` has a `node` field (Pods).
+page's bar (the shell routes it; ignored while typing in a field or terminal) and opens its
+suggestions; Esc closes the suggestions, a second Esc clears the filter (decision 57).
 
-The field says “Filter”; its separate `/` key cap disappears while
-entering a query. `ns:` completes cluster namespaces, `label:` / `l:` completes keys and then
-values from the current list. ↑ / ↓ moves through suggestions, Tab or Enter completes, and Esc
-closes suggestions before clearing the query. Completed tokens become removable chips; Backspace
-with an empty text field removes the last chip. Plain words remain editable text. Enter keeps its
-normal behavior when no suggestion is open.
+The query field is a list of chips (`flock_core::query::Chip`): `@facet:value` includes (key in
+`acc` on `accbg`), `-@facet:value` excludes (key in `err` on `errbg`), plain text is a name chip.
+Each chip has a ×; Backspace with an empty input removes the last one and the trailing × clears
+them all. Typed text filters while typed; Enter commits it, or the highlighted suggestion. The
+legacy tokens `ns:`, `label:` / `l:` and `node:` parse to the same chips. The 320px menu below
+the field lists values with counts under an `@facet` header: up to four unchosen values per facet
+on an empty input, `name:*text*` and up to six matches per facet while typing, facets after `@`,
+and one facet's values after `@facet:`. ↑ / ↓ move, Tab or Enter picks, hovering a value shows a
+“−” that adds it excluded. The bar parses chips into `flock_core::filter::TextFilter`
+(`words` and `terms`); matching lives in `FilterSpec` and is unit-tested in `flock-core`.
 
-Each list passes the labels of its rows with
-`FilterBar::set_labels(flock_core::filter::label_values(rows.iter().map(|row| &row.labels)), cx)`;
-the shell supplies the cluster's namespaces through `set_namespaces`. `FilterBar::text` returns the
-chips and the typed text together. A screen opens another list with a preset filter by emitting
-`ScreenEvent::Filter { page, tokens }` (e.g. `vec![node_query(&node.name)]`): the shell selects all
-namespaces for that list, opens the page and calls `FilterBar::preset(tokens, ..)`, which replaces
-the chips, empties the text and resets the status chip.
+A list declares its facets on its `FilterSpec` (`facets: &[("status", |p, (), out| ..)]`, besides
+the `namespace` and `labels` flags) and passes the values of its current rows with
+`FilterBar::set_facets(flock_core::filter::facets(rows), cx)` (or
+`Spec::FILTER.unlabeled_facets(..)` / a row's `count_facets` for lists that are not
+`Searchable`). `FilterBar::text` returns the chips and the typed text together. A screen opens
+another list with a preset filter by emitting `ScreenEvent::Filter { page, tokens }` (e.g.
+`vec![node_query(&node.name)]`, which is `@node:<name>`): the shell selects all namespaces for
+that list, opens the page and calls `FilterBar::preset(&tokens, ..)`, which replaces the chips,
+empties the text and resets the status chip.
 
 ```rust
 let filter = cx.new(|cx| FilterBar::new("pod-filter", window, cx).scope(namespace_select.clone()));
 cx.subscribe(&filter, |this, _, FilterEvent::Changed, cx| this.refresh(cx)).detach();
+// on new rows: offer their facet values
+filter.update(cx, |bar, cx| bar.set_facets(facets(rows.iter()), cx));
 // in refresh: read the query and chip, filter rows in flock-core, then report back
 let (query, chip) = { let bar = filter.read(cx); (bar.query().clone(), bar.chip()) };
 filter.update(cx, |bar, cx| {
