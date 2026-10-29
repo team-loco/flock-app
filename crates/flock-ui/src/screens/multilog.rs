@@ -11,24 +11,20 @@ use gpui::{
 
 use crate::highlight::{SOURCE_COLORS, source_colors};
 use crate::kit::{
-    ActionMenu, FILTER_PLACEHOLDER, InputEvent, LogLine, LogView, MenuItem, MetaLine, PageHeader,
-    TextField, TextFieldState, drain, find_matches, pane,
+    ActionMenu, FILTER_PLACEHOLDER, InputEvent, LogLine, LogView, MenuItem, TextField,
+    TextFieldState, drain, find_matches, pane,
 };
 use crate::screens::workload::kit_line;
 use crate::theme::{
     ActiveTheme, CONTROL_SMALL, FONT_MONO, LEGEND_CHIP_SWATCH, RADIUS, RADIUS_SMALL, RULE, SPACE_2,
-    SPACE_3, SPACE_4, SPACE_8, TEXT_SMALL,
+    SPACE_3, SPACE_8, TEXT_SMALL,
 };
 
 const PAUSE: &str = "Pause";
-const META_SEPARATOR: &str = " · ";
 const CONTAINER_SEPARATOR: &str = "/";
 const ENDED: &str = "ended";
 const LEFT: &str = "left";
-const FOLLOWING: &str = "new pods join automatically";
 const WAITING: &str = "Waiting for running containers…";
-const PODS: &str = "pods";
-const POD: &str = "pod";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceState {
@@ -104,20 +100,8 @@ impl MultiLogs {
         }
     }
 
-    pub fn target(&self) -> &LogTarget {
-        &self.target
-    }
-
     pub fn logs(&self) -> &Entity<LogView> {
         &self.logs
-    }
-
-    pub fn legend(&self) -> Vec<&LegendEntry> {
-        self.legend.values().collect()
-    }
-
-    pub fn paused(&self) -> bool {
-        self.paused
     }
 
     pub fn watch(&mut self, cx: &mut Context<Self>) {
@@ -338,25 +322,6 @@ impl MultiLogs {
             .child(self.options.clone())
     }
 
-    pub fn summary(&self) -> String {
-        let pods: std::collections::BTreeSet<String> = self
-            .legend
-            .values()
-            .filter(|entry| entry.state != SourceState::Left)
-            .map(|entry| pod_key(&entry.source))
-            .collect();
-        let noun = if pods.len() == 1 { POD } else { PODS };
-        let count = format!("{} {noun}", pods.len());
-        let mut facts: Vec<String> = Vec::new();
-        facts.extend(self.target.namespace().map(str::to_owned));
-        facts.push(self.target.cluster().to_string());
-        facts.push(count);
-        if self.target.follows_new_pods() {
-            facts.push(FOLLOWING.to_owned());
-        }
-        facts.join(META_SEPARATOR)
-    }
-
     fn chip(
         &self,
         id: SourceId,
@@ -459,93 +424,6 @@ impl Render for MultiLogs {
             .bg(palette.editor)
             .child(legend)
             .child(div().flex_1().min_h_0().child(pane(&self.logs)))
-    }
-}
-
-pub struct MultiLogsScreen {
-    pub(crate) navigation: Option<Entity<crate::kit::HeaderNavigation>>,
-    view: Entity<MultiLogs>,
-    compact: bool,
-    _events: Subscription,
-}
-
-impl EventEmitter<Command> for MultiLogsScreen {}
-
-impl MultiLogsScreen {
-    pub fn new(target: LogTarget, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let view = cx.new(|cx| MultiLogs::new("tab-pod-logs", target, window, cx));
-        let events = cx.subscribe(&view, |_, _, command: &Command, cx| {
-            cx.emit(command.clone());
-        });
-        cx.observe(&view, |_, _, cx| cx.notify()).detach();
-        Self {
-            navigation: None,
-            view,
-            compact: false,
-            _events: events,
-        }
-    }
-
-    pub fn shows(&self, target: &LogTarget, cx: &gpui::App) -> bool {
-        self.view.read(cx).target() == target
-    }
-
-    pub fn view(&self) -> &Entity<MultiLogs> {
-        &self.view
-    }
-
-    pub fn set_compact(&mut self, compact: bool, cx: &mut Context<Self>) {
-        if self.compact != compact {
-            self.compact = compact;
-            cx.notify();
-        }
-    }
-
-    pub fn watch(&mut self, cx: &mut Context<Self>) {
-        self.view.update(cx, MultiLogs::watch);
-    }
-}
-
-impl Render for MultiLogsScreen {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = *cx.palette();
-        let title = self.view.read(cx).target().label();
-        if self.compact {
-            let logs = self.view.read(cx).logs().clone();
-            return div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .bg(palette.editor)
-                .child(crate::kit::PageTitle::new(title).leading(self.navigation.clone()))
-                .child(div().flex_1().min_h_0().child(pane(&logs)));
-        }
-        let summary = self.view.read(cx).summary();
-        let header = PageHeader::new(title)
-            .leading(self.navigation.clone())
-            .mono()
-            .meta(MetaLine::new(summary));
-        let tools = self
-            .view
-            .update(cx, |view, cx| view.tools(Vec::new(), cx).into_any_element());
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(palette.editor)
-            .child(header)
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .px(SPACE_8)
-                    .py(SPACE_4)
-                    .border_b(RULE)
-                    .border_color(palette.line)
-                    .child(tools),
-            )
-            .child(div().flex_1().min_h_0().child(self.view.clone()))
     }
 }
 

@@ -603,3 +603,20 @@ Settled; change only with a new entry that says why.
     on headers as well as rows; a header with the keyboard on it takes the selection fill, and
     Enter on a row still opens it. The choice and the collapsed groups are stored per table and
     scope in `view.json` beside column widths (#115); changing the facet expands every group.
+59. **Logs v3: one Logs page with sources, levels, volume and search** (design v2.1 `LogsV3`;
+    amends 35 and 55): every `Logs <target>` tab (`Command::FollowLogs`) is `LogsPage`. Its query
+    bar takes `@level`, `@cluster` (several clusters only), `@namespace`, `@workload`, `@pod` and
+    `@container` chips, which filter lines like a list's facets (decision 57), while free text
+    only highlights and is stepped with ▲/▼ and a "3/41" position; the current match line gets
+    ◆ in the marker column. A line's level is its parsed JSON or logfmt level, else the level the
+    stream reported, else a leading level word. Time ranges (Live, 15m, 1h, 6h) end at the newest
+    buffered line and count the lines they hold; there is no custom range and no brush yet. The
+    Volume section stacks 60 buckets of the shown window by level. Sources group by status
+    (failing first), workload, cluster and node in the picked order; clicking a source hides or
+    shows its lines, a group row folds it, and Add source streams one more pod from the
+    namespaces already shown. A Workload or label-selector target follows every selected cluster:
+    choosing several clusters (or all) on a logs tab keeps the page with that scope instead of
+    going to Flock home, and lines show their cluster. Picked pods stay on their cluster. The
+    pod row menu gains "Logs in a new tab" for that pod; the pod and workload docks, their
+    previous-container logs and the single-container `OpenLogs` tab stay as decision 55 has them.
+    Pause is gone from the tab: logs follow at the bottom and "↓ Latest" resumes.

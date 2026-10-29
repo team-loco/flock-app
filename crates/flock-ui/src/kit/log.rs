@@ -4,11 +4,12 @@ use std::ops::Range;
 use gpui::{
     AnyElement, App, Context, ElementId, Entity, HighlightStyle, Hsla, InteractiveElement,
     IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, ScrollStrategy,
-    SharedString, Styled, UniformListScrollHandle, Window, div, list, prelude::FluentBuilder, px,
-    uniform_list,
+    SharedString, Styled, UnderlineStyle, UniformListScrollHandle, Window, div, list,
+    prelude::FluentBuilder, px, uniform_list,
 };
 
 use flock_core::LogLevel;
+use flock_core::logpage::contains_phrase;
 use flock_core::logparse::{self, ParsedLine};
 
 use super::button::Button;
@@ -16,7 +17,8 @@ use super::menu::MenuItem;
 use super::selectable::SelectableText;
 use crate::highlight::{SOURCE_COLORS, source_colors};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, LOG_LEVEL, LOG_LINE, LOG_SOURCE, LOG_TIMESTAMP, Palette, SPACE_3,
+    ActiveTheme, FONT_MONO, LOG_CLUSTER_OPACITY, LOG_LEVEL, LOG_LINE, LOG_MARKER, LOG_SOURCE,
+    LOG_SOURCE_BAR, LOG_SOURCE_BAR_HEIGHT, LOG_TIMESTAMP, Palette, RADIUS_SMALL, RULE, SPACE_3,
     SPACE_6, TEXT_MONO, TEXT_UI,
 };
 
@@ -35,6 +37,7 @@ const TIMESTAMP_MIN_LEN: usize = 20;
 const WRAP_OVERDRAW: Pixels = px(200.);
 const LINE_ID: &str = "log-line";
 const FIELDS_GAP: &str = "  ";
+const CURRENT_MARK: &str = "◆";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
@@ -121,6 +124,14 @@ impl ParsedText {
 pub struct LineSource {
     pub label: SharedString,
     pub slot: usize,
+    pub detail: Option<SourceDetail>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceDetail {
+    pub workload: SharedString,
+    pub place: SharedString,
+    pub cluster: Option<SharedString>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -156,8 +167,25 @@ impl LogLine {
         self.source = Some(LineSource {
             label: label.into(),
             slot,
+            detail: None,
         });
         self
+    }
+
+    pub fn with_detail(mut self, detail: SourceDetail, slot: usize) -> Self {
+        self.source = Some(LineSource {
+            label: detail.place.clone(),
+            slot,
+            detail: Some(detail),
+        });
+        self
+    }
+
+    pub fn shown_text(&self, raw: bool) -> &SharedString {
+        match &self.parsed {
+            Some(parsed) if !raw => &parsed.text,
+            _ => &self.message,
+        }
     }
 
     pub fn text(&self) -> String {
@@ -391,6 +419,15 @@ pub struct LogView {
     wrapped: ListState,
     sources: Option<(Palette, [Hsla; SOURCE_COLORS])>,
     format: LineFormat,
+    matches: MatchStyle,
+    current: Option<usize>,
+    source_width: Pixels,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MatchStyle {
+    Accent,
+    Marked,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -415,7 +452,54 @@ impl LogView {
             wrapped: ListState::new(0, ListAlignment::Top, WRAP_OVERDRAW),
             sources: None,
             format: LineFormat::Raw,
+            matches: MatchStyle::Accent,
+            current: None,
+            source_width: LOG_SOURCE,
         }
+    }
+
+    pub fn marked(mut self) -> Self {
+        self.matches = MatchStyle::Marked;
+        self
+    }
+
+    pub fn set_source_width(&mut self, width: Pixels, cx: &mut Context<Self>) {
+        if self.source_width != width {
+            self.source_width = width;
+            cx.notify();
+        }
+    }
+
+    pub fn match_lines_from(&self, start: usize) -> Vec<usize> {
+        let raw = self.raw();
+        (start..self.buffer.len())
+            .filter(|ix| {
+                self.buffer
+                    .get(*ix)
+                    .is_some_and(|line| contains_phrase(line.shown_text(raw), &self.query))
+            })
+            .collect()
+    }
+
+    pub fn current(&self) -> Option<usize> {
+        self.current
+    }
+
+    pub fn set_current(&mut self, current: Option<usize>, cx: &mut Context<Self>) {
+        if self.current == current {
+            return;
+        }
+        self.current = current;
+        cx.notify();
+    }
+
+    pub fn reveal(&mut self, ix: usize, cx: &mut Context<Self>) {
+        self.follow = false;
+        self.scroll.scroll_to_item(ix, ScrollStrategy::Center);
+        if self.wrap {
+            self.wrapped.scroll_to_reveal_item(ix);
+        }
+        cx.notify();
     }
 
     pub fn parsed(mut self) -> Self {
@@ -674,40 +758,12 @@ impl LogView {
             .clone()
             .or_else(|| parsed.and_then(|parsed| parsed.time.clone()));
         let colors = line_colors(level, self.levels, palette);
-        let source = line.source.as_ref().map(|source| {
-            let color = sources
-                .get(source.slot % SOURCE_COLORS)
-                .copied()
-                .unwrap_or(palette.fg2);
-            div()
-                .w(LOG_SOURCE)
-                .flex_none()
-                .truncate()
-                .text_color(color)
-                .child(source.label.clone())
-        });
-        let highlight = HighlightStyle {
-            background_color: Some(palette.accbg),
-            color: Some(palette.fg),
-            ..HighlightStyle::default()
-        };
-        let id = ElementId::NamedInteger(LINE_ID.into(), ix as u64);
-        let message = if let Some(parsed) = parsed {
-            let matches = find_matches(&parsed.text, &self.query);
-            let muted = HighlightStyle {
-                color: Some(palette.mute),
-                ..HighlightStyle::default()
-            };
-            let runs = field_runs(parsed.fields(), &matches, muted, highlight);
-            SelectableText::new(parsed.text.clone())
-                .id(id)
-                .highlights(runs)
-        } else {
-            let matches = find_matches(&line.message, &self.query);
-            SelectableText::new(line.message.clone())
-                .id(id)
-                .highlights(matches.into_iter().map(|range| (range, highlight)))
-        };
+        let source = line
+            .source
+            .as_ref()
+            .map(|source| self.source_cell(source, palette, sources));
+        let marked = self.matches == MatchStyle::Marked;
+        let message = self.message(ix, line, parsed, palette);
         div()
             .flex()
             .gap(SPACE_6)
@@ -717,6 +773,18 @@ impl LogView {
                 row.h(LOG_LINE).w_full().whitespace_nowrap()
             })
             .when_some(colors.row, Styled::bg)
+            .when(marked, |row| {
+                let diamond = (self.current == Some(ix)).then_some(CURRENT_MARK);
+                row.child(
+                    div()
+                        .w(LOG_MARKER)
+                        .flex_none()
+                        .flex()
+                        .justify_center()
+                        .text_color(palette.acc)
+                        .children(diamond),
+                )
+            })
             .when(self.timestamps, |row| {
                 row.child(
                     div()
@@ -743,6 +811,93 @@ impl LogView {
                     .child(message),
             )
             .into_any_element()
+    }
+
+    fn source_cell(
+        &self,
+        source: &LineSource,
+        palette: &Palette,
+        sources: &[Hsla; SOURCE_COLORS],
+    ) -> AnyElement {
+        let color = sources
+            .get(source.slot % SOURCE_COLORS)
+            .copied()
+            .unwrap_or(palette.fg2);
+        match &source.detail {
+            Some(detail) => detail_cell(detail, color, self.source_width, palette),
+            None => div()
+                .w(self.source_width)
+                .flex_none()
+                .truncate()
+                .text_color(color)
+                .child(source.label.clone())
+                .into_any_element(),
+        }
+    }
+
+    fn message(
+        &self,
+        ix: usize,
+        line: &LogLine,
+        parsed: Option<&ParsedText>,
+        palette: &Palette,
+    ) -> SelectableText {
+        let marked = self.matches == MatchStyle::Marked;
+        let highlight = if marked {
+            HighlightStyle {
+                background_color: Some(palette.warnbg),
+                color: Some(palette.fg),
+                underline: Some(UnderlineStyle {
+                    thickness: RULE,
+                    color: Some(palette.warn),
+                    wavy: false,
+                }),
+                ..HighlightStyle::default()
+            }
+        } else {
+            HighlightStyle {
+                background_color: Some(palette.accbg),
+                color: Some(palette.fg),
+                ..HighlightStyle::default()
+            }
+        };
+        let current = HighlightStyle {
+            background_color: Some(palette.warn),
+            color: Some(palette.editor),
+            ..HighlightStyle::default()
+        };
+        let is_current = marked && self.current == Some(ix);
+        let id = ElementId::NamedInteger(LINE_ID.into(), ix as u64);
+        if let Some(parsed) = parsed {
+            let matches = find_matches(&parsed.text, &self.query);
+            let muted = HighlightStyle {
+                color: Some(palette.mute),
+                ..HighlightStyle::default()
+            };
+            let mut runs = field_runs(parsed.fields(), &matches, muted, highlight);
+            if is_current && let Some(first) = matches.first() {
+                for run in &mut runs {
+                    if run.0 == *first {
+                        run.1 = current;
+                    }
+                }
+            }
+            SelectableText::new(parsed.text.clone())
+                .id(id)
+                .highlights(runs)
+        } else {
+            let matches = find_matches(&line.message, &self.query);
+            let styled = matches.into_iter().enumerate().map(|(n, range)| {
+                if is_current && n == 0 {
+                    (range, current)
+                } else {
+                    (range, highlight)
+                }
+            });
+            SelectableText::new(line.message.clone())
+                .id(id)
+                .highlights(styled)
+        }
     }
 }
 
@@ -825,6 +980,46 @@ impl Render for LogView {
                 )
             })
     }
+}
+
+fn detail_cell(detail: &SourceDetail, color: Hsla, width: Pixels, palette: &Palette) -> AnyElement {
+    div()
+        .w(width)
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(SPACE_3)
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .child(
+            div()
+                .w(LOG_SOURCE_BAR)
+                .h(LOG_SOURCE_BAR_HEIGHT)
+                .flex_none()
+                .rounded(RADIUS_SMALL)
+                .bg(color),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_color(palette.fg2)
+                .child(detail.workload.clone()),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_color(palette.mute)
+                .child(detail.place.clone()),
+        )
+        .children(detail.cluster.clone().map(|cluster| {
+            div()
+                .flex_none()
+                .text_color(palette.mute)
+                .opacity(LOG_CLUSTER_OPACITY)
+                .child(cluster)
+        }))
+        .into_any_element()
 }
 
 #[cfg(test)]

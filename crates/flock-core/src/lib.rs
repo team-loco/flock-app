@@ -27,6 +27,7 @@ pub mod id;
 pub mod issue;
 #[cfg(feature = "loco")]
 pub mod loco;
+pub mod logpage;
 pub mod logparse;
 pub mod menubar;
 pub mod multilog;

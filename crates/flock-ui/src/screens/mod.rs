@@ -21,6 +21,7 @@ pub(crate) mod flux_object;
 pub mod gitops;
 pub(crate) mod helm;
 pub mod logs;
+pub mod logs_page;
 pub mod multilog;
 pub mod namespace;
 mod namespaces;

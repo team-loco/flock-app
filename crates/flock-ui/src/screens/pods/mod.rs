@@ -25,7 +25,7 @@ use gpui::{
 mod inspector;
 mod streams;
 
-pub(crate) use streams::exit_note;
+pub(crate) use streams::{exit_note, log_file_name, save_log};
 
 use inspector::{PodContent, PodInspector};
 use streams::{LogSession, ShellSession, TERMINAL_ID};
@@ -62,6 +62,9 @@ pub(super) const CONTAINER_SELECT: Pixels = px(160.);
 
 pub(super) const MISSING: &str = "—";
 const LOGS_FOR: &str = "Logs for";
+const LOGS_IN_TAB: &str = "Logs in a new tab";
+const LOGS_IN_TAB_DESCRIPTION: &str =
+    "Every container of this pod on the Logs page, with levels, volume and search.";
 const SELECTED_PODS: &str = "selected pods";
 const MARKED_LOGS_DESCRIPTION: &str = "Merge the output of every ⇧-clicked pod in one tab.";
 const SELECTOR_LOGS_DESCRIPTION: &str =
@@ -638,6 +641,16 @@ fn menu_items(
                 let _ = selected_screen.update(cx, |_, cx| open_logs(target, cx));
             })
             .description(description),
+        );
+    }
+    if let Some(target) = LogTarget::pods(&[pod.resource()]) {
+        let tab_screen = screen.clone();
+        items.push(
+            MenuItem::new(LOGS_IN_TAB, move |_, cx| {
+                let target = target.clone();
+                let _ = tab_screen.update(cx, |_, cx| open_logs(target, cx));
+            })
+            .description(LOGS_IN_TAB_DESCRIPTION),
         );
     }
     for (container, port) in pod.ports() {

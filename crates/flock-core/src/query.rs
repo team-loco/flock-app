@@ -211,6 +211,17 @@ impl Facets {
         }
     }
 
+    pub fn add(&mut self, facet: &str, value: &str, count: usize) {
+        if value.is_empty() || count == 0 {
+            return;
+        }
+        self.declare(facet);
+        let Some((_, values)) = self.0.iter_mut().find(|(name, _)| name == facet) else {
+            return;
+        };
+        *values.entry(value.to_owned()).or_default() += count;
+    }
+
     pub fn names(&self) -> impl Iterator<Item = (&str, usize)> {
         self.0
             .iter()

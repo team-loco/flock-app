@@ -3693,29 +3693,117 @@ fn a_workloads_logs_tab_merges_every_pod_in_time_order() -> anyhow::Result<()> {
     for label in &legend {
         assert!(text.contains(label.as_str()), "{label} has no lines");
     }
-    ui.click("tab-pod-logs-source-0")?;
+    ui.click("logs-source-0")?;
     let (shown, filtered) = pod_logs(&ui);
     assert_eq!(shown.len(), legend.len() - 1);
     let hidden = legend.iter().find(|label| !shown.contains(label));
     assert!(hidden.is_some_and(|label| !filtered.contains(&format!(" {label} "))));
-    ui.click("tab-pod-logs-source-0")?;
+    ui.click("logs-source-0")?;
     assert_eq!(pod_logs(&ui).0, legend);
     Ok(())
 }
 
+fn logs_search(ui: &Ui) -> (String, Option<usize>) {
+    ui.read(|shell, cx| {
+        shell.logs_page().map_or((String::new(), None), |page| {
+            let page = page.read(cx);
+            (page.match_position(), page.current_match())
+        })
+    })
+}
+
 #[test]
-fn pausing_the_merged_logs_holds_new_lines_until_resumed() -> anyhow::Result<()> {
+fn searching_the_logs_page_steps_through_matches() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Logs)?;
     ui.settle()?;
-    ui.click("tab-pod-logs-options")?;
-    ui.click("tab-pod-logs-options-item-2")?;
-    let held = pod_logs(&ui).1;
-    ui.advance_clock(std::time::Duration::from_secs(2))?;
-    assert_eq!(pod_logs(&ui).1, held);
-    ui.click("tab-pod-logs-options")?;
-    ui.click("tab-pod-logs-options-item-2")?;
-    ui.advance_clock(std::time::Duration::from_secs(1))?;
-    assert!(pod_logs(&ui).1.len() > held.len());
+    assert!(ui.bounds("logs-match-position").is_none());
+    ui.click("logs-query-field")?;
+    ui.type_text("webhook secret")?;
+    ui.settle()?;
+    let (position, first) = logs_search(&ui);
+    assert!(position.starts_with("1/"), "{position}");
+    assert!(ui.bounds("logs-match-position").is_some());
+    ui.click("logs-next-match")?;
+    let (position, second) = logs_search(&ui);
+    assert!(position.starts_with("2/"), "{position}");
+    assert!(second > first, "{first:?} {second:?}");
+    ui.click("logs-previous-match")?;
+    assert_eq!(logs_search(&ui).1, first);
+    let (_, text) = pod_logs(&ui);
+    ui.press("enter")?;
+    ui.type_text("@level:ERROR ")?;
+    ui.settle()?;
+    let (_, errors) = pod_logs(&ui);
+    assert!(errors.lines().count() < text.lines().count());
+    assert!(
+        errors.lines().all(|line| line.contains(" ERROR ")),
+        "{errors}"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_logs_volume_and_source_groups_collapse() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Logs)?;
+    ui.settle()?;
+    assert!(ui.bounds("logs-histogram").is_some());
+    ui.click("logs-volume-toggle")?;
+    assert!(ui.bounds("logs-histogram").is_none());
+    ui.click("logs-volume-toggle")?;
+    assert!(ui.bounds("logs-histogram").is_some());
+    assert!(ui.bounds("logs-source-0").is_some());
+    ui.click("logs-group-row-0")?;
+    ui.click("logs-group-row-1")?;
+    assert!(ui.bounds("logs-source-0").is_none());
+    ui.click("logs-range-1")?;
+    ui.click("logs-view-0")?;
+    let wrapped = ui.read(|shell, cx| shell.log_view(cx).is_some_and(|view| view.read(cx).wrap()));
+    assert!(wrapped);
+    Ok(())
+}
+
+#[test]
+fn a_workloads_logs_page_spreads_across_the_selected_clusters() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Logs)?;
+    ui.settle()?;
+    let target = ui.state().location().logs.clone();
+    ui.click("cluster-switcher")?;
+    ui.click("switcher-row-2")?;
+    ui.settle()?;
+    let state = ui.state();
+    assert_eq!(state.location().page, Page::Logs);
+    assert!(matches!(state.location().scope(), Scope::Several(ids) if ids.len() == 2));
+    assert_eq!(state.location().logs, target);
+    assert!(ui.bounds("logs-histogram").is_some());
+    let clusters = ui.read(|shell, cx| {
+        shell.logs_page().map_or(0, |page| {
+            let page = page.read(cx);
+            let ids: std::collections::BTreeSet<&ClusterId> = page
+                .sources()
+                .into_iter()
+                .map(|source| &source.cluster)
+                .collect();
+            ids.len()
+        })
+    });
+    assert_eq!(clusters, 2);
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    ui.save_png(&dir.join("logs-several-clusters.png"))?;
+    Ok(())
+}
+
+#[test]
+fn a_pods_row_menu_opens_its_logs_page_in_a_new_tab() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Pods)?;
+    ui.right_click("pods-row-1")?;
+    ui.click("pods-row-menu-item-3")?;
+    let state = ui.state();
+    assert_eq!(state.location().page, Page::Logs);
+    let target = state.location().logs.clone();
+    assert!(
+        matches!(&target, Some(flock_core::LogTarget::Pods { pods, .. }) if pods.len() == 1),
+        "{target:?}"
+    );
     Ok(())
 }
 
@@ -3759,7 +3847,7 @@ fn the_workload_menu_and_dock_follow_all_pods() -> anyhow::Result<()> {
 const FIT_FRAMES: usize = 3;
 const FIT_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
 const POD_LOGS_FOR_ITEM: &str = "pods-row-menu-item-3";
-const POD_MENU_ITEMS: [&str; 8] = [
+const POD_MENU_ITEMS: [&str; 10] = [
     "pods-row-menu-item-0",
     "pods-row-menu-item-1",
     "pods-row-menu-item-2",
@@ -3768,6 +3856,8 @@ const POD_MENU_ITEMS: [&str; 8] = [
     "pods-row-menu-item-5",
     "pods-row-menu-item-6",
     "pods-row-menu-item-7",
+    "pods-row-menu-item-8",
+    "pods-row-menu-item-9",
 ];
 
 fn pod_menu_len(ui: &mut Ui) -> anyhow::Result<usize> {

@@ -19,7 +19,7 @@ use crate::screens::flock_problems::FleetProblemsScreen;
 use crate::screens::flux_object::FluxObjectPage;
 use crate::screens::gitops::GitOpsScreen;
 use crate::screens::logs::LogsScreen;
-use crate::screens::multilog::MultiLogsScreen;
+use crate::screens::logs_page::LogsPage;
 use crate::screens::namespace::NamespaceScreen;
 use crate::screens::pods::PodsScreen;
 use crate::screens::settings::SettingsScreen;
@@ -111,7 +111,7 @@ pub(super) struct PaneScreens {
     pub(super) detail: Option<(Entity<DetailScreen>, Subscription)>,
     pub(super) namespace: Option<(Entity<NamespaceScreen>, Subscription)>,
     pub(super) logs: Option<(Entity<LogsScreen>, Subscription)>,
-    pub(super) multi_logs: Option<(Entity<MultiLogsScreen>, Subscription)>,
+    pub(super) multi_logs: Option<(Entity<LogsPage>, Subscription)>,
     pub(super) edits: Vec<(TabId, Entity<EditScreen>, Subscription)>,
     pub(super) load: LoadClock,
     pub(super) strip: ScrollHandle,

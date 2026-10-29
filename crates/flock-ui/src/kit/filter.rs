@@ -79,6 +79,7 @@ pub struct FilterBar {
     suggestions: Vec<Suggestion>,
     highlighted: Option<usize>,
     open: bool,
+    inline: bool,
     _subscription: Subscription,
 }
 
@@ -110,8 +111,18 @@ impl FilterBar {
             suggestions: Vec::new(),
             highlighted: None,
             open: false,
+            inline: false,
             _subscription: subscription,
         }
+    }
+
+    pub fn inline(mut self) -> Self {
+        self.inline = true;
+        self
+    }
+
+    pub fn set_placeholder(&mut self, placeholder: impl Into<SharedString>) {
+        self.placeholder = placeholder.into();
     }
 
     pub fn set_facets(&mut self, facets: Facets, cx: &mut Context<Self>) {
@@ -639,6 +650,7 @@ impl FilterBar {
             .items_center()
             .gap(SPACE_2)
             .max_w(FILTER_WIDTH)
+            .when(self.inline, Styled::max_w_full)
             .flex_1()
             .min_w(FILTER_MIN)
             .min_h(QUERY_BAR)
@@ -735,17 +747,11 @@ impl Render for FilterBar {
             });
         let selector = self.id.to_string();
         let field = self.field_element(window, cx);
-        div()
+        let bar = div()
             .debug_selector(move || selector)
             .id(self.id.clone())
             .flex()
-            .flex_none()
             .items_center()
-            .gap(SPACE_4)
-            .px(SPACE_8)
-            .py(SPACE_4)
-            .border_b(RULE)
-            .border_color(palette.line)
             .capture_action(cx.listener(|this, _: &TextFieldUp, window, cx| {
                 this.suggestion_key(SuggestionKey::Up, window, cx);
             }))
@@ -768,7 +774,16 @@ impl Render for FilterBar {
             )
             .on_action(cx.listener(|this, _: &TextFieldEscape, window, cx| {
                 this.clear(window, cx);
-            }))
+            }));
+        if self.inline {
+            return bar.w_full().child(field);
+        }
+        bar.flex_none()
+            .gap(SPACE_4)
+            .px(SPACE_8)
+            .py(SPACE_4)
+            .border_b(RULE)
+            .border_color(palette.line)
             .when_some(self.scope.clone(), ParentElement::child)
             .child(field)
             .children(chips)

@@ -477,6 +477,16 @@ fn exists(resource: &ResourceRef, snapshot: &Snapshot) -> bool {
 }
 
 fn retargeted(location: &Location, scope: &Scope, snapshot: &Snapshot) -> Location {
+    let spreads = location
+        .logs
+        .as_ref()
+        .filter(|target| target.follows_new_pods() && scope.cluster().is_none());
+    if let Some(target) = spreads {
+        return Location {
+            logs: Some(target.clone()),
+            ..Location::flock_in(Page::Logs, scope)
+        };
+    }
     let Some(id) = scope.cluster() else {
         let on_flock = location.cluster.is_none() && location.page.is_flock();
         let page = if on_flock {
@@ -1240,6 +1250,33 @@ mod tests {
         assert_eq!(state.location(), &Location::flock_in(Page::Overview, &two));
         state.apply(&Command::SelectCluster(None));
         assert_eq!(state.location().scope(), Scope::All);
+    }
+
+    #[test]
+    fn workload_logs_follow_several_clusters_and_picked_pods_do_not() {
+        let mut state = loaded();
+        let two = Scope::Several(vec![ClusterId::new("a"), ClusterId::new("b")]);
+        let workload = LogTarget::Workload(ResourceRef {
+            cluster: ClusterId::new("a"),
+            kind: "Deployment".into(),
+            namespace: Some("web".into()),
+            name: "checkout".into(),
+        });
+        state.apply(&Command::FollowLogs(workload.clone()));
+        state.retarget(&two);
+        assert_eq!(state.location().page, Page::Logs);
+        assert_eq!(state.location().scope(), two);
+        assert_eq!(state.location().logs, Some(workload.clone()));
+        state.retarget(&Scope::All);
+        assert_eq!(state.location().scope(), Scope::All);
+        assert_eq!(state.location().logs, Some(workload));
+        let pods = LogTarget::Pods {
+            cluster: ClusterId::new("a"),
+            pods: std::collections::BTreeSet::new(),
+        };
+        state.apply(&Command::FollowLogs(pods));
+        state.retarget(&two);
+        assert_eq!(state.location(), &Location::flock_in(Page::Overview, &two));
     }
 
     #[test]

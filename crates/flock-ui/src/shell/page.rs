@@ -2,7 +2,7 @@ use flock_core::history::Location;
 use flock_core::overview::plural;
 use flock_core::tabs::TabId;
 use flock_core::watch::WatchState;
-use flock_core::{Command, Page, ResourceRef};
+use flock_core::{ClusterId, Command, Page, ResourceRef};
 use gpui::{
     AnyElement, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement,
     MouseButton, ParentElement, Styled, Subscription, Window, div,
@@ -18,7 +18,7 @@ use crate::screens::add_cluster::empty_flock;
 use crate::screens::detail::DetailScreen;
 use crate::screens::edit::EditScreen;
 use crate::screens::logs::LogsScreen;
-use crate::screens::multilog::MultiLogsScreen;
+use crate::screens::logs_page::LogsPage;
 use crate::screens::namespace::NamespaceScreen;
 use crate::screens::workload::WorkloadScreen;
 use crate::theme::{
@@ -306,7 +306,7 @@ impl Shell {
         location: &Location,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Option<Entity<MultiLogsScreen>> {
+    ) -> Option<Entity<LogsPage>> {
         let pane = self.screens(ix).pane;
         let target = location
             .logs
@@ -316,18 +316,30 @@ impl Shell {
             self.screens_mut(ix).multi_logs = None;
             return None;
         };
+        let all: Vec<ClusterId> = self
+            .state
+            .snapshot
+            .clusters
+            .iter()
+            .map(|cluster| cluster.id.clone())
+            .collect();
+        let clusters = location.scope().selected(&all);
         let compact = self.panes.len() > 1;
+        let snapshot = self.state.snapshot.clone();
         let current = self
             .screens(ix)
             .multi_logs
             .as_ref()
-            .filter(|(screen, _)| screen.read(cx).shows(&target, cx))
+            .filter(|(screen, _)| screen.read(cx).shows(&target, &clusters))
             .map(|(screen, _)| screen.clone());
         if let Some(screen) = current {
-            screen.update(cx, |screen, cx| screen.set_compact(compact, cx));
+            screen.update(cx, |screen, cx| {
+                screen.set_compact(compact, cx);
+                screen.set_snapshot(&snapshot, cx);
+            });
             return Some(screen);
         }
-        let screen = cx.new(|cx| MultiLogsScreen::new(target, window, cx));
+        let screen = cx.new(|cx| LogsPage::new(target, clusters, window, cx));
         let navigation = self.screens(ix).navigation.clone();
         screen.update(cx, |screen, _| screen.navigation = Some(navigation));
         let subscription = cx.subscribe(&screen, move |shell, _, command: &Command, cx| {
@@ -335,6 +347,7 @@ impl Shell {
         });
         screen.update(cx, |screen, cx| {
             screen.set_compact(compact, cx);
+            screen.set_snapshot(&snapshot, cx);
             screen.watch(cx);
         });
         self.screens_mut(ix).multi_logs = Some((screen.clone(), subscription));
