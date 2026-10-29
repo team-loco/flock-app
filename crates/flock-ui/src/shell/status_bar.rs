@@ -1,6 +1,6 @@
 use flock_core::action::forwards_label;
 use flock_core::palette::{COMMAND_PREFIX, STOP_FORWARD};
-use flock_core::{Command, Page, Status};
+use flock_core::{Command, Counts, Page, Status};
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, svg,
@@ -10,8 +10,8 @@ use super::Shell;
 use crate::assets::REFRESH;
 use crate::kit::{Tooltip, status_symbols};
 use crate::theme::{
-    ActiveTheme, FONT_MONO, ICON, Palette, RULE, SPACE_5, SPACE_8, STATUS_BAR, STATUS_REFRESH,
-    TEXT_SMALL,
+    ActiveTheme, FONT_MONO, ICON, Palette, RULE, SPACE_5, SPACE_6, SPACE_8, STATUS_BAR,
+    STATUS_REFRESH, TEXT_SMALL,
 };
 
 const PROBLEMS: &str = "status-problems";
@@ -25,8 +25,7 @@ const REFRESH_KEY: &str = "⌥⌘R";
 impl Shell {
     pub(super) fn status_bar(&self, cx: &mut Context<Self>) -> AnyElement {
         let palette = *cx.palette();
-        let snapshot = &self.state.snapshot;
-        let problems = snapshot.problems();
+        let problems = self.scoped_problems();
         let hover = palette.hover;
         let counts = div()
             .debug_selector(|| PROBLEMS.to_owned())
@@ -35,14 +34,19 @@ impl Shell {
             .items_center()
             .gap(SPACE_5)
             .h_full()
-            .px(SPACE_5)
-            .border_l(RULE)
+            .px(SPACE_6)
+            .border_r(RULE)
             .border_color(palette.line)
             .cursor_pointer()
             .hover(move |style| style.bg(hover))
             .tooltip(Tooltip::text(PROBLEMS_TOOLTIP))
             .on_click(cx.listener(|this, _, _, cx| {
-                this.dispatch(Command::SelectPage(Page::Problems), cx);
+                let page = if this.state.location().scope().cluster().is_some() {
+                    Page::ClusterProblems
+                } else {
+                    Page::Problems
+                };
+                this.dispatch(Command::SelectPage(page), cx);
             }))
             .child(div().text_color(palette.err).child(status_symbols(format!(
                 "{} {}",
@@ -74,13 +78,27 @@ impl Shell {
             .text_color(palette.mute)
             .whitespace_nowrap()
             .overflow_hidden()
-            .child(self.switcher.clone())
+            .child(counts)
             .children(self.kubernetes_version())
             .child(div().flex_1())
             .child(notices)
-            .child(counts)
             .child(Self::refresh_button(&palette, cx))
+            .child(self.switcher.clone())
             .into_any_element()
+    }
+
+    fn scoped_problems(&self) -> Counts {
+        let clusters = &self.state.snapshot.clusters;
+        let selected = self
+            .state
+            .location()
+            .scope()
+            .selected(&flock_core::scope::ids(clusters));
+        clusters
+            .iter()
+            .filter(|cluster| selected.contains(&cluster.id))
+            .map(|cluster| cluster.problems)
+            .sum()
     }
 
     pub(super) fn refresh_view(&mut self, cx: &mut Context<Self>) {

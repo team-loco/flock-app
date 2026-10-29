@@ -13,6 +13,9 @@ pub const GEAR: &str = "icons/gear.svg";
 pub const SPLIT: &str = "icons/split.svg";
 pub const REFRESH: &str = "icons/refresh.svg";
 pub const EXTERNAL_LINK: &str = "icons/external-link.svg";
+pub const DASH: &str = "icons/dash.svg";
+pub const CLUSTERS: &str = "icons/clusters.svg";
+pub const CLUSTER: &str = "icons/cluster.svg";
 
 const ICONS: &[(&str, &[u8])] = &[
     (
@@ -38,6 +41,9 @@ const ICONS: &[(&str, &[u8])] = &[
         EXTERNAL_LINK,
         include_bytes!("../assets/icons/external-link.svg"),
     ),
+    (DASH, include_bytes!("../assets/icons/dash.svg")),
+    (CLUSTERS, include_bytes!("../assets/icons/clusters.svg")),
+    (CLUSTER, include_bytes!("../assets/icons/cluster.svg")),
 ];
 
 pub(crate) const PLEX_SANS_SEMIBOLD: &[u8] =

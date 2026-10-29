@@ -262,6 +262,31 @@ impl Snapshot {
         next.pods.extend(pods);
     }
 
+    pub fn restricted(&self, keep: &[ClusterId]) -> Self {
+        let mut view = self.clone();
+        let dropped: Vec<ClusterId> = self
+            .clusters
+            .iter()
+            .map(|cluster| cluster.id.clone())
+            .filter(|id| !keep.contains(id))
+            .collect();
+        for id in &dropped {
+            view.remove_cluster(id);
+        }
+        view.gitops.restrict(keep);
+        view.changes.restrict(keep);
+        view.flux_events
+            .retain(|event| keep.contains(&event.cluster));
+        let flux: Counts = view
+            .clusters
+            .iter()
+            .filter_map(|cluster| cluster.metrics.as_ref())
+            .map(|metrics| metrics.flux)
+            .sum();
+        view.flock_nav.insert(Page::GitOps, flux);
+        view
+    }
+
     fn connected_cluster(&self, id: &ClusterId) -> bool {
         self.cluster(id).is_some_and(ClusterSummary::is_connected)
     }
@@ -378,6 +403,30 @@ pub(crate) mod tests {
             age: std::time::Duration::ZERO,
             events: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_restricted_view_keeps_only_the_selected_clusters() {
+        let mut snapshot = sample();
+        snapshot.home.problems = vec![problem("a", Status::Err), problem("b", Status::Warn)];
+        let lane = |id: &str| crate::changes::Lane {
+            cluster: ClusterId::new(id),
+            short: id.into(),
+            label: id.into(),
+        };
+        snapshot.changes.lanes = vec![lane("a"), lane("b")];
+        let keep = [ClusterId::new("b"), ClusterId::new("c")];
+        let view = snapshot.restricted(&keep);
+        let ids: Vec<&str> = view.clusters.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["b", "c"]);
+        assert_eq!(view.home.problems, vec![problem("b", Status::Warn)]);
+        assert_eq!(
+            view.flock_nav.get(&Page::Problems),
+            Some(&Counts::default().with_warn(1))
+        );
+        assert_eq!(view.changes.lanes, vec![lane("b")]);
+        assert_eq!(view.problems(), Counts::default().with_sus(1));
+        assert_eq!(snapshot.clusters.len(), 3);
     }
 
     #[test]

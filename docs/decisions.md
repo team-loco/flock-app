@@ -557,3 +557,19 @@ Settled; change only with a new entry that says why.
     (Timestamps, Wrap, Raw, Previous container logs, Download; on/off shown with a check) and the
     ⌄ collapse. There is no follow button: logs follow while scrolled to the bottom, stop when
     the user scrolls up, and a floating "↓ Latest" button resumes following.
+56. **Multi-cluster scope and the v2.1 status bar** (design v2.1 `StatusBarMulti`,
+    `StatusBarMultiOpen`; amends 25, 49, 51 and 53): a tab's scope is a non-empty set of selected
+    clusters (`flock_core::scope::Scope`: All, One or Several), kept on its `Location` (`cluster`
+    for one, `clusters` for several, absent for all, so older `tabs.json` files load unchanged).
+    One cluster behaves as the cluster scope did; all or several behave like Flock home, and the
+    Overview, Problems, GitOps, Changes and Flux events pages plus the Flock nav badges read a
+    per-pane `Snapshot::restricted` view of the selected clusters. Moving between Flock pages keeps
+    the selection; leaving for a cluster page or picking one cluster goes to that cluster. The
+    status bar leads with the selected clusters' problem counts (opening the cluster's Problems
+    page when one is selected, else Flock Problems), then the Kubernetes version for one cluster,
+    a spacer, Refresh, and the cluster selector at the right end. Its 300px menu, anchored right,
+    has checkbox rows: clicking toggles and keeps the menu open, the last selected cluster stays
+    selected, All clusters selects all (or only the first when all are selected); Space toggles
+    the highlighted row and Enter picks only it and closes, so ⌘⇧C, a name and ↵ still switch to
+    one cluster. The gear, right-click and ⌘. menu opens to the left of the list. The sidebar
+    header and pane-tab context read All clusters, the cluster's name, or "N clusters".

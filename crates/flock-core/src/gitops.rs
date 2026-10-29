@@ -270,9 +270,73 @@ pub struct GitOps {
     pub installs: Vec<FluxInstall>,
 }
 
+impl GitOps {
+    pub fn restrict(&mut self, keep: &[ClusterId]) {
+        let kept: Vec<bool> = self.clusters.iter().map(|id| keep.contains(id)).collect();
+        self.clusters.retain(|id| keep.contains(id));
+        for group in &mut self.groups {
+            for row in &mut group.rows {
+                let mut column = kept.iter();
+                row.cells
+                    .retain(|_| column.next().copied().unwrap_or_default());
+            }
+            group
+                .rows
+                .retain(|row| row.cells.iter().any(SyncCell::is_deployed));
+            group.total = u32::try_from(group.rows.len()).unwrap_or(u32::MAX);
+        }
+        self.groups.retain(|group| !group.rows.is_empty());
+        self.installs
+            .retain(|install| keep.contains(&install.cluster));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restricting_keeps_the_columns_and_rows_of_the_kept_clusters() {
+        let install = |id: &str| FluxInstall {
+            cluster: ClusterId::new(id),
+            version: "v2.4.0".into(),
+            upgrade: None,
+            controllers: Vec::new(),
+        };
+        let mut gitops = GitOps {
+            clusters: vec![ClusterId::new("a"), ClusterId::new("b")],
+            sources: Vec::new(),
+            groups: vec![SyncGroup {
+                kind: FluxKind::Kustomization,
+                total: 2,
+                rows: vec![
+                    row(
+                        FluxKind::Kustomization,
+                        "apps",
+                        vec![cell(Status::Ok, false), cell(Status::Err, false)],
+                    ),
+                    row(
+                        FluxKind::Kustomization,
+                        "only-a",
+                        vec![cell(Status::Ok, false), SyncCell::not_deployed()],
+                    ),
+                ],
+            }],
+            installs: vec![install("a"), install("b")],
+        };
+        gitops.restrict(&[ClusterId::new("b")]);
+        assert_eq!(gitops.clusters, [ClusterId::new("b")]);
+        let group = gitops.groups.first();
+        assert_eq!(group.map(|g| g.total), Some(1));
+        let cells: Vec<Option<Status>> = group
+            .into_iter()
+            .flat_map(|g| &g.rows)
+            .flat_map(|r| &r.cells)
+            .map(|c| c.status)
+            .collect();
+        assert_eq!(cells, [Some(Status::Err)]);
+        assert_eq!(gitops.installs, [install("b")]);
+    }
 
     fn cell(status: Status, behind: bool) -> SyncCell {
         SyncCell {

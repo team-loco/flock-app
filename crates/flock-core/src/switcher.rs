@@ -33,6 +33,16 @@ pub fn initial_highlight(rows: &[Entry], selected: Option<&ClusterId>) -> Option
         .or_else(|| (!rows.is_empty()).then_some(0))
 }
 
+pub fn meta(cluster: &ClusterSummary) -> String {
+    if cluster.is_connected() {
+        cluster.version.clone().unwrap_or_default()
+    } else if cluster.state.is_empty() {
+        cluster.connection().label().to_owned()
+    } else {
+        cluster.state.to_lowercase()
+    }
+}
+
 pub fn label<'a>(entry: &'a Entry, clusters: &'a [ClusterSummary]) -> &'a str {
     match entry {
         Entry::AllClusters => ALL_CLUSTERS,
@@ -77,6 +87,19 @@ mod tests {
         let gone = ClusterId::new("gone");
         assert_eq!(initial_highlight(&listed, Some(&gone)), Some(0));
         assert_eq!(initial_highlight(&[], None), None);
+    }
+
+    #[test]
+    fn rows_show_the_version_or_why_a_cluster_is_unavailable() {
+        let mut snapshot = sample();
+        let [a, _, c] = &mut snapshot.clusters[..] else {
+            panic!("the sample has three clusters");
+        };
+        a.version = Some("v1.31.2".into());
+        assert_eq!(meta(a), "v1.31.2");
+        assert_eq!(meta(c), "offline");
+        c.state = "Offline 3h".into();
+        assert_eq!(meta(c), "offline 3h");
     }
 
     #[test]

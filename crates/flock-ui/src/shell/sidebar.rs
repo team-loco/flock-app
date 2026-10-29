@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use flock_core::switcher::ALL_CLUSTERS;
 use flock_core::{ClusterSummary, Command, Counts, NavSection, Page, Status};
 use gpui::{
     Animation, AnimationExt, AnyElement, App, ClickEvent, Context, CursorStyle, DispatchPhase,
@@ -283,7 +282,9 @@ impl Shell {
 
     fn nav_counts(&self) -> BTreeMap<Page, Counts> {
         let Some(cluster) = self.selected_cluster() else {
-            return self.state.snapshot.flock_nav.clone();
+            let shown = self.focused_screens().scoped_snapshot();
+            let snapshot = shown.unwrap_or(&self.state.snapshot);
+            return snapshot.flock_nav.clone();
         };
         let mut counts = cluster.nav.clone();
         let definitions = self.state.snapshot.crds(&cluster.id).len();
@@ -316,10 +317,12 @@ impl Shell {
             }
             items.extend(section_rows(section, highlight, &counts, palette, cx));
         }
-        let scope: SharedString = match &self.state.location().cluster {
-            Some(id) => flock_core::tabs::cluster_name(id, &self.state.snapshot).into(),
-            None => ALL_CLUSTERS.into(),
-        };
+        let scope: SharedString = self
+            .state
+            .location()
+            .scope()
+            .name(&self.state.snapshot.clusters)
+            .into();
         let header = div()
             .debug_selector(|| "sidebar-scope".to_owned())
             .flex()

@@ -405,8 +405,9 @@ impl Shell {
             .map(|id| flock_core::tabs::cluster_name(id, &self.state.snapshot))
             .unwrap_or_default();
         let sentence = format!("{name} is not available. {UNAVAILABLE_REASON}");
-        let action = Button::new("tab-show-flock", SHOW_ALL_CLUSTERS)
-            .on_click(cx.listener(|this, _, _, cx| this.retarget(None, cx)));
+        let action = Button::new("tab-show-flock", SHOW_ALL_CLUSTERS).on_click(
+            cx.listener(|this, _, _, cx| this.retarget(&flock_core::scope::Scope::All, cx)),
+        );
         div()
             .debug_selector(|| "cluster-unavailable".to_owned())
             .flex()

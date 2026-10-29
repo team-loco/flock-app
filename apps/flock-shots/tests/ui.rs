@@ -4,6 +4,7 @@ use anyhow::Context as _;
 use flock::Screen;
 use flock_core::resource::page_for_kind;
 use flock_core::resources::{EVENT_LIST, POD_LIST};
+use flock_core::scope::Scope;
 use flock_core::{ClusterId, ClusterSummary, Command, Page};
 use flock_shots::Ui;
 use flock_ui::Shell;
@@ -206,19 +207,81 @@ fn cluster_at(ui: &Ui, ix: usize) -> anyhow::Result<ClusterSummary> {
 }
 
 #[test]
-fn clicking_the_switcher_opens_it_and_a_row_selects_that_cluster() -> anyhow::Result<()> {
+fn clicking_switcher_rows_toggles_clusters_and_keeps_the_menu_open() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Flock)?;
+    let clusters = ui.state().snapshot.clusters.clone();
+    let first = cluster_at(&ui, 0)?;
     let second = cluster_at(&ui, 1)?;
-    let connected = ui.state().snapshot.connected();
+    let all: Vec<ClusterId> = clusters.iter().map(|c| c.id.clone()).collect();
     assert!(!ui.read(Shell::switcher_open));
+    assert_eq!(ui.read(Shell::switcher_label), "All clusters");
     ui.click("cluster-switcher")?;
     assert!(ui.read(Shell::switcher_open));
     ui.click("switcher-row-2")?;
-    let state = ui.state();
-    assert_eq!(state.location().cluster, Some(second.id));
-    assert_eq!(state.location().page, Page::ClusterOverview);
+    assert!(ui.read(Shell::switcher_open));
+    let rest: Vec<ClusterId> = all.iter().filter(|id| **id != second.id).cloned().collect();
+    assert_eq!(ui.state().location().scope(), Scope::Several(rest));
+    assert_eq!(ui.state().location().page, Page::Overview);
+    let more = format!("{} +{}", first.name, all.len() - 2);
+    assert_eq!(ui.read(Shell::switcher_label), more);
+    assert!(ui.bounds("cluster-switcher-more").is_some());
+    assert!(ui.bounds("status-version").is_none());
+    ui.click("switcher-row-0")?;
+    assert_eq!(ui.state().location().scope(), Scope::All);
+    ui.click("switcher-row-0")?;
+    assert_eq!(ui.state().location().scope(), Scope::One(first.id.clone()));
+    assert_eq!(ui.read(Shell::switcher_label), first.name);
+    assert!(ui.bounds("status-version").is_some());
+    assert!(ui.bounds("cluster-switcher-more").is_none());
+    ui.click("switcher-row-1")?;
+    assert_eq!(ui.state().location().scope(), Scope::One(first.id.clone()));
+    ui.click("switcher-row-2")?;
+    let pair = Scope::Several(vec![first.id.clone(), second.id.clone()]);
+    assert_eq!(ui.state().location().scope(), pair);
+    assert_eq!(ui.read(Shell::switcher_label), format!("{} +1", first.name));
+    assert_eq!(ui.state().location().page, Page::Overview);
+    assert!(ui.read(Shell::switcher_open));
+    Ok(())
+}
+
+#[test]
+fn space_toggles_the_highlighted_cluster_and_enter_picks_only_it() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Cluster)?;
+    let first = cluster_at(&ui, 0)?;
+    let second = cluster_at(&ui, 1)?;
+    ui.press("cmd-shift-c down space")?;
+    let pair = Scope::Several(vec![first.id.clone(), second.id.clone()]);
+    assert_eq!(ui.state().location().scope(), pair);
+    assert!(ui.read(Shell::switcher_open));
+    ui.press("enter")?;
+    assert_eq!(ui.state().location().scope(), Scope::One(second.id));
     assert!(!ui.read(Shell::switcher_open));
-    assert_eq!(state.snapshot.connected(), connected);
+    Ok(())
+}
+
+#[test]
+fn several_clusters_restrict_the_flock_pages_and_name_the_scope() -> anyhow::Result<()> {
+    let mut ui = Ui::open(Screen::Flock)?;
+    let first = cluster_at(&ui, 0)?;
+    let second = cluster_at(&ui, 1)?;
+    let count = ui.state().snapshot.clusters.len();
+    ui.click("nav-problems")?;
+    ui.press("cmd-shift-c")?;
+    for ix in 3..=count {
+        ui.click(selector(format!("switcher-row-{ix}")))?;
+        assert_eq!(ui.state().location().page, Page::Problems);
+    }
+    ui.press("escape")?;
+    assert!(!ui.read(Shell::switcher_open));
+    let pair = Scope::Several(vec![first.id.clone(), second.id.clone()]);
+    let state = ui.state();
+    assert_eq!(state.location().scope(), pair);
+    assert_eq!(state.location().page, Page::Problems);
+    let tab = flock_core::tabs::title(state.location(), &state.snapshot);
+    assert_eq!(tab.context, "2 clusters");
+    let shown = ui.read(Shell::problem_clusters);
+    assert!(shown.contains(&first.id) && shown.contains(&second.id));
+    assert!(shown.iter().all(|id| *id == first.id || *id == second.id));
     Ok(())
 }
 
@@ -2102,6 +2165,13 @@ fn the_workload_dock_opens_a_pods_logs_in_a_tab() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn pick_only(ui: &mut Ui, cluster: &str) -> anyhow::Result<()> {
+    ui.click("cluster-switcher")?;
+    let row = switcher_row(ui, cluster)?;
+    ui.hover(row)?;
+    ui.press("enter")
+}
+
 fn switcher_row(ui: &Ui, cluster: &str) -> anyhow::Result<&'static str> {
     let ix = ui
         .state()
@@ -2117,9 +2187,7 @@ fn switcher_row(ui: &Ui, cluster: &str) -> anyhow::Result<&'static str> {
 fn picking_a_cluster_retargets_the_active_tab_to_the_same_page() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     ui.click("nav-events")?;
-    ui.click("cluster-switcher")?;
-    let staging = switcher_row(&ui, "staging")?;
-    ui.click(staging)?;
+    pick_only(&mut ui, "staging")?;
     let state = ui.state();
     assert_eq!(state.location().cluster, Some(ClusterId::new("staging")));
     assert_eq!(state.location().page, Page::Events);
@@ -2136,9 +2204,7 @@ fn picking_a_cluster_retargets_the_active_tab_to_the_same_page() -> anyhow::Resu
 fn a_workload_tab_follows_the_object_to_another_cluster_or_falls_back() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Workload)?;
     let target = ui.state().workload().cloned();
-    ui.click("cluster-switcher")?;
-    let west = switcher_row(&ui, "prod-eu-west")?;
-    ui.click(west)?;
+    pick_only(&mut ui, "prod-eu-west")?;
     let moved = ui.state().workload().cloned();
     assert_eq!(
         moved
@@ -2178,7 +2244,7 @@ fn the_switcher_gear_and_right_click_open_the_cluster_menu_beside_the_list() -> 
         .bounds("switcher-menu")
         .context("right-click opens the menu")?;
     let list = ui.bounds(staging).context("the list stays open")?;
-    assert!(menu.left() > list.right());
+    assert!(menu.right() < list.left());
     assert!(ui.bounds("switcher-action-4").is_some());
     assert!(ui.bounds("switcher-action-5").is_none());
     ui.press("escape escape")?;
@@ -3727,9 +3793,7 @@ fn a_label_filter_on_pods_offers_logs_for_the_selector_in_the_row_menu() -> anyh
 #[test]
 fn the_cluster_overview_opens_settings_for_its_own_cluster() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
-    ui.click("cluster-switcher")?;
-    let staging = switcher_row(&ui, "staging")?;
-    ui.click(staging)?;
+    pick_only(&mut ui, "staging")?;
     let staging = Some(ClusterId::new("staging"));
     assert_eq!(ui.state().location().cluster, staging);
     assert_eq!(ui.state().location().page, Page::ClusterOverview);
@@ -5019,7 +5083,7 @@ fn cluster_problems_group_by_cause_and_rows_open_the_object() -> anyhow::Result<
 }
 
 #[test]
-fn the_status_bar_puts_the_switcher_left_and_the_problem_counts_by_refresh() -> anyhow::Result<()> {
+fn the_status_bar_leads_with_problems_and_ends_with_the_cluster_selector() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
     let switcher = ui
         .bounds("cluster-switcher")
@@ -5033,10 +5097,12 @@ fn the_status_bar_puts_the_switcher_left_and_the_problem_counts_by_refresh() -> 
     let refresh = ui
         .bounds("status-refresh")
         .context("the refresh button renders")?;
-    assert_eq!(switcher.left(), gpui::px(0.));
-    assert_eq!(version.left(), switcher.right());
-    assert!(problems.left() > version.right());
-    assert_eq!(problems.right(), refresh.left());
+    let window = ui.read_in_window(|_, window, _| window.viewport_size());
+    assert_eq!(problems.left(), gpui::px(0.));
+    assert_eq!(version.left(), problems.right());
+    assert!(refresh.left() > version.right());
+    assert_eq!(refresh.right(), switcher.left());
+    assert_eq!(switcher.right(), window.width);
     assert_eq!(refresh.size.width, flock_ui::theme::STATUS_REFRESH);
     let mut ui = Ui::open(Screen::Flock)?;
     assert!(ui.bounds("status-problems").is_some());
@@ -5045,8 +5111,14 @@ fn the_status_bar_puts_the_switcher_left_and_the_problem_counts_by_refresh() -> 
 }
 
 #[test]
-fn the_status_bar_counts_open_the_fleet_problems_page() -> anyhow::Result<()> {
+fn the_status_bar_counts_open_problems_for_the_selected_clusters() -> anyhow::Result<()> {
     let mut ui = Ui::open(Screen::Cluster)?;
+    let cluster = ui.state().location().cluster.clone();
+    ui.click("status-problems")?;
+    let location = ui.state().location().clone();
+    assert_eq!(location.page, Page::ClusterProblems);
+    assert_eq!(location.cluster, cluster);
+    let mut ui = Ui::open(Screen::Flock)?;
     ui.click("status-problems")?;
     let location = ui.state().location().clone();
     assert_eq!(location.page, Page::Problems);

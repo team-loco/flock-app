@@ -1,37 +1,39 @@
 use std::rc::Rc;
 use std::time::Instant;
 
+use flock_core::scope::{self, Check, Scope};
 use flock_core::settings::ClusterAction;
 use flock_core::switcher::{self, ADD_CLUSTER, ALL_CLUSTERS, Entry};
 use flock_core::{ClusterId, ClusterSummary, Command};
 use gpui::{
-    AnyElement, App, Context, ElementId, EventEmitter, FocusHandle, FontWeight, Hsla,
-    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, Render,
-    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder, svg,
+    AnyElement, App, Context, ElementId, EventEmitter, FocusHandle, FontWeight, InteractiveElement,
+    IntoElement, KeyDownEvent, MouseButton, ParentElement, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, svg,
 };
 
 use super::Shell;
-use crate::assets::{CHEVRON_UP, GEAR};
+use crate::assets::{CHECK, CHEVRON_UP, CLUSTER, CLUSTERS, DASH, GEAR};
 use crate::kit::list_keys::{Nav, TypeAhead, find, typed};
 use crate::kit::{
-    ConfirmDialog, Dismissal, MenuItem, Tooltip, above_left, appear, confirm, surface,
+    ConfirmDialog, Dismissal, MenuItem, Tooltip, above_right, appear, confirm, surface,
 };
 use crate::screens::settings::DISCONNECT;
 use crate::theme::{
-    ActiveTheme, FONT_MONO, FONT_SANS, FONT_STATUS, GLYPH_SLOT, ICON, Palette, RADIUS, ROW_CLUSTER,
-    ROW_NAV, RULE, SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SWITCHER_GEAR,
-    SWITCHER_LIST, SWITCHER_MENU, SWITCHER_WIDTH, TEXT_BODY, TEXT_GLYPH, TEXT_LABEL, TEXT_UI,
+    ActiveTheme, FONT_MONO, FONT_SANS, ICON, Palette, RADIUS, ROW_CLUSTER, ROW_NAV, RULE, SPACE_1,
+    SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6, SWITCHER_CHECK, SWITCHER_CHEVRON, SWITCHER_GEAR,
+    SWITCHER_ICON, SWITCHER_LIST, SWITCHER_MENU, SWITCHER_TICK, SWITCHER_WIDTH, TEXT_BODY,
+    TEXT_LABEL, TEXT_UI,
 };
 
 pub const SWITCH_KEY: &str = "⌘⇧C";
-pub const ALL_CLUSTERS_KEY: &str = "⌘0";
 const ID: &str = "cluster-switcher";
-const TOOLTIP: &str = "Switch cluster";
+const MORE_ID: &str = "cluster-switcher-more";
+const TOOLTIP: &str = "Clusters";
 const ADD_GLYPH: &str = "+";
 const GEAR_TOOLTIP: &str = "Cluster settings";
 const ACTIONS_KEY: &str = ".";
 const ENTER: &str = "enter";
+const SPACE: &str = "space";
 const ESCAPE: &str = "escape";
 const MENU_ID: &str = "switcher-menu";
 const SETTINGS: &str = "Settings…";
@@ -41,7 +43,7 @@ const REMOVE: &str = "Remove";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SwitcherEvent {
-    Select(Option<ClusterId>),
+    Select(Scope),
     AddCluster,
     Run(Command),
     Remove(ClusterId),
@@ -158,7 +160,7 @@ fn child_index(rows: &[Entry], ix: usize) -> usize {
 
 pub struct ClusterSwitcher {
     clusters: Vec<ClusterSummary>,
-    selected: Option<ClusterId>,
+    scope: Scope,
     rows: Vec<Entry>,
     highlighted: Option<usize>,
     steered: bool,
@@ -180,7 +182,7 @@ impl ClusterSwitcher {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             clusters: Vec::new(),
-            selected: None,
+            scope: Scope::All,
             rows: Vec::new(),
             highlighted: None,
             steered: false,
@@ -201,15 +203,20 @@ impl ClusterSwitcher {
         self.open
     }
 
+    pub fn label(&self) -> String {
+        let (label, more) = self.scope.trigger(&self.clusters);
+        more.map_or_else(|| label.clone(), |more| format!("{label} {more}"))
+    }
+
     pub fn set_context(
         &mut self,
         clusters: &[ClusterSummary],
-        selected: Option<&ClusterId>,
+        scope: Scope,
         cx: &mut Context<Self>,
     ) {
-        let moved = self.selected.as_ref() != selected;
+        let moved = self.scope.cluster() != scope.cluster();
         self.clusters = clusters.to_vec();
-        self.selected = selected.cloned();
+        self.scope = scope;
         let gone = self
             .actions_for
             .as_ref()
@@ -268,7 +275,7 @@ impl ClusterSwitcher {
     }
 
     fn initial(&self) -> Option<usize> {
-        switcher::initial_highlight(&self.rows, self.selected.as_ref())
+        switcher::initial_highlight(&self.rows, self.scope.cluster())
     }
 
     fn actions(&self) -> Option<(ClusterId, [Action; 5])> {
@@ -313,11 +320,31 @@ impl ClusterSwitcher {
 
     fn activate(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let event = self.rows.get(ix).map(|row| match row {
-            Entry::AllClusters => SwitcherEvent::Select(None),
-            Entry::Cluster(id) => SwitcherEvent::Select(Some(id.clone())),
+            Entry::AllClusters => SwitcherEvent::Select(Scope::All),
+            Entry::Cluster(id) => SwitcherEvent::Select(Scope::One(id.clone())),
             Entry::AddCluster => SwitcherEvent::AddCluster,
         });
         self.emit_and_close(event, window, cx);
+    }
+
+    fn toggle_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let all = scope::ids(&self.clusters);
+        let next = match self.rows.get(ix) {
+            Some(Entry::AllClusters) => self.scope.toggle_all(&all),
+            Some(Entry::Cluster(id)) => self.scope.toggle(id, &all),
+            Some(Entry::AddCluster) => {
+                self.emit_and_close(Some(SwitcherEvent::AddCluster), window, cx);
+                return;
+            }
+            None => return,
+        };
+        self.highlighted = Some(ix);
+        self.steered = true;
+        if next != self.scope {
+            self.scope = next.clone();
+            cx.emit(SwitcherEvent::Select(next));
+        }
+        cx.notify();
     }
 
     fn activate_action(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -393,6 +420,12 @@ impl ClusterSwitcher {
             } else if let Some(ix) = self.highlighted {
                 self.activate(ix, window, cx);
             }
+        } else if plain && keystroke.key == SPACE {
+            if self.actions_for.is_none()
+                && let Some(ix) = self.highlighted
+            {
+                self.toggle_row(ix, window, cx);
+            }
         } else if plain && keystroke.key == ESCAPE {
             self.escape(window, cx);
         } else if let Some(nav) = Nav::parse(keystroke) {
@@ -407,14 +440,21 @@ impl ClusterSwitcher {
     }
 
     fn render_trigger(&self, palette: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let name: SharedString = self
-            .selected
-            .as_ref()
-            .and_then(|id| self.cluster(id))
-            .map_or_else(
-                || ALL_CLUSTERS.into(),
-                |cluster| cluster.name.clone().into(),
-            );
+        let (label, more) = self.scope.trigger(&self.clusters);
+        let icon = if self.scope.cluster().is_some() {
+            CLUSTER
+        } else {
+            CLUSTERS
+        };
+        let more = more.map(|more| {
+            div()
+                .debug_selector(|| MORE_ID.to_owned())
+                .font_family(FONT_MONO)
+                .text_size(TEXT_LABEL)
+                .font_weight(FontWeight::NORMAL)
+                .text_color(palette.mute)
+                .child(more)
+        });
         let hover = palette.hover;
         div()
             .debug_selector(|| ID.to_owned())
@@ -425,7 +465,7 @@ impl ClusterSwitcher {
             .h_full()
             .pl(SPACE_6)
             .pr(SPACE_5)
-            .border_r(RULE)
+            .border_l(RULE)
             .border_color(palette.line)
             .cursor_pointer()
             .font_family(FONT_SANS)
@@ -443,8 +483,20 @@ impl ClusterSwitcher {
                 }
                 this.toggle(window, cx);
             }))
-            .child(name)
-            .child(svg().path(CHEVRON_UP).size(ICON).text_color(palette.mute))
+            .child(
+                svg()
+                    .path(icon)
+                    .size(SWITCHER_ICON)
+                    .text_color(palette.mute),
+            )
+            .child(label)
+            .children(more)
+            .child(
+                svg()
+                    .path(CHEVRON_UP)
+                    .size(SWITCHER_CHEVRON)
+                    .text_color(palette.mute),
+            )
             .into_any_element()
     }
 
@@ -475,11 +527,6 @@ impl ClusterSwitcher {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let highlighted = self.highlighted == Some(ix);
-        let current = match row {
-            Entry::AllClusters => self.selected.is_none(),
-            Entry::Cluster(id) => self.selected.as_ref() == Some(id),
-            Entry::AddCluster => false,
-        };
         let base = div()
             .debug_selector(move || format!("switcher-row-{ix}"))
             .id(ElementId::NamedInteger("switcher-row".into(), ix as u64))
@@ -494,7 +541,6 @@ impl ClusterSwitcher {
             .text_size(TEXT_UI)
             .text_color(palette.fg)
             .when(highlighted, |row| row.bg(palette.hover))
-            .when(current, |row| row.bg(palette.sel))
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 if *hovered && this.actions_for.is_none() {
                     this.highlighted = Some(ix);
@@ -502,23 +548,20 @@ impl ClusterSwitcher {
                     cx.notify();
                 }
             }))
-            .on_click(cx.listener(move |this, _, window, cx| this.activate(ix, window, cx)));
+            .on_click(cx.listener(move |this, _, window, cx| this.toggle_row(ix, window, cx)));
         let label = |text: SharedString| div().flex_1().min_w_0().truncate().child(text);
         let element = match row {
-            Entry::AllClusters => base
-                .pr(SPACE_4)
-                .child(glyph_cell(SharedString::default(), palette.mute))
-                .child(label(ALL_CLUSTERS.into()))
-                .child(
-                    div()
-                        .font_family(FONT_MONO)
-                        .text_size(TEXT_LABEL)
-                        .text_color(palette.mute)
-                        .child(ALL_CLUSTERS_KEY),
-                ),
+            Entry::AllClusters => {
+                let tally = self.scope.tally(&scope::ids(&self.clusters));
+                base.pr(SPACE_4)
+                    .child(check_box(self.scope.all_check(), palette))
+                    .child(label(ALL_CLUSTERS.into()))
+                    .child(meta(tally.into(), palette))
+            }
             Entry::AddCluster => base
+                .pr(SPACE_4)
                 .text_color(palette.fg2)
-                .child(glyph_cell(ADD_GLYPH.into(), palette.mute))
+                .child(add_glyph(palette))
                 .child(label(ADD_CLUSTER.into())),
             Entry::Cluster(id) => match self.cluster(id) {
                 Some(cluster) => {
@@ -529,11 +572,14 @@ impl ClusterSwitcher {
                             this.show_actions(actions_id.clone(), cx);
                         }),
                     );
-                    let gear = gear_button(ix, id.clone(), highlighted || current, palette, cx);
+                    let shown = highlighted || self.actions_for.as_ref() == Some(id);
+                    let gear = gear_button(ix, id.clone(), shown, palette, cx);
+                    let details = switcher::meta(cluster);
                     base.pr(SPACE_1)
                         .when(!cluster.is_connected(), |row| row.text_color(palette.mute))
-                        .child(glyph_cell(SharedString::default(), palette.mute))
+                        .child(check_box(self.scope.check(id), palette))
                         .child(label(cluster.name.clone().into()))
+                        .child(meta(details.into(), palette))
                         .child(gear)
                 }
                 None => base,
@@ -571,7 +617,7 @@ impl ClusterSwitcher {
             .debug_selector(|| MENU_ID.to_owned())
             .absolute()
             .bottom_0()
-            .left(SWITCHER_WIDTH + SPACE_2)
+            .right(SWITCHER_WIDTH + SPACE_2)
             .w(SWITCHER_MENU)
             .capture_any_mouse_down(cx.listener(|this, _, _, _| this.menu_pressed = true))
             .child(header)
@@ -618,14 +664,48 @@ impl ClusterSwitcher {
     }
 }
 
-fn glyph_cell(glyph: SharedString, color: Hsla) -> impl IntoElement {
-    div()
-        .w(GLYPH_SLOT)
+fn check_box(check: Check, palette: &Palette) -> impl IntoElement {
+    let mark = match check {
+        Check::On => Some(CHECK),
+        Check::Mixed => Some(DASH),
+        Check::Off => None,
+    };
+    let base = div()
+        .flex()
         .flex_none()
-        .font_family(FONT_STATUS)
-        .text_size(TEXT_GLYPH)
-        .text_color(color)
-        .child(glyph)
+        .items_center()
+        .justify_center()
+        .size(SWITCHER_CHECK)
+        .rounded(RADIUS)
+        .border(RULE);
+    match mark {
+        Some(path) => base.bg(palette.acc).border_color(palette.acc).child(
+            svg()
+                .path(path)
+                .size(SWITCHER_TICK)
+                .text_color(palette.onacc),
+        ),
+        None => base.border_color(palette.line2),
+    }
+}
+
+fn add_glyph(palette: &Palette) -> impl IntoElement {
+    div()
+        .w(SWITCHER_CHECK)
+        .flex_none()
+        .flex()
+        .justify_center()
+        .text_color(palette.mute)
+        .child(ADD_GLYPH)
+}
+
+fn meta(text: SharedString, palette: &Palette) -> impl IntoElement {
+    div()
+        .flex_none()
+        .font_family(FONT_MONO)
+        .text_size(TEXT_LABEL)
+        .text_color(palette.mute)
+        .child(text)
 }
 
 fn rule(palette: &Palette) -> impl IntoElement {
@@ -695,7 +775,7 @@ impl Render for ClusterSwitcher {
                 .children(menu)
                 .child(panel);
             let key = ElementId::NamedInteger(ID.into(), self.generation);
-            above_left(appear(anchor, key))
+            above_right(appear(anchor, key))
         });
         div()
             .id(ElementId::NamedInteger(ID.into(), 0))
@@ -718,7 +798,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         match event {
-            SwitcherEvent::Select(target) => self.retarget(target.as_ref(), cx),
+            SwitcherEvent::Select(scope) => self.retarget(scope, cx),
             SwitcherEvent::AddCluster => {
                 self.open_add_cluster(flock_core::AddClusterStep::Pick, window, cx);
             }

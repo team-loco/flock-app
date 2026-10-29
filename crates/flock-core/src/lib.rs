@@ -43,6 +43,7 @@ pub mod related;
 pub mod rename;
 pub mod resource;
 pub mod resources;
+pub mod scope;
 pub mod settings;
 pub mod state;
 pub mod status;

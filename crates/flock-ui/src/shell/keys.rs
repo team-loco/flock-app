@@ -123,6 +123,9 @@ impl Shell {
     }
 
     pub(super) fn keep_keyboard_focus(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.switcher.read(cx).is_open() {
+            return;
+        }
         if !std::mem::take(&mut self.keys.refocus) || self.keys.sidebar_focus.is_focused(window) {
             return;
         }

@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::history::{History, Location};
-use crate::switcher::ALL_CLUSTERS;
 use crate::{ClusterId, Page, Snapshot, Status};
 
 pub const MAX_PANES: usize = 2;
@@ -586,11 +585,7 @@ pub struct TabTitle {
 }
 
 pub fn title(location: &Location, snapshot: &Snapshot) -> TabTitle {
-    let context = location
-        .cluster
-        .as_ref()
-        .filter(|_| !location.page.is_flock())
-        .map_or_else(|| ALL_CLUSTERS.to_owned(), |id| cluster_name(id, snapshot));
+    let context = location.scope().name(&snapshot.clusters);
     let (status, label) = describe(location, snapshot);
     TabTitle {
         status,
@@ -679,6 +674,8 @@ pub fn cluster_name(id: &ClusterId, snapshot: &Snapshot) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scope::Scope;
+    use crate::switcher::ALL_CLUSTERS;
 
     const DEMO: [&str; 6] = [
         "prod-us-east",
@@ -1059,6 +1056,18 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_keeps_several_selected_clusters_across_a_save() -> Result<(), serde_json::Error> {
+        let several = Scope::Several(vec![ClusterId::new("a"), ClusterId::new("c")]);
+        let tab = Location::flock_in(Page::Problems, &several);
+        let json = serde_json::to_string(&tab)?;
+        let read = serde_json::from_str::<Location>(&json)?;
+        assert_eq!(read.scope(), several);
+        let plain = serde_json::to_string(&Location::flock(Page::Problems))?;
+        assert!(!plain.contains("clusters"));
+        Ok(())
+    }
+
+    #[test]
     fn titles_name_the_object_and_the_real_cluster() {
         let snapshot = crate::flock::tests::sample();
         let flock = title(&Location::flock(Page::GitOps), &snapshot);
@@ -1066,6 +1075,9 @@ mod tests {
             (flock.label.as_str(), flock.context.as_str()),
             ("GitOps", ALL_CLUSTERS)
         );
+        let two = Scope::Several(vec![ClusterId::new("a"), ClusterId::new("b")]);
+        let several = title(&Location::flock_in(Page::GitOps, &two), &snapshot);
+        assert_eq!(several.context, "2 clusters");
         let nodes = title(&at(Page::Nodes), &snapshot);
         assert_eq!(
             (nodes.label.as_str(), nodes.context.as_str()),
