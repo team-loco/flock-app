@@ -165,8 +165,6 @@ pub struct ApplicationServiceSpecObs {
     pub logging: Option<ApplicationServiceSpecObsLogging>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metrics: Option<ApplicationServiceSpecObsMetrics>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tracing: Option<ApplicationServiceSpecObsTracing>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -191,20 +189,6 @@ pub struct ApplicationServiceSpecObsMetrics {
     pub path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<i32>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct ApplicationServiceSpecObsTracing {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        rename = "sampleRate"
-    )]
-    pub sample_rate: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tags: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
