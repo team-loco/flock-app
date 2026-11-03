@@ -29,8 +29,7 @@ const FLOCK: SheepSpec[] = [
   { side: "right", scale: 2, reach: 160, flip: false, walk: true, blinkDelay: "-2.2s" },
 ];
 
-const sideReach = (side: Side) =>
-  Math.max(...FLOCK.filter((sheep) => sheep.side === side).map((sheep) => sheep.reach));
+const sideReach = (side: Side) => Math.max(...FLOCK.filter((sheep) => sheep.side === side).map((sheep) => sheep.reach));
 
 const frame = "pixelated absolute inset-0 block size-full";
 
@@ -47,16 +46,7 @@ function Frame({
   className?: string;
   style?: CSSProperties;
 }) {
-  return (
-    <img
-      src={src}
-      alt=""
-      width={width}
-      height={height}
-      className={cn(frame, className)}
-      style={style}
-    />
-  );
+  return <img src={src} alt="" width={width} height={height} className={cn(frame, className)} style={style} />;
 }
 
 function Sheep({ sheep, band }: { sheep: SheepSpec; band: string }) {
@@ -84,29 +74,14 @@ function Sheep({ sheep, band }: { sheep: SheepSpec; band: string }) {
         <span
           key={jumps}
           data-jump=""
-          className={cn(
-            "absolute inset-0 block",
-            jumping && "motion-safe:animate-hop motion-reduce:animate-hop-small",
-          )}
+          className={cn("absolute inset-0 block", jumping && "motion-safe:animate-hop motion-reduce:animate-hop-small")}
         >
           <span className={cn("absolute inset-0 block", sheep.flip && "-scale-x-100")}>
             <Frame src={FRAMES.base} width={width} height={height} />
             {sheep.walk && (
-              <Frame
-                src={FRAMES.stomp}
-                width={width}
-                height={height}
-                className="opacity-0 motion-safe:animate-stomp"
-              />
+              <Frame src={FRAMES.stomp} width={width} height={height} className="opacity-0 motion-safe:animate-stomp" />
             )}
-            {jumping && (
-              <Frame
-                src={FRAMES.stomp}
-                width={width}
-                height={height}
-                className="opacity-0 animate-land"
-              />
-            )}
+            {jumping && <Frame src={FRAMES.stomp} width={width} height={height} className="opacity-0 animate-land" />}
             <Frame
               src={FRAMES.blink}
               width={width}

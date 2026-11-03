@@ -39,10 +39,7 @@ for (const { screen, width } of screens) {
     }
     const source = join(rendered, `${screen}-${appearance}.png`);
     const target = join(published, shotPath(screen, appearance));
-    await sharp(source)
-      .resize({ width })
-      .webp({ quality: WEBP_QUALITY, effort: WEBP_EFFORT })
-      .toFile(target);
+    await sharp(source).resize({ width }).webp({ quality: WEBP_QUALITY, effort: WEBP_EFFORT }).toFile(target);
     console.log(target);
   }
 }

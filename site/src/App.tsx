@@ -100,15 +100,7 @@ function Shot({
   const size = { width: pixels, height: shotHeight(pixels) };
   const image = "block h-auto w-full";
   if (appearance) {
-    return (
-      <img
-        src={shotPath(screen, appearance)}
-        alt={alt}
-        loading={loading}
-        className={image}
-        {...size}
-      />
-    );
+    return <img src={shotPath(screen, appearance)} alt={alt} loading={loading} className={image} {...size} />;
   }
   return (
     <picture>
@@ -228,16 +220,8 @@ export default function App() {
   const year = new Date().getFullYear();
   return (
     <div className="flex min-h-screen w-full flex-col">
-      <header
-        className="relative lg:bg-hero-split"
-        style={{ "--band-stop": BAND_STOP } as CSSProperties}
-      >
-        <Field
-          kind="hero"
-          light={light}
-          className="top-0 max-lg:hidden"
-          style={{ height: BAND_STOP }}
-        />
+      <header className="relative lg:bg-hero-split" style={{ "--band-stop": BAND_STOP } as CSSProperties}>
+        <Field kind="hero" light={light} className="top-0 max-lg:hidden" style={{ height: BAND_STOP }} />
         <section className="relative mx-auto flex max-w-page flex-col items-center gap-5.5 px-6 pt-11 pb-11 text-center">
           <Icon size={ICON_SIZE} label="Flock" className="shadow-icon" />
           <h1 className="m-0 max-w-headline text-hero-compact font-semibold sm:text-hero">
