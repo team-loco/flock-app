@@ -50,10 +50,7 @@ const HTML_VALUES: Record<string, string> = {
 const htmlValues = (): Plugin => ({
   name: "flock-html-values",
   transformIndexHtml: (html) =>
-    Object.entries(HTML_VALUES).reduce(
-      (page, [token, value]) => page.replaceAll(token, value),
-      html,
-    ),
+    Object.entries(HTML_VALUES).reduce((page, [token, value]) => page.replaceAll(token, value), html),
 });
 
 export default defineConfig(async () => ({

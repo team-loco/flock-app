@@ -111,8 +111,6 @@ export const FEATURES: Feature[] = [
   },
 ];
 
-export const shotPath = (screen: string, appearance: Appearance) =>
-  `/shots/${screen}-${appearance}.webp`;
+export const shotPath = (screen: string, appearance: Appearance) => `/shots/${screen}-${appearance}.webp`;
 
-export const shotHeight = (width: number) =>
-  Math.round((width * SHOT_SOURCE.height) / SHOT_SOURCE.width);
+export const shotHeight = (width: number) => Math.round((width * SHOT_SOURCE.height) / SHOT_SOURCE.width);

@@ -35,9 +35,7 @@ const CHANNEL_MAX = 255;
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
 const rgb = (hex: string) =>
-  HEX_CHANNELS.map(
-    (start) => parseInt(hex.slice(start, start + HEX_CHANNEL_LENGTH), HEX_RADIX) / CHANNEL_MAX,
-  );
+  HEX_CHANNELS.map((start) => parseInt(hex.slice(start, start + HEX_CHANNEL_LENGTH), HEX_RADIX) / CHANNEL_MAX);
 
 function compile(gl: WebGLRenderingContext, type: number, source: string) {
   const shader = gl.createShader(type);
@@ -108,9 +106,7 @@ export function Field({
     };
     const draw = (now: number) => {
       fit();
-      paletteRef.current.forEach((color, index) =>
-        gl.uniform3fv(uniform(PALETTE_UNIFORMS[index]), rgb(color)),
-      );
+      paletteRef.current.forEach((color, index) => gl.uniform3fv(uniform(PALETTE_UNIFORMS[index]), rgb(color)));
       gl.uniform1f(uniform("time"), (now - start) / MS_PER_SECOND);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);

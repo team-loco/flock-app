@@ -12,7 +12,7 @@ flux2 = "2.9.6"
 helm = "4.3.0"
 yq = "4.54.1"
 uv = "0.13.0"
-bun = "1.4.3"
+bun = "1.4.4"
 
 [settings]
 cargo.binstall = true
@@ -39,7 +39,7 @@ run = "mise-tasks/bundle --features loco"
 
 [tasks.fmt]
 description = "Check formatting"
-run = "cargo fmt --all --check"
+run = ["cargo fmt --all --check", "cd site && bun fmt --check"]
 
 [tasks.lint]
 description = "Clippy with warnings denied, with and without Loco"
