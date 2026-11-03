@@ -49,6 +49,19 @@ export const FEATURES: Feature[] = [
     alt: "Flock listing every connected cluster with its status, capacity and problems",
   },
   {
+    kicker: "Across clusters",
+    accent: "ok",
+    title: "One list for every cluster's resources",
+    body: "Deployments, Pods, Nodes and Helm releases from all the clusters you pick, in one table. Filter by cluster, status or image, group the rows, and act on many at once.",
+    points: [
+      "several clusters per tab",
+      "query bar with facets, rows grouped",
+      "restart, scale, cordon or delete in bulk",
+    ],
+    screen: "flock-deployments",
+    alt: "Deployments from two clusters in one table, grouped by status with the failing ones first",
+  },
+  {
     kicker: "GitOps",
     accent: "violet",
     title: "See which commit is on which cluster",
@@ -74,14 +87,14 @@ export const FEATURES: Feature[] = [
     kicker: "Debugging",
     accent: "ok",
     title: "Logs, shells and debug containers",
-    body: "Stream logs from every pod of a workload at once. Open a shell in any container, or a debug container when the image has none.",
+    body: "Stream logs from every pod of a workload, on every cluster, at once. Filter by level or pod, search, and see the volume over time. Open a shell in any container, or a debug container when the image has none.",
     points: [
-      "logs from all pods, parsed into fields",
-      "logs from before the last restart",
+      "logs from all pods, levels parsed from JSON and logfmt",
+      "volume histogram stacked by level",
       "port-forward and YAML editing from ⌘K",
     ],
     screen: "logs",
-    alt: "Streaming pod logs parsed into fields",
+    alt: "Logs from every pod of a workload, with a volume histogram by level and the sources grouped by status",
   },
   {
     kicker: "Capacity",
