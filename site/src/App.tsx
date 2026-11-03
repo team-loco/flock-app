@@ -26,7 +26,6 @@ const SPLIT_START = 50;
 const BAND_STOP = "62%";
 const COMPARE_BAND_STOP = "50%";
 const ICON_SIZE = 84;
-const CTA_ICON_SIZE = 88;
 
 const ACCENT_CLASS: Record<Accent, string> = {
   primary: "text-primary",
@@ -272,7 +271,6 @@ export default function App() {
       <section className="relative flex flex-[1_0_auto] flex-col bg-band text-band-foreground">
         <Field kind="cta" light={light} className="inset-y-0" />
         <div className="relative mx-auto flex max-w-page flex-col items-center gap-4 px-6 pt-12 pb-8 text-center">
-          <Icon size={CTA_ICON_SIZE} label="Flock app icon" />
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button asChild variant="inverse">
               <a href={__DOWNLOAD_URL__}>
