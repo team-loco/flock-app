@@ -29,6 +29,7 @@
   --handle: #ffffff;
   --handle-ring: rgba(0, 0, 0, 0.25);
   --frame-shadow: rgba(0, 0, 0, 0.45);
+  --frame-border: #323740;
 }
 
 @media (prefers-color-scheme: light) {
@@ -50,6 +51,7 @@
     --violet: #7c3aed;
     --band: #1f5fd1;
     --band-foreground-soft: rgba(255, 255, 255, 0.78);
+    --frame-border: rgba(20, 24, 32, 0.16);
   }
 }
 
@@ -79,6 +81,7 @@
   --color-handle: var(--handle);
   --color-handle-ring: var(--handle-ring);
   --color-frame-shadow: var(--frame-shadow);
+  --color-frame-border: var(--frame-border);
 }
 
 @theme {

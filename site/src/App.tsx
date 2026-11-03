@@ -129,7 +129,7 @@ function Compare() {
       style={{ "--band-stop": COMPARE_BAND_STOP } as CSSProperties}
     >
       <div className="mx-auto max-w-page">
-        <div className="relative overflow-hidden rounded-frame border border-border-strong bg-card shadow-frame">
+        <div className="relative overflow-hidden rounded-frame border border-frame-border bg-card shadow-frame">
           <div className="group relative">
             <Shot
               screen={HERO_SCREEN}
