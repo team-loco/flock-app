@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
-import { TAGLINE, TITLE } from "./src/content";
+import { HERO_SCREEN, shotPath, TAGLINE, TITLE } from "./src/content";
 
 const REPO = "team-loco/flock-app";
 const REPO_URL = `https://github.com/${REPO}`;
@@ -45,6 +45,7 @@ async function downloadUrl(): Promise<string> {
 const HTML_VALUES: Record<string, string> = {
   "%FLOCK_TITLE%": TITLE,
   "%FLOCK_TAGLINE%": TAGLINE,
+  "%FLOCK_OG_IMAGE%": shotPath(HERO_SCREEN, "dark"),
 };
 
 const htmlValues = (): Plugin => ({
