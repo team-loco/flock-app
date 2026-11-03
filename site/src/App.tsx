@@ -273,7 +273,6 @@ export default function App() {
         <Field kind="cta" light={light} className="inset-y-0" />
         <div className="relative mx-auto flex max-w-page flex-col items-center gap-4 px-6 pt-12 pb-8 text-center">
           <Icon size={CTA_ICON_SIZE} label="Flock app icon" />
-          <h2 className="m-0 text-download font-semibold">Download Flock</h2>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Button asChild variant="inverse">
               <a href={__DOWNLOAD_URL__}>
