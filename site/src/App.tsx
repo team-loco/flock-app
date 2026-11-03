@@ -257,7 +257,7 @@ export default function App() {
               </a>
             </Button>
           </div>
-          <span className="text-note text-muted-foreground">For Macs with Apple silicon</span>
+          <span className="text-note text-muted-foreground">Apple Silicon Only</span>
         </section>
         <Compare />
         <Pasture band={BAND_STOP} className="max-lg:hidden" />
@@ -281,7 +281,7 @@ export default function App() {
               </a>
             </Button>
           </div>
-          <span className="text-note text-band-foreground-soft">For Macs with Apple silicon</span>
+          <span className="text-note text-band-foreground-soft">Apple Silicon Only</span>
         </div>
         <footer className="relative mt-auto">
           <div className="mx-auto flex max-w-page flex-wrap items-center gap-6 px-6 pb-2 text-footer text-band-foreground-soft">
