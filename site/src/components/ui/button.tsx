@@ -11,6 +11,8 @@ const buttonVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground",
         inverse: "bg-cta text-cta-foreground",
+        outline: "border border-border-strong bg-background text-foreground",
+        "inverse-outline": "border border-band-foreground-soft text-band-foreground",
       },
       size: {
         default: "h-11 px-5 text-base",
