@@ -17,12 +17,10 @@ export const HERO_SCREEN: Screen = { name: "flock-deployments", group: 3 };
 export const HERO_ALT =
   "Deployments from two clusters in one table, grouped by namespace, with checkout-api failing on prod-us-east";
 
-export const TITLE = "Flock: find what's broken and what changed across every Kubernetes cluster";
-
-export const KICKER = "Native Kubernetes app for macOS";
+export const TITLE = "Flock: Kubernetes, without the context switching";
 
 export const TAGLINE =
-  "Flock brings your Kubernetes workloads, failures, logs and Flux rollouts into one native desktop app. See what is happening across environments without jumping between clusters and tools.";
+  "Flock is a native Mac app for running and debugging multi-cluster Kubernetes setups. All your clusters, in one window.";
 
 export const DOWNLOAD_NOTE = "Free and open source · Apache-2.0 · Apple Silicon Only";
 
