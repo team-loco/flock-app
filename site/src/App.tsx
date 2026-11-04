@@ -10,7 +10,6 @@ import {
   HERO_SCREEN,
   ICON_ASSET_SIZE,
   iconPath,
-  KICKER,
   PIXEL_RATIO,
   shotHeight,
   shotPath,
@@ -275,9 +274,12 @@ export default function App() {
         <Field kind="hero" light={light} className="top-0 max-lg:hidden" style={{ height: BAND_STOP }} />
         <section className="relative mx-auto flex max-w-page flex-col items-center gap-5.5 px-6 pt-11 pb-11 text-center">
           <Icon size={ICON_SIZE} label="Flock" className="shadow-icon" />
-          <span className="text-kicker font-semibold text-primary uppercase">{KICKER}</span>
           <h1 className="m-0 max-w-headline text-hero-compact font-semibold sm:text-hero">
-            Find what's broken. See what changed. <span className="text-primary">Across every cluster.</span>
+            Kubernetes, without the{" "}
+            <span className="text-muted-foreground line-through decoration-primary decoration-(length:--spacing-strike)">
+              context switching
+            </span>
+            .
           </h1>
           <p className="m-0 max-w-lead text-lead text-foreground-soft">{TAGLINE}</p>
           <div id="download" className="mt-1.5">

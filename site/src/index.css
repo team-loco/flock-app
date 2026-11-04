@@ -125,6 +125,7 @@
 
   --spacing-handle: 34px;
   --spacing-divider: 2px;
+  --spacing-strike: 6px;
 
   --animate-blink: blink 6s steps(1) infinite;
   --animate-stomp: stomp 0.5s steps(1) infinite;
